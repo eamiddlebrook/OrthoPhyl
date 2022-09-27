@@ -1,4 +1,5 @@
-# OrthoPhylo
+# OrthoPhyl
+## (previously OrthoPhylo...OrthoPhyl sounds better)
 ### Developed at Los Alamos National Labs (LANL - C22064)
 #### Written by Earl Middlbrook with input from Robab Katani at Penn State and Jeanne Fair at LANL.
 #### The software is available through a GLPv3 open source licence. 
