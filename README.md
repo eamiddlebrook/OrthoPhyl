@@ -189,7 +189,8 @@ This appeared to be a problem with wget, which was resolved by updating through 
 ## Future modules:
 + DONE: add assembly filtering, now very incomplete assemblies will be used, so the number of strict single copy orthologs could be drastically reduced (maybe to zero). Filtering done with gather_filter_asm
 + DONE: Quantify phylogenetic info per gene (https://github.com/dportik/Alignment_Assessment.git)
-+ Test evolutionalty models of genes with ete3. Then test GO enrichment
++ Test evolutionalty models of genes with ete3. Then test GO enrichment, AMR, Virulence genes
 + Look at tree wide paralog numbers. Do GO analysis...
 + Identify HGT from Transcript alignments. HGTs specific to any group?
 + allow "protected assemblies" when filtering. Perhaps your favorite assembly is crap, but you really want it in the tree. A couple of bad assemblies shouldnt reduce the number of SCOs that much
++ allow usage of precomputed Orthogroup HMMs
