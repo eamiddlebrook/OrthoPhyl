@@ -189,6 +189,7 @@ This appeared to be a problem with wget, which was resolved by updating through 
 ## Future modules:
 + DONE: add assembly filtering, now very incomplete assemblies will be used, so the number of strict single copy orthologs could be drastically reduced (maybe to zero). Filtering done with gather_filter_asm
 + DONE: Quantify phylogenetic info per gene (https://github.com/dportik/Alignment_Assessment.git)
++ Check genome assembly file not empty at start of Main pipeline....will crash pipe at Orthofinder run. This happened because of a file transfer mishap for me :( 
 + Test evolutionalty models of genes with ete3. Then test GO enrichment, AMR, Virulence genes
 + Look at tree wide paralog numbers. Do GO analysis...
 + Identify HGT from Transcript alignments. HGTs specific to any group?
