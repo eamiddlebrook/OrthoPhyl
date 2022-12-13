@@ -17,16 +17,17 @@
 ### What this software does not do: 
 #### Generate trees that are ready for publication without parameter tuning or manual inspection. Reconstructing trees from whole genomes requires many many steps, all of which have parameters that will differ based on the input sequences. Some importent outputs too look at: input genomes quality (checkM output), assembly subset used for Ortholog model generation (assembly shortlist), number of strict/relaxed single copy orthologs (drops quickly with additional assemblies), phylogenetic signal for transcript alignments, missing data in alignments (per gene and concatenated alignments)...to name a few.
 
-#### This workflow has been tested on a CentOS8 machine, but should be pretty portable. Testing is starting on diverse *nix systems. There will likely be some errors due to the wrapper having moderate bash complexity. 
+#### This workflow has been tested on a CentOS8 machine, but should be pretty portable. Testing is starting on diverse *nix systems. There will likely be some errors due to the wrapper having moderate bash complexity. Unfortunately fastANI seems to be incompatable with MacOS, so I will need to find an alternative before the pipeline can be run on that architecture.
 ## Dependencies
 + prodigal 
 + orthofinder 
 + bbmap
-+ fastTree
++ fastTree*
 + hmmer
 + pal2nal
 + prodigal 
-+ ete3 
++ ete3
++ IQTree*
 + raxml*
 + trimal
 + parallel
