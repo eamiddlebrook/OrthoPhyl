@@ -116,8 +116,38 @@ Cloning takes a minute because of the test files
 cd ~/$Path_to_gits/
 git clone https://github.com/eamiddlebrook/OrthoPhylo.git
 cd ortho_phylo1
+```
 
-# to test conda activate orthophylo (within scirpt)
+### Edit control_file.required to reflect system specific locations
+### Example:
+```
+#!/bin/bash
+
+# invoked at the beginning of orthophylo.X.slurm with
+# source $script_home/control_file.required
+
+###################################
+# Required user specified options
+#   Will eventually expose all with standard -X bash style
+# genome_dir should contain multifastas (1 file per species/strain) with .fa or .fna as extention
+# multifasta file names will be taken as strain/species name
+export input_genomes=~/scratch/orthophylo/brucella_genomes.10.28/genomes_to_keep/
+export output_dir=Brucella.10.27 # the name of the main output dir
+export store=$HOME/scratch/orthophylo/$output_dir/ # the full path of the main output dir
+export threads=30
+export Path_to_gits=$HOME/Path_to_gits/
+#paths to externl programs
+export conda_env=orthophylo
+export fastANI=~/apps/fastANI
+export ASTRAL_cmd="$Path_to_gits/ASTRAL/Astral/astral.5.7.8.jar"
+export catfasta2phyml_cmd="$Path_to_gits/catfasta2phyml/catfasta2phyml.pl"
+export Alignment_Assessment="$Path_to_gits/Alignment_Assessment/Alignment_Assessment_v2.py"
+
+conda activate $conda_env
+```
+
+### to test 'conda activate' within orthophylo 
+```
 conda deactivate
 ``` 
 ## Test install
@@ -198,3 +228,4 @@ This appeared to be a problem with wget, which was resolved by updating through 
 + allow "protected assemblies" when filtering. Perhaps your favorite assembly is crap, but you really want it in the tree. A couple of bad assemblies shouldnt reduce the number of SCOs that much
 + allow usage of precomputed Orthogroup HMMs
 + Related to above: allow adding assemblies to pre-run pipeline. i.e. use precomputed hmms to identify orthologs, and add them to alignemnts and regenerate trees
++ allow users to pick which dataset to use for tree building (currently strict and relaxed are used). This would greatly reduce pipeline run time.
