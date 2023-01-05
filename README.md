@@ -96,7 +96,6 @@ git clone https://github.com/dportik/Alignment_Assessment.git
 cd Alignment_Assessment/
 # convert script to python3
 2to3 -w Alignment_Assessment_v2.py 
-mv Alignment_Assessment_v2.py Alignment_Assessment_v2.py3
 
 cd ~/Downloads
 wget https://github.com/ParBLiSS/FastANI/releases/download/v1.33/fastANI-Linux64-v1.33.zip
@@ -114,8 +113,8 @@ Requires a username and HTTP key or collaborator status
 Cloning takes a minute because of the test files
 ```
 cd ~/$Path_to_gits/
-git clone https://github.com/eamiddlebrook/OrthoPhylo.git
-cd ortho_phylo1
+git clone https://github.com/eamiddlebrook/OrthoPhyl.git
+cd OrthoPhyl
 ```
 
 ### Edit control_file.required to reflect system specific locations
@@ -123,7 +122,7 @@ cd ortho_phylo1
 ```
 #!/bin/bash
 
-# invoked at the beginning of orthophylo.X.slurm with
+# invoked at the beginning of OrthoPhyl with
 # source $script_home/control_file.required
 
 ###################################
@@ -136,6 +135,7 @@ export output_dir=Brucella.10.27 # the name of the main output dir
 export store=$HOME/scratch/orthophylo/$output_dir/ # the full path of the main output dir
 export threads=30
 export Path_to_gits=$HOME/Path_to_gits/
+
 #paths to externl programs
 export conda_env=orthophylo
 export fastANI=~/apps/fastANI
