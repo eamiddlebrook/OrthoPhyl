@@ -229,3 +229,4 @@ This appeared to be a problem with wget, which was resolved by updating through 
 + allow usage of precomputed Orthogroup HMMs
 + Related to above: allow adding assemblies to pre-run pipeline. i.e. use precomputed hmms to identify orthologs, and add them to alignemnts and regenerate trees
 + allow users to pick which dataset to use for tree building (currently strict and relaxed are used). This would greatly reduce pipeline run time.
++ change how the list of OGs for HMM  searching is inumerated. Currently tries with OG that have be filtered out because of paralogs, then gets mad because there is no multifasta to align
