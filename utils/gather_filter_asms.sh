@@ -18,7 +18,7 @@ conda activate gather_genomes
 export taxon="$1"
 export NCBI_assemblies=$2
 wd=$(pwd)/$NCBI_assemblies
-threads=30
+threads=2
 # Set these if you hav a good idea of the expected values
 # if not, set to "default" and they will be set as the average+-(3*stddev)
 # of course stddev is a bit weird because the values are almost surely not normal..
@@ -32,7 +32,7 @@ MAX_dup="default"
 MIN_completeness="98"
 MAX_contam="1.0"
 
-MAX_dup_default="0.01"
+MAX_dup_default="0.02"
 MIN_completness_default="98"
 MAX_contam_default="0.2"
 
@@ -48,17 +48,17 @@ echo "Output will be in $wd"
 #######################################################
 # comment out function calls ass needed
 main () {
-	get_NCBI_genomes
-	filter_NCBI_genomes
-	get_asm_metadata
-	get_non_datasets_assemblies
-	get_all_asm_list
-	get_biosample_GEOdata
-	merge_metadata_geoloc
-	all_sample_metadata
-	aggregate_assemblies "$wd"/assemblies_all.TMP
-	filter_asm_by_taxCheck
-	get_stats_with_checkM "$wd"/assemblies_all.TMP/ $wd/checkM_out genome fna
+	#get_NCBI_genomes
+	#filter_NCBI_genomes
+	#get_asm_metadata
+	#get_non_datasets_assemblies
+	#get_all_asm_list
+	#get_biosample_GEOdata
+	#merge_metadata_geoloc
+	#all_sample_metadata
+	#aggregate_assemblies "$wd"/assemblies_all.TMP
+	#filter_asm_by_taxCheck
+	#get_stats_with_checkM "$wd"/assemblies_all.TMP/ $wd/checkM_out genome fna
 	###get_asm_stats # bbmap stats superseded by checkm
 	filter_asm_by_stats $MIN_LEN $MAX_LEN $MIN_N50 $MIN_GC $MAX_GC $MAX_dup $MIN_completeness $MAX_contam
 	get_all_asms_to_remove
@@ -451,7 +451,7 @@ filter_asm_by_stats () {
 		fi
 		if [ $MIN_N50 == "default" ]
 		then
-			MIN_N50=$(bc -l <<< "$ctg_N50+($ctg_N50_stddev*3)")
+			MIN_N50=$(bc -l <<< "$scaf_N50-($scaf_N50_stddev*3)")
 		fi
 		if [ $MIN_GC == "default" ]
                 then
@@ -493,7 +493,7 @@ filter_asm_by_stats () {
 	echo "Paths to assemblies being filtered out are found in assemblies_to_remove.stats"
 	# Emply output file
 	:> assemblies_to_remove.stats
-	cat assemblies_all.stats.txt |\
+v	cat assemblies_all.stats.txt |\
 	tail -n +2 |\
 	awk '{print $1,$16,$18,$14,$11,$12,$13}' |\
 	while read acc scaf_bp ctg_N50 gc_avg dup complete contam
@@ -514,11 +514,24 @@ filter_asm_by_stats () {
 }
 
 get_all_asms_to_remove () {
+	echo ""
+	echo "#######################################"
+	echo "####### Get final list of ASMs ########"
+	echo "#############  to remove  #############"
+	echo "#######################################"
+	echo ""
 	cd $wd || exit
 	cat assemblies_to_remove.* | sort | uniq > final_assemblies_to_remove
 }
 
 filter_for_redundancy () {
+	echo ""
+       	echo "##############################"
+       	echo "####### Filter ASMs ##########"
+       	echo "####### For redundancy #######"
+       	echo "##############################"
+	echo ""
+
 	cd $wd || exit
 	mkdir genomes_to_keep/
 	ls assemblies_all.TMP > genome_list
