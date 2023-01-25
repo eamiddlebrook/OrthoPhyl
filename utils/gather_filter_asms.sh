@@ -493,7 +493,7 @@ filter_asm_by_stats () {
 	echo "Paths to assemblies being filtered out are found in assemblies_to_remove.stats"
 	# Emply output file
 	:> assemblies_to_remove.stats
-v	cat assemblies_all.stats.txt |\
+	cat assemblies_all.stats.txt |\
 	tail -n +2 |\
 	awk '{print $1,$16,$18,$14,$11,$12,$13}' |\
 	while read acc scaf_bp ctg_N50 gc_avg dup complete contam
