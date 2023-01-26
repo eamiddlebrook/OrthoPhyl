@@ -20,6 +20,10 @@ if tester == "TEST":
     ANI_out="/Users/earlm/gits/ortho_phylo/TESTER/ANI_out"
     genome_names="/Users/earlm/gits/ortho_phylo/TESTER/genome_names"
     n_clusters=10
+elif tester == "local":
+    ANI_out="/Users/earlm/Projects/orthophylo/ecoli/ANI/ANI_out"
+    genome_names="/Users/earlm/Projects/orthophylo/ecoli/ANI/genome_names"
+    n_clusters=10
 else:
     ANI_out=sys.argv[1]
     genome_names=sys.argv[2]
@@ -97,9 +101,13 @@ def cluster(in_dict,first_iteration):
         ANI_max[max_key,key1]=full_dict[key1][max_key]
 
     max_ANI_pair = max(ANI_max, key=ANI_max.get)
+    max_val = ANI_max[max_ANI_pair]
+    #sum ANI from both in pair and create a dictionary
     sums = dict(Counter(full_dict[max_ANI_pair[0]]) + Counter(full_dict[max_ANI_pair[1]]))
-    full_dict[max_ANI_pair] = {k: sums[k] / float((k in full_dict[max_ANI_pair[0]]) + (k in full_dict[max_ANI_pair[1]])) for k in sums}
-
+    # create a new "full_dict entry for the clustered clade (max_ANI_pair)
+    #  Average distances, add 1/2 the max_ANI_pair's distance to get new distances
+    full_dict[max_ANI_pair] = {k: (sums[k] / float((k in full_dict[max_ANI_pair[0]]) + (k in full_dict[max_ANI_pair[1]])))+((100-max_val)/2) for k in sums}
+    print (max_ANI_pair)
     #add other values for other side of matrix for merged genomes
     for I in full_dict[max_ANI_pair]:
         full_dict[I][max_ANI_pair] = full_dict[max_ANI_pair][I]
