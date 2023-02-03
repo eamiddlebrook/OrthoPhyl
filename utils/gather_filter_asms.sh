@@ -535,6 +535,7 @@ filter_for_redundancy () {
 	cd $wd || exit
 	mkdir genomes_to_keep/
 	ls assemblies_all.TMP > genome_list
+	# this removes multiple versions of assemblies (i.e. GCA_XXXX.1 and GCA_XXXX.2)
 	cat genome_list | sed 's/GC._//g' | sed 's/\..*fna//g' | sort | uniq | sed 's/^ *//g' > genome_list.accNum
 	for I in $(cat genome_list.accNum)
 	do 
