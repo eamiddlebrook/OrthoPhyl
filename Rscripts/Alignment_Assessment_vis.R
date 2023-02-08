@@ -19,6 +19,8 @@ summary(data2)
 #Percent_Ns_Qs_Aln	Percent_Missing_Data	Seqs_with_above90p_missing_data	Seqs_with_above70p_missing_data	Seqs_with_above50p_missing_data	Seqs_with_less50p_missing_data	
 #Seqs_with_no_missing_data
 
+# Just for local testing
+#data <- read.delim("../Master_Alignment_Assessment.txt", header = TRUE, sep = "\t")
 
 
 ##############################
@@ -45,54 +47,55 @@ missing_ind <- seq(0,100,1)
 #############################################
 #Automatically save some of the plots using above settings 
 #Save individual plots
-pdf("Taxon_Numbers.pdf")
+pdf("Taxon_Numbers.pdf",pointsize=16)
 hist(data$Taxa_No, breaks=taxa_seq, xlab="Number of Taxa", main="Number of Taxa Across Alignments", col="steelblue1")
 dev.off()
 
-pdf("Alignments_per_taxa.pdf")
+pdf("Alignments_per_taxa.pdf",pointsize=16)
 hist(data2$V1, breaks=num_gene_by_taxa_breaks, xlab="Number of Alignments", main="Number of Alignments per Taxa", col="steelblue1")
 dev.off()
 
-pdf("Sequence_Lengths.pdf")
+pdf("Sequence_Lengths.pdf",pointsize=16)
 hist(data$Seq_Length, breaks=seq_seq, xlab="Sequence Length (bp)", main="Alignment Length Distribution", col="steelblue1")
 dev.off()
 
-pdf("Gaps_Percents.pdf")
+pdf("Gaps_Percents.pdf",pointsize=16)
 hist(data$Percent_Gaps_Aln, breaks=gaps_seq, xlab="Percent", main="Percentage of Gaps Per Alignment", col="steelblue1")
 dev.off()
 
-pdf("Informative_Sites_Numbers.pdf")
+pdf("Informative_Sites_Numbers.pdf",pointsize=16)
 hist(data$Number_Inform_Sites, breaks=inf_sites, xlab="Informative Sites", main="Number of Informative Sites", col="steelblue1")
 dev.off()
 
-pdf("Informative_Sites_Percents.pdf")
+pdf("Informative_Sites_Percents.pdf",pointsize=16)
 hist(data$Percent_Inform_sites, breaks=perc_inf_sites, xlab="Percent", main="Percentage of Informative Sites", col="steelblue1")
 dev.off()
 
-pdf("Missing_Data_Percents.pdf")
-hist(data$Percent_Missing_Data, breaks=missing_seq, xlab="Percent", main="Percentage of Total Missing Data (-, ?, N) Per Alignment", col="steelblue1")
+pdf("Missing_Data_Percents.pdf",pointsize=18)
+hist(data$Percent_Missing_Data, breaks=missing_seq, xlab="Percent", main="Percentage of Total Missing Data\n(-,?, N) Per Alignment", col="steelblue1")
 dev.off()
 
-pdf("Sequence_Lengths_vs_Number_Informative_Sites.pdf")
+pdf("Sequence_Lengths_vs_Number_Informative_Sites.pdf",pointsize=16)
 lim <- max(data$Seq_Length)
 plot(data$Seq_Length, data$Number_Inform_Sites, xlim=c(0,lim), ylim=c(0,lim), xlab="Alignment Length", ylab="Informative Sites", pch=16)
 evolrate_regression <- lm(data$Number_Inform_Sites ~ data$Seq_Length)
 abline(evolrate_regression, lwd = 3, col='red')
+text(lim/2,lim,labels=paste("slope =",evolrate_regression$coefficients[2]))
 abline(1,1, lwd = 2, lty=3)
 dev.off()
-
 
 #Now save the important plots all in one file
 #This file will have 5 plots on one row
 
 pdf("Taxa_SeqLength_MissData_PercInfSites_LvI.pdf", width=35, height=7)
 layout(mat = matrix(c(1,2,3,4,5), nrow = 1, ncol = 5), heights = c(2), widths = c(2,2,2,2,2), respect=TRUE)
-hist(data$Taxa_No, breaks=taxa_seq, xlab="Number of Taxa", main="Number of Taxa Across Alignments", col="steelblue1", cex.axis=1.6, cex.lab=1.6, cex.main=2)
-hist(data$Seq_Length, breaks=seq_seq, xlab="Sequence Length (bp)", main="Alignment Length Distribution", col="steelblue1", cex.axis=1.6, cex.lab=1.6, cex.main=2)
-hist(data$Percent_Missing_Data, breaks=missing_seq, xlab="Percent", main="Percentage of Total Missing Data (-, ?, N) Per Alignment", col="steelblue1", cex.axis=1.6, cex.lab=1.6, cex.main=2)
-hist(data$Percent_Inform_sites, breaks=perc_inf_sites, xlab="Percent", main="Percentage of Informative Sites", col="steelblue1", cex.axis=1.6, cex.lab=1.6, cex.main=2)
-plot(data$Seq_Length, data$Number_Inform_Sites, xlim=c(0,lim), ylim=c(0,lim), xlab="Alignment Length", ylab="Informative Sites", pch=16)
+hist(data$Taxa_No, breaks=taxa_seq, xlab="Number of Taxa", main="Number of Taxa Across Alignments", col="steelblue1", cex.axis=2, cex.lab=2, cex.main=2.2)
+hist(data$Seq_Length, breaks=seq_seq, xlab="Sequence Length (bp)", main="Alignment Length Distribution", col="steelblue1", cex.axis=2, cex.lab=2, cex.main=2.2)
+hist(data$Percent_Missing_Data, breaks=missing_seq, xlab="Percent", main="Percentage of Total Missing Data (-, ?, N) Per Alignment", col="steelblue1", cex.axis=2, cex.lab=2, cex.main=2.2)
+hist(data$Percent_Inform_sites, breaks=perc_inf_sites, xlab="Percent", main="Percentage of Informative Sites", col="steelblue1", cex.axis=2, cex.lab=2, cex.main=2.2)
+plot(data$Seq_Length, data$Number_Inform_Sites, xlim=c(0,lim), ylim=c(0,lim), xlab="Alignment Length", ylab="Informative Sites", main="Percent Informative Sites\nVS. Alignment Length",pch=16,cex.lab=2,cex.axis=2,cex.main=2.2)
 abline(evolrate_regression, lwd = 3, col='red')
+text(lim/2,lim,labels=paste("slope =",evolrate_regression$coefficients[2]),cex = 2)
 abline(1,1, lwd = 2, lty=3)
 dev.off()
 
