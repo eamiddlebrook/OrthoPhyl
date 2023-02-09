@@ -40,6 +40,12 @@ then
 	echo $TESTER
 fi
 
+############################################
+####  import control file variables  #######
+############################################
+
+# Will be overwritten if provided on the command line
+
 # import required user defined variables
 source $script_home/control_file.required
 
@@ -86,6 +92,105 @@ then
         then
                 rm -r $store
         fi
+else
+
+
+	###################################################
+	#######  Handle command line Arguments ############
+	###################################################
+	DESCRIPTION="OrthoPhylo makes trees and stuff...link this to an external file"
+	USAGE="orthophyl.sh -hgstxrA
+	# all arguments are optional if set in control_file.required
+	-h 	display a description and a super useful usage message
+	-g	full path to genomes directiory
+	-s	full path to the main directory for output
+	-t	threads to use
+	-x	trimal paramerter string (in double "quotes")
+	-r	flag to rerun orthofinder on the ANI_shorlist (true/false)
+	-a	max number of genomes to run through OrthoFinder. If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on
+
+	"
+
+	#Setting Variables manually to override ones in control file
+	while [[ ${1:0:1} = '-' ]] ; do 
+	N=1 
+	L=${#1} 
+	while [[ $N -lt $L ]] ; do 
+	  case ${1:$N:1} in 
+	     'h') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+	            echo $USAGE 'g' 
+	            exit 1 
+	          fi 
+	          echo $DESCRIPTION
+	          echo $USAGE
+	          exit $1
+	          shift ;; 
+
+	     'g') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+	            echo "looks like the argument for -g is messed up" 
+	            echo $USAGE
+	            exit 1 
+	          elif [[ ! -d {2} ]]; then
+	            echo "WORNING: -g declaring an input genome directory that does not exist...maybe check on that"
+	            exit 1
+	          fi 
+	          input_genomes=${2} 
+	          shift ;; 
+
+	     's') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+	            echo $USAGE 's' 
+	            exit 1 
+	          fi 
+	          store=${2} 
+	          shift ;; 
+	    
+	     't') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+	            echo $USAGE 't' 
+	            exit 1 
+	          fi 
+	          threads=${2} 
+	          shift ;; 
+	     
+	     's') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+	            echo $USAGE 's'
+	            exit 1 
+	          fi 
+	          store=${2} 
+	          shift ;; 
+	  
+	     'x') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+	            echo $USAGE 'x' 
+	            exit 1 
+	          fi 
+	          trimal_parameter=${2} 
+	          shift ;; 
+	     'r') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+	            echo $USAGE 'r' 
+	            exit 1 
+	          fi 
+	          orthofinder_rerun=${2} 
+	          shift ;; 
+	     'a') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+	            echo $USAGE 'A' 
+	            exit 1 
+	          fi 
+	          ANI_shortlist=${2} 
+	          shift ;; 
+	     \?) # Invalid option
+	         echo "Error: Invalid option"
+	         echo $USAGE
+	         exit;;
+	     *) echo $USAGE 't2' 
+	        exit 1 ;; 
+	  esac 
+	  N=$(($N+1)) 
+	done 
+	shift 
+	done 
+	if [[ ! -n ${1} ]] ; then 
+	echo $USAGE 
+	exit 1 
+	fi 
 fi
 
 # outputs are held in:
