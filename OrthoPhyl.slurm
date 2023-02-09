@@ -20,4 +20,4 @@
 #SBATCH --time=200:00:00
 
 # Use 1st positional arg to specify running test ($1="TESTER")
-bash orthophylo.sh $1
+bash OrthoPhyl.sh $1

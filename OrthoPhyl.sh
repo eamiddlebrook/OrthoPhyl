@@ -1,18 +1,19 @@
 #!/bin/bash
 ####################################################################
 # USAGE:
-# $ bash orthophylo.XXX.sh
+# $ bash OrthoPhyl.XXX.sh
 # to test install run:
-# $ bash orthophylo.XXX.sh TESTER
+# $ bash OrthoPhyl.XXX.sh TESTER
 # to run through slurm scheduler:
-# $ sbatch orthophylo.XXX.slurm TESTER
-# all variable can be found in the files control_file.*
-# control_file.required contains variable that must be set for a custom run
+# $ sbatch OrthoPhyl.XXX.slurm TESTER
+# all variables can be found in the files control_file.*
+# control_file.required contains variable that must be set for a custom run or they must be set with command line args
 #   (TESTER requires no editing of the control files unless you have a different conda env)
 # control_file.user allows the user to declare variable to override control_file.defaults
 #   these can be copy/pasted directly from the defaults file and edited as desired
+#   many are available as command line args
 ###################################################################
-# This script is the main wrapper for the orthophylo repo
+# This script is the main wrapper for the OrthoPhyl repo
 # the goal of this script is to take in a directory of bacterial genomes (in the hundreds)
 # and generate species trees.
 # Trees generated from both concatenated (protien informed) transcript alignments
@@ -98,7 +99,7 @@ else
 	###################################################
 	#######  Handle command line Arguments ############
 	###################################################
-	DESCRIPTION="OrthoPhylo makes trees and stuff...link this to an external file"
+	DESCRIPTION="OrthoPhyl makes trees and stuff...link this to an external file"
 	USAGE="orthophyl.sh -hgstxrA
 	# all arguments are optional if set in control_file.required
 	-h 	display a description and a super useful usage message
