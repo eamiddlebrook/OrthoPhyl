@@ -11,7 +11,12 @@
 export input_genomes=$script_home/TESTER/genomes/
 export output_dir=TESTER/Workflow_test.$(date +%m-%d-%Y) # the name of the main output dir
 export store=$script_home/$output_dir/ # the full path of the main output dir
-export threads=18
+if [[ ! -z ${threads+x} ]]
+then
+        export threads
+else
+	export threads=4
+fi
 export Path_to_gits=$HOME/Path_to_gits/
 #paths to externl programs
 export conda_env=orthophylo

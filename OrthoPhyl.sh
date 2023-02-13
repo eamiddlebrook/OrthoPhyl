@@ -1,25 +1,29 @@
 #!/bin/bash
-####################################################################
-# USAGE:
-# $ bash OrthoPhyl.XXX.sh
-# to test install run:
-# $ bash OrthoPhyl.XXX.sh TESTER
-# to run through slurm scheduler:
-# $ sbatch OrthoPhyl.XXX.slurm TESTER
-# all variables can be found in the files control_file.*
-# control_file.required contains variable that must be set for a custom run or they must be set with command line args
-#   (TESTER requires no editing of the control files unless you have a different conda env)
-# control_file.user allows the user to declare variable to override control_file.defaults
-#   these can be copy/pasted directly from the defaults file and edited as desired
-#   many are available as command line args
-###################################################################
-# This script is the main wrapper for the OrthoPhyl repo
-# the goal of this script is to take in a directory of bacterial genomes (in the hundreds)
-# and generate species trees.
-# Trees generated from both concatenated (protien informed) transcript alignments
-# and gene tree to species tree methods (ASTRAL)
-##
-# future versions will include evolutionary model testing of indevidual orthogroups with ete3
+
+USAGE () {
+echo "
+USAGE: OrthoPhyl.sh -hgstxrA
+# ALL arguments are optional if set in control_file.required
+#   Many default parameters are set in control_file.defaults
+Required:
+-g	full path to genomes directiory
+-s	full path to the main directory for output
+-t	threads to use
+Optional:
+-x	trimal paramerter string (in double "quotes")
+-r	flag to rerun orthofinder on the ANI_shorlist (true/false)
+-a	max number of genomes to run through OrthoFinder. If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on
+-T	run test dataset (TESTER/TESTER_chloroplast), incompatable with -g|s
+-h	display a description and a super useful usage message
+###############################################################\n
+To run test datasets:
+# Test of full bacterial genomes
+bash OrthoPhyl.sh -T TESTER -t #threads
+# Big test with ~100 orchid chloroplasts
+bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
+
+"
+}
 
 
 ######################
@@ -34,12 +38,6 @@ source $HOME/.bashrc
 
 #used for loading stuff from git repo
 export script_home=$(pwd)
-TESTER=""
-if [[ ! -z ${1+x} ]]
-then
-	export TESTER="$1"
-	echo $TESTER
-fi
 
 ############################################
 ####  import control file variables  #######
@@ -61,6 +59,7 @@ source $script_home/script_lib/functions.sh
 
 
 # if first arg is "TESTER" run a small pipeline to test...pipeline
+tester () {
 if [[ $TESTER == "TESTER" ]]
 then
 	echo "
@@ -94,37 +93,29 @@ then
                 rm -r $store
         fi
 else
+	echo "PANIC: TESTER was set, but didnt equal 'TESTER' or 'TESTER_chloroplast'"
+fi
+}
 
 
 	###################################################
 	#######  Handle command line Arguments ############
 	###################################################
-	DESCRIPTION="OrthoPhyl makes trees and stuff...link this to an external file"
-	USAGE="orthophyl.sh -hgstxrA
-	# all arguments are optional if set in control_file.required
-	-h 	display a description and a super useful usage message
-	-g	full path to genomes directiory
-	-s	full path to the main directory for output
-	-t	threads to use
-	-x	trimal paramerter string (in double "quotes")
-	-r	flag to rerun orthofinder on the ANI_shorlist (true/false)
-	-a	max number of genomes to run through OrthoFinder. If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on
-
-	"
-
 	#Setting Variables manually to override ones in control file
 	while [[ ${1:0:1} = '-' ]] ; do 
+	ARGS_SET=''
 	N=1 
 	L=${#1} 
 	while [[ $N -lt $L ]] ; do 
 	  case ${1:$N:1} in 
 	     'h') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            echo $USAGE 'g' 
-	            exit 1 
+	            USAGE
+	            exit 0
 	          fi 
-	          echo $DESCRIPTION
-	          echo $USAGE
-	          exit $1
+	          # run function to print usage and exit
+		  echo "Looks like you used the '-h' with an argument...thats not right" 
+		  USAGE
+	          exit 1
 	          shift ;; 
 
 	     'g') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
@@ -132,51 +123,71 @@ else
 	            echo $USAGE
 	            exit 1 
 	          elif [[ ! -d {2} ]]; then
-	            echo "WORNING: -g declaring an input genome directory that does not exist...maybe check on that"
+	            echo "WARNING: -g declaring an input genome directory that does not exist...maybe check on that"
 	            exit 1
-	          fi 
+	          fi
 	          input_genomes=${2} 
-	          shift ;; 
+	          ARGS_SET+=g
+		  shift ;; 
 
 	     's') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            echo $USAGE 's' 
+	            USAGE 
 	            exit 1 
-	          fi 
-	          store=${2} 
-	          shift ;; 
-	    
-	     't') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            echo $USAGE 't' 
-	            exit 1 
-	          fi 
-	          threads=${2} 
-	          shift ;; 
-	     
+	          fi
+	          store=${2}
+                  ARGS_SET+=s
+	          shift ;;
+
+	     't') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
+	            USAGE
+	            exit 1
+	          fi
+	          threads=${2}
+                  ARGS_SET+=t
+	          shift ;;
+
 	     's') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            echo $USAGE 's'
+	            USAGE
 	            exit 1 
-	          fi 
-	          store=${2} 
-	          shift ;; 
-	  
+	          fi
+	          store=${2}
+                  ARGS_SET+=s
+	          shift ;;
+
 	     'x') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            echo $USAGE 'x' 
+	            USAGE 
 	            exit 1 
 	          fi 
 	          trimal_parameter=${2} 
-	          shift ;; 
+                  ARGS_SET+=x
+	          shift ;;
+
 	     'r') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            echo $USAGE 'r' 
+	            USAGE
 	            exit 1 
 	          fi 
 	          orthofinder_rerun=${2} 
-	          shift ;; 
+                  ARGS_SET+=r
+	          shift ;;
+
 	     'a') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            echo $USAGE 'A' 
+	            USAGE 
 	            exit 1 
 	          fi 
 	          ANI_shortlist=${2} 
-	          shift ;; 
+                  ARGS_SET+=a
+	          shift ;;
+
+             'T') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
+		    USAGE
+		    exit 1
+		  fi
+		export TESTER=${2}
+                ARGS_SET+=T
+		# set variables specific for running OrthoPhyl on a test data set.
+		tester
+		shift ;;
+
 	     \?) # Invalid option
 	         echo "Error: Invalid option"
 	         echo $USAGE
@@ -188,11 +199,25 @@ else
 	done 
 	shift 
 	done 
-	if [[ ! -n ${1} ]] ; then 
-	echo $USAGE 
-	exit 1 
+	if [[ -n ${1} ]] ; then 
+		echo "!!!!: you have a hanging argument without a flag!"
+		USAGE 
+		exit 1 
 	fi 
-fi
+	# test for incompatable args
+	if [[ "$ARGS_SET" == *@(T|g|s|a)*@(T|g|s|a)* ]]
+	then
+		echo "!!!!: -T was set along with -g/s/a, which are incompatable args"
+		USAGE
+		exit 1
+	fi
+
+#######################################################
+# Import command line args and run tester is flagged #
+######################################################
+
+
+
 
 # outputs are held in:
 mkdir $store
