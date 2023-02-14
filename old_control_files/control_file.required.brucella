@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# invoked at the beginning of orthophylo.X.slurm with
+# source $script_home/control_file.required
+
+###################################
+# Required user specified options
+#   Will eventually expose all with standard -X bash style
+# genome_dir should contain multifastas (1 file per species/strain) with .fa or .fna as extention
+# multifasta file names will be taken as strain/species name
+export input_genomes=~/scratch/orthophylo/brucella_genomes.6.14.22.clean.ddp/
+export output_dir=Brucella.10.18 # the name of the main output dir
+export store=$HOME/scratch/orthophylo/$output_dir/ # the full path of the main output dir
+export threads=30
+export Path_to_gits=$HOME/Path_to_gits/
+#paths to externl programs
+export conda_env=orthophylo
+export fastANI=~/apps/fastANI
+export ASTRAL_cmd="$Path_to_gits/ASTRAL/Astral/astral.5.7.8.jar"
+export catfasta2phyml_cmd="$Path_to_gits/catfasta2phyml/catfasta2phyml.pl"
+export Alignment_Assessment="$Path_to_gits/Alignment_Assessment/Alignment_Assessment_v2.py"
+
+conda activate $conda_env
+
