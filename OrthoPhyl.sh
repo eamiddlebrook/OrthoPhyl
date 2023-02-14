@@ -10,6 +10,7 @@ Required:
 -s	full path to the main directory for output
 -t	threads to use
 Optional:
+-c	path to a control file with required variables and any optional ones to override defaults. Will override values set on command line!
 -x	trimal paramerter string (in double "quotes")
 -r	flag to rerun orthofinder on the ANI_shorlist (true/false)
 -a	max number of genomes to run through OrthoFinder. If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on
@@ -36,29 +37,36 @@ bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
 source $HOME/.bash_profile
 source $HOME/.bashrc
 
+# grab the Orthophyl directory no mater where script was run from
 #used for loading stuff from git repo
-export script_home=$(pwd)
+export script_home=$(dirname "$(readlink -f "$0")")
 
 ############################################
 ####  import control file variables  #######
 ############################################
 
-# Will be overwritten if provided on the command line
+# import paths to external programs and the conda environment
+source $script_home/control_file.paths
 
-# import required user defined variables
-source $script_home/control_file.required
-
-# import pipeline defaults
+# import pipeline defaults (will be overridden by command line args or -c control_file)
 source $script_home/control_file.defaults
 
-# import used defined parameters to override defaults
-source $script_home/control_file.user
 
+#############################################
+######## Import funtions and stuff ##########
+#############################################
 # import main_script functions
 source $script_home/script_lib/functions.sh
 
+#load custom aliases...might get rid of
+shopt -s expand_aliases
+source $script_home/script_lib/bash_utils_and_aliases.sh
 
-# if first arg is "TESTER" run a small pipeline to test...pipeline
+
+##############################################
+##### if -T "TESTER" is set, run a small #####
+#######  pipeline to test...pipeline  ########
+##############################################
 tester () {
 if [[ $TESTER == "TESTER" ]]
 then
@@ -68,9 +76,9 @@ then
 	####  and genomes from the TESTER directory  ###
 	################################################
 	"
-	source $script_home/TESTER/control_file.required
-	source $script_home/control_file.defaults
 	source $script_home/TESTER/control_file.user
+	source $script_home/control_file.defaults
+	source $script_home/control_file.paths
 	if [ -d $store ]
 	then
 		rm -r $store
@@ -85,9 +93,9 @@ then
 	################################################
         "
 	# NEED TO ADD COMPRESSED GENOME FILES TO TEST NEW FUNC
-	source $script_home/TESTER/control_file.required_chloroplast
+	source $script_home/TESTER/control_file.user_chloroplast
         source $script_home/control_file.defaults
-        source $script_home/TESTER/control_file.user
+        source $script_home/control_file.paths
         if [ -d $store ]
         then
                 rm -r $store
@@ -102,8 +110,8 @@ fi
 	#######  Handle command line Arguments ############
 	###################################################
 	#Setting Variables manually to override ones in control file
-	while [[ ${1:0:1} = '-' ]] ; do 
-	ARGS_SET=''
+	ARGS_SET=""
+	while [[ ${1:0:1} = '-' ]] ; do
 	N=1 
 	L=${#1} 
 	while [[ $N -lt $L ]] ; do 
@@ -118,23 +126,24 @@ fi
 	          exit 1
 	          shift ;; 
 
-	     'g') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+	     'g') if [[ $N -ne $(($L-1)) || ! -n ${2} ]]; then 
 	            echo "looks like the argument for -g is messed up" 
 	            echo $USAGE
-	            exit 1 
-	          elif [[ ! -d {2} ]]; then
-	            echo "WARNING: -g declaring an input genome directory that does not exist...maybe check on that"
 	            exit 1
 	          fi
-	          input_genomes=${2} 
-	          ARGS_SET+=g
-		  shift ;; 
+	          input_genomes="$( cd "$(relative_absolute ${2})" && pwd )"
+	          if [[ ! -d "${input_genomes}" ]]; then
+                    echo "WARNING: -g declaring an input genome directory that does not exist...maybe check on that"
+                    exit 1
+                  fi
+		  ARGS_SET+=g
+		  shift ;;
 
 	     's') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
 	            USAGE 
 	            exit 1 
 	          fi
-	          store=${2}
+	          store=$(relative_absolute ${2})
                   ARGS_SET+=s
 	          shift ;;
 
@@ -146,18 +155,24 @@ fi
                   ARGS_SET+=t
 	          shift ;;
 
-	     's') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+	     'c') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
 	            USAGE
-	            exit 1 
+	            exit 1
 	          fi
-	          store=${2}
-                  ARGS_SET+=s
-	          shift ;;
+		  # tests if control file given is relative for an absolute path
+	          control_file=$(relative_absolute ${2})
+		  echo $control_file
+	          # test if control_file is a file
+		  if [[ ! -f $control_file ]]; then
+		  	echo "given control file (-c ${2}) does not exist"
+			exit 1
+		  fi
+		  shift ;;
 
 	     'x') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            USAGE 
-	            exit 1 
-	          fi 
+	            USAGE
+	            exit 1
+	          fi
 	          trimal_parameter=${2} 
                   ARGS_SET+=x
 	          shift ;;
@@ -171,9 +186,9 @@ fi
 	          shift ;;
 
 	     'a') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            USAGE 
-	            exit 1 
-	          fi 
+	            USAGE
+	            exit 1
+	          fi
 	          ANI_shortlist=${2} 
                   ARGS_SET+=a
 	          shift ;;
@@ -205,27 +220,40 @@ fi
 		exit 1 
 	fi 
 	# test for incompatable args
-	if [[ "$ARGS_SET" == *@(T|g|s|a)*@(T|g|s|a)* ]]
+	if [[ "$ARGS_SET" == *@(g|s|a)*@(T)* ]] || [[ "$ARGS_SET" == *@(T)*@(g|s|a)* ]]
 	then
 		echo "!!!!: -T was set along with -g/s/a, which are incompatable args"
 		USAGE
 		exit 1
 	fi
 
-#######################################################
-# Import command line args and run tester is flagged #
-######################################################
+	#import control_file arguments
+	if [[ -z ${control_file+x} ]]
+	then
+		#nothing
+		echo "All required args taken from command line"
+	else
+		echo ""
+		echo "##########################################"
+		echo "  setting variable found in $control_file"
+		echo "   This will overright any args set on the command line"
+		echo "##########################################"
+    		echo ""
+		source $control_file || exit 1
+	fi
+
+
 
 
 
 
 # outputs are held in:
-mkdir $store
+mkdir -p $store || exit 1
 export genome_dir=$store/genomes
 export wd=$store/phylo_current
 export run_notes=$store/run_notes.txt
 export genome_list=($(ls $genome_dir))
-cd $store || exit
+cd $store || exit 1
 
 export trans=$store/prodigal_nucls/
 export prots=$store/prodigal_prots

@@ -8,21 +8,21 @@
 #   Will eventually expose all with standard -X bash style
 # genome_dir should contain multifastas (1 file per species/strain) with .fa or .fna as extention
 # multifasta file names will be taken as strain/species name
-export input_genomes=$script_home/TESTER/genomes/
-export output_dir=TESTER/Workflow_test.$(date +%m-%d-%Y) # the name of the main output dir
+export input_genomes=$script_home/TESTER/genomes_chloroplast
+export output_dir=TESTER/Workflow_test.chloroplast$(date +%m-%d-%Y) # the name of the main output dir
 export store=$script_home/$output_dir/ # the full path of the main output dir
 if [[ ! -z ${threads+x} ]]
 then
         export threads
 else
-	export threads=4
+	export threads=19
 fi
 
 # other variables to set
 
 # example
 export min_frac_orthos=0.50 #minimum fraction of species with SCOs to count OG
-export ANI_shortlist=6 # max number of seqs to run through Orthofinder
+export ANI_shortlist=20 # max number of seqs to run through Orthofinder
 export tree_method=("fasttree" "iqtree")
 export gene_tree_methods=("fasttree")
 

@@ -6,7 +6,7 @@
 # Optional parameters to mess with
 export rerun=false # if rerunning post-Orthofinder, this will ensure $orthodir is declated correctly
 export trimal_parameter="-resoverlap .5 -seqoverlap 50 -gt .80 -cons 60 -w 3"
-export min_frac_orthos=0.6 #minimum fraction of total species with gene to count OG as relaxed SCO
+export min_frac_orthos=0.30 #minimum fraction of total species with gene to count OG as relaxed SCO
 export tree_method=("fasttree" "iqtree")
 export gene_tree_methods=("fasttree")
 export fasttree_speciestree_options="-gtr -gamma"
