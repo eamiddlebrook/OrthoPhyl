@@ -37,15 +37,22 @@ bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
 source $HOME/.bash_profile
 source $HOME/.bashrc
 
-# Used to Catch all set variables later
-tmpfile=$(/tmp/temp_env)
-declare -p >"$tmpfile"
 
 
-
-# grab the Orthophyl directory no mater where script was run from
+# grab the Orthophyl directory no matter where script was run from
 #used for loading stuff from git repo
 export script_home=$(dirname "$(readlink -f "$0")")
+
+#############################################
+######## Import funtions and stuff ##########
+#############################################
+# import main_script functions
+source $script_home/script_lib/functions.sh
+
+#load custom aliases...might get rid of
+shopt -s expand_aliases
+source $script_home/script_lib/bash_utils_and_aliases.sh
+
 
 ############################################
 ####  import control file variables  #######
@@ -58,19 +65,17 @@ then
     source $script_home/control_file.paths
 fi
 
+
+
+# Used to Catch all set variables later
+tmpfile=$(mktemp)
+declare -p > "$tmpfile"
+echo $tmpfile
+
+
+
 # import pipeline defaults (will be overridden by command line args or -c control_file)
 source $script_home/control_file.defaults
-
-
-#############################################
-######## Import funtions and stuff ##########
-#############################################
-# import main_script functions
-source $script_home/script_lib/functions.sh
-
-#load custom aliases...might get rid of
-shopt -s expand_aliases
-source $script_home/script_lib/bash_utils_and_aliases.sh
 
 
 ##############################################
@@ -172,6 +177,7 @@ fi
 		  # tests if control file given is relative for an absolute path
 	          control_file=$(relative_absolute ${2})
 		  echo $control_file
+		  ARGS_SET+=c
 	          # test if control_file is a file
 		  if [[ ! -f $control_file ]]; then
 		  	echo "given control file (-c ${2}) does not exist"
@@ -215,9 +221,9 @@ fi
 
 	     \?) # Invalid option
 	         echo "Error: Invalid option"
-	         echo $USAGE
+	         USAGE
 	         exit;;
-	     *) echo $USAGE 't2' 
+	     *) USAGE 
 	        exit 1 ;; 
 	  esac 
 	  N=$(($N+1)) 
@@ -230,12 +236,35 @@ fi
 		exit 1 
 	fi 
 	# test for incompatable args
-	if [[ "$ARGS_SET" == *@(g|a)*@(T)* ]] || [[ "$ARGS_SET" == *@(T)*@(g|a)* ]]
+	if [[ "$ARGS_SET" == *@(g|c|a)*@(T)* ]] || [[ "$ARGS_SET" == *@(T)*@(g|c|a)* ]]
 	then
-		echo "!!!!: -T was set along with -g/a, which are incompatable args"
+		echo "!!!!: -T was set along with -g/c/a, which are incompatable args"
 		USAGE
 		exit 1
+	elif [[ ! "$ARGS_SET" == *c* ]] && [[ ! "$ARGS_SET" == *@(g|s|t)*@(g|s|t)*@(g|s|t)* ]] && [[ ! "$ARGS_SET" == *T* ]]
+	then
+		echo -e "WARNING: Required arguments were not given, you need to provied either \n\ta control file with \"-c control_file\"\n\t-g genome_directory -s storage_directory and -t threads \n\tor \"-T TESTER\" to start a test run"
+		echo "Arguments that you set are -"${ARGS_SET}
+		USAGE
+		exit 1
+
 	fi
+
+
+# print all variables set up to this point
+echo "
+######################################
+#########  Variables set  ############
+######################################
+"
+# compare the output of declare -p at the begining and now
+# $tmpfile was created at the top of script
+declare -p | diff "$tmpfile" - | grep "declare" | cut -d " " -f 4-
+echo "#####################################"
+echo "#####################################"
+#rm -f "$tmpfile"
+
+
 
 	#import control_file arguments
 	if [[ -z ${control_file+x} ]]
@@ -251,20 +280,6 @@ fi
     		echo ""
 		source $control_file || exit 1
 	fi
-
-# print all variables set up to this point
-echo "
-######################################
-#########  Variables set  ############
-######################################
-"
-# compare the output of declare -p at the begining and now
-# $tmpfile was created at the top of script
-declare -p | diff "$tmpfile" - | grep "declare" | awk '{print $4}'
-echo "#####################################"
-echo "#####################################"
-rm -f "$tmpfile"
-
 
 
 
