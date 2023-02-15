@@ -220,7 +220,7 @@ fi
 		exit 1 
 	fi 
 	# test for incompatable args
-	if [[ "$ARGS_SET" == *@(g|s|a)*@(T)* ]] || [[ "$ARGS_SET" == *@(T)*@(g|s|a)* ]]
+	if [[ "$ARGS_SET" == *@(g|a)*@(T)* ]] || [[ "$ARGS_SET" == *@(T)*@(g|a)* ]]
 	then
 		echo "!!!!: -T was set along with -g/s/a, which are incompatable args"
 		USAGE
