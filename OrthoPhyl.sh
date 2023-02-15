@@ -70,7 +70,7 @@ fi
 # Used to Catch all set variables later
 tmpfile=$(mktemp)
 declare -p > "$tmpfile"
-echo $tmpfile
+
 
 
 
@@ -262,7 +262,7 @@ echo "
 declare -p | diff "$tmpfile" - | grep "declare" | cut -d " " -f 4-
 echo "#####################################"
 echo "#####################################"
-#rm -f "$tmpfile"
+rm -f "$tmpfile"
 
 
 
