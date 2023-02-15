@@ -37,6 +37,12 @@ bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
 source $HOME/.bash_profile
 source $HOME/.bashrc
 
+# Used to Catch all set variables later
+tmpfile=$(/tmp/temp_env)
+declare -p >"$tmpfile"
+
+
+
 # grab the Orthophyl directory no mater where script was run from
 #used for loading stuff from git repo
 export script_home=$(dirname "$(readlink -f "$0")")
@@ -45,8 +51,12 @@ export script_home=$(dirname "$(readlink -f "$0")")
 ####  import control file variables  #######
 ############################################
 
-# import paths to external programs and the conda environment
-source $script_home/control_file.paths
+# if not in a singularity container, import paths to external programs and the conda environment
+#    !!! need to make compatable with docker...hopefully just a different variable
+if [[ -z ${SINGULARITY_CONTAINER+x} ]]
+then
+    source $script_home/control_file.paths
+fi
 
 # import pipeline defaults (will be overridden by command line args or -c control_file)
 source $script_home/control_file.defaults
@@ -222,7 +232,7 @@ fi
 	# test for incompatable args
 	if [[ "$ARGS_SET" == *@(g|a)*@(T)* ]] || [[ "$ARGS_SET" == *@(T)*@(g|a)* ]]
 	then
-		echo "!!!!: -T was set along with -g/s/a, which are incompatable args"
+		echo "!!!!: -T was set along with -g/a, which are incompatable args"
 		USAGE
 		exit 1
 	fi
@@ -242,6 +252,18 @@ fi
 		source $control_file || exit 1
 	fi
 
+# print all variables set up to this point
+echo "
+######################################
+#########  Variables set  ############
+######################################
+"
+# compare the output of declare -p at the begining and now
+# $tmpfile was created at the top of script
+declare -p | diff "$tmpfile" - | grep "declare" | awk '{print $4}'
+echo "#####################################"
+echo "#####################################"
+rm -f "$tmpfile"
 
 
 
