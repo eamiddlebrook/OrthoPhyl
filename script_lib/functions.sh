@@ -324,7 +324,7 @@ ORTHO_RUN () {
 	then
 		echo "Orthofinder previously completed."
 		echo "if rerun is desired, delete $store/ortho.complete"
-		export orthodir=$(echo ${local_prots_fixed}/OrthoFinder/Results_*)
+		export orthodir=$(echo ${local_prots_fixed}/OrthoFinder/Results_${ortho_trial})
 	else
 		# this avoids getting a ${orthodir}_X for 1 restart...
 		export orthodir=$(echo ${local_prots_fixed}/OrthoFinder/Results_${ortho_trial})
@@ -484,7 +484,7 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 		done
 	}
 
-
+	echo $orthodir
 	cd $orthodir || exit
 	reps=2
 	if [ -f $store/ANI_ORTHOFINDER_TO_ALL_SEQS.complete ]

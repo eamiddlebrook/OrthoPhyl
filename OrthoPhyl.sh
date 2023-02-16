@@ -14,7 +14,7 @@ Optional:
 -x	trimal paramerter string (in double "quotes")
 -r	flag to rerun orthofinder on the ANI_shorlist (true/false)
 -a	max number of genomes to run through OrthoFinder. If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on
--T	run test dataset (TESTER/TESTER_chloroplast), incompatable with -g|s
+-T	run test dataset [TESTER,TESTER_chloroplast]), incompatable with -g|s
 -h	display a description and a super useful usage message
 ###############################################################\n
 To run test datasets:
@@ -64,7 +64,6 @@ if [[ -z ${SINGULARITY_CONTAINER+x} ]]
 then
     source $script_home/control_file.paths
 fi
-
 
 
 # Used to Catch all set variables later
@@ -121,134 +120,134 @@ fi
 }
 
 
-	###################################################
-	#######  Handle command line Arguments ############
-	###################################################
-	#Setting Variables manually to override ones in control file
-	ARGS_SET=""
-	while [[ ${1:0:1} = '-' ]] ; do
-	N=1 
-	L=${#1} 
-	while [[ $N -lt $L ]] ; do 
-	  case ${1:$N:1} in 
-	     'h') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            USAGE
-	            exit 0
-	          fi 
-	          # run function to print usage and exit
-		  echo "Looks like you used the '-h' with an argument...thats not right" 
-		  USAGE
-	          exit 1
-	          shift ;; 
+###################################################
+#######  Handle command line Arguments ############
+###################################################
+#Setting Variables manually to override ones in control file
+ARGS_SET=""
+while [[ ${1:0:1} = '-' ]] ; do
+N=1 
+L=${#1} 
+while [[ $N -lt $L ]] ; do 
+  case ${1:$N:1} in 
+     'h') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+            USAGE
+            exit 0
+          fi 
+          # run function to print usage and exit
+	  echo "Looks like you used the '-h' with an argument...thats not right" 
+	  USAGE
+          exit 1
+          shift ;; 
 
-	     'g') if [[ $N -ne $(($L-1)) || ! -n ${2} ]]; then 
-	            echo "looks like the argument for -g is messed up" 
-	            echo $USAGE
-	            exit 1
-	          fi
-	          input_genomes="$( cd "$(relative_absolute ${2})" && pwd )"
-	          if [[ ! -d "${input_genomes}" ]]; then
-                    echo "WARNING: -g declaring an input genome directory that does not exist...maybe check on that"
-                    exit 1
-                  fi
-		  ARGS_SET+=g
-		  shift ;;
+     'g') if [[ $N -ne $(($L-1)) || ! -n ${2} ]]; then 
+            echo "looks like the argument for -g is messed up" 
+            echo $USAGE
+            exit 1
+          fi
+          input_genomes="$( cd "$(relative_absolute ${2})" && pwd )"
+          if [[ ! -d "${input_genomes}" ]]; then
+            echo "WARNING: -g declaring an input genome directory that does not exist...maybe check on that"
+            exit 1
+          fi
+	  ARGS_SET+=g
+	  shift ;;
 
-	     's') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            USAGE 
-	            exit 1 
-	          fi
-	          store=$(relative_absolute ${2})
-                  ARGS_SET+=s
-	          shift ;;
+     's') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+            USAGE 
+            exit 1 
+          fi
+          store=$(relative_absolute ${2})
+          ARGS_SET+=s
+          shift ;;
 
-	     't') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
-	            USAGE
-	            exit 1
-	          fi
-	          threads=${2}
-                  ARGS_SET+=t
-	          shift ;;
+     't') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
+            USAGE
+            exit 1
+          fi
+          threads=${2}
+          ARGS_SET+=t
+          shift ;;
 
-	     'c') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            USAGE
-	            exit 1
-	          fi
-		  # tests if control file given is relative for an absolute path
-	          control_file=$(relative_absolute ${2})
-		  echo $control_file
-		  ARGS_SET+=c
-	          # test if control_file is a file
-		  if [[ ! -f $control_file ]]; then
-		  	echo "given control file (-c ${2}) does not exist"
-			exit 1
-		  fi
-		  shift ;;
-
-	     'x') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            USAGE
-	            exit 1
-	          fi
-	          trimal_parameter=${2} 
-                  ARGS_SET+=x
-	          shift ;;
-
-	     'r') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            USAGE
-	            exit 1 
-	          fi 
-	          orthofinder_rerun=${2} 
-                  ARGS_SET+=r
-	          shift ;;
-
-	     'a') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-	            USAGE
-	            exit 1
-	          fi
-	          ANI_shortlist=${2} 
-                  ARGS_SET+=a
-	          shift ;;
-
-             'T') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
-		    USAGE
-		    exit 1
-		  fi
-		export TESTER=${2}
-                ARGS_SET+=T
-		# set variables specific for running OrthoPhyl on a test data set.
-		tester
-		shift ;;
-
-	     \?) # Invalid option
-	         echo "Error: Invalid option"
-	         USAGE
-	         exit;;
-	     *) USAGE 
-	        exit 1 ;; 
-	  esac 
-	  N=$(($N+1)) 
-	done 
-	shift 
-	done 
-	if [[ -n ${1} ]] ; then 
-		echo "!!!!: you have a hanging argument without a flag!"
-		USAGE 
-		exit 1 
-	fi 
-	# test for incompatable args
-	if [[ "$ARGS_SET" == *@(g|c|a)*@(T)* ]] || [[ "$ARGS_SET" == *@(T)*@(g|c|a)* ]]
-	then
-		echo "!!!!: -T was set along with -g/c/a, which are incompatable args"
-		USAGE
+     'c') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+            USAGE
+            exit 1
+          fi
+	  # tests if control file given is relative for an absolute path
+          control_file=$(relative_absolute ${2})
+	  echo $control_file
+	  ARGS_SET+=c
+          # test if control_file is a file
+	  if [[ ! -f $control_file ]]; then
+	  	echo "given control file (-c ${2}) does not exist"
 		exit 1
-	elif [[ ! "$ARGS_SET" == *c* ]] && [[ ! "$ARGS_SET" == *@(g|s|t)*@(g|s|t)*@(g|s|t)* ]] && [[ ! "$ARGS_SET" == *T* ]]
-	then
-		echo -e "WARNING: Required arguments were not given, you need to provied either \n\ta control file with \"-c control_file\"\n\t-g genome_directory -s storage_directory and -t threads \n\tor \"-T TESTER\" to start a test run"
-		echo "Arguments that you set are -"${ARGS_SET}
-		USAGE
-		exit 1
+	  fi
+	  shift ;;
 
-	fi
+     'x') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+            USAGE
+            exit 1
+          fi
+          trimal_parameter=${2} 
+          ARGS_SET+=x
+          shift ;;
+
+     'r') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+            USAGE
+            exit 1 
+          fi 
+          orthofinder_rerun=${2} 
+          ARGS_SET+=r
+          shift ;;
+
+     'a') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+            USAGE
+            exit 1
+          fi
+          ANI_shortlist=${2} 
+          ARGS_SET+=a
+          shift ;;
+
+     'T') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
+	    USAGE
+	    exit 1
+	  fi
+	export TESTER=${2}
+        ARGS_SET+=T
+	# set variables specific for running OrthoPhyl on a test data set.
+	tester
+	shift ;;
+
+     \?) # Invalid option
+         echo "Error: Invalid option"
+         USAGE
+         exit;;
+     *) USAGE 
+        exit 1 ;; 
+  esac 
+  N=$(($N+1)) 
+done 
+shift 
+done 
+if [[ -n ${1} ]] ; then 
+	echo "!!!!: you have a hanging argument without a flag!"
+	USAGE 
+	exit 1 
+fi 
+# test for incompatable args
+if [[ "$ARGS_SET" == *@(g|c|a)*@(T)* ]] || [[ "$ARGS_SET" == *@(T)*@(g|c|a)* ]]
+then
+	echo "!!!!: -T was set along with -g/c/a, which are incompatable args"
+	USAGE
+	exit 1
+elif [[ ! "$ARGS_SET" == *c* ]] && [[ ! "$ARGS_SET" == *@(g|s)*@(g|s)* ]] && [[ ! "$ARGS_SET" == *T* ]]
+then
+	echo -e "WARNING: Required arguments were not given, you need to provied either \n\ta control file with \"-c control_file\"\n\t-g genome_directory -s storage_directory \n\tor \"-T TESTER\" to start a test run"
+	echo "Arguments that you set are -"${ARGS_SET}
+	USAGE
+	exit 1
+
+fi
 
 
 # print all variables set up to this point
@@ -266,22 +265,20 @@ rm -f "$tmpfile"
 
 
 
-	#import control_file arguments
-	if [[ -z ${control_file+x} ]]
-	then
-		#nothing
-		echo "All required args taken from command line"
-	else
+#import control_file arguments
+if [[ -z ${control_file+x} ]]
+then
+	#nothing
+	echo "All required args taken from command line"
+else
+	echo ""
+	echo "##########################################"
+	echo "  setting variable found in $control_file"
+	echo "   This will overright any args set on the command line"
+	echo "##########################################"
 		echo ""
-		echo "##########################################"
-		echo "  setting variable found in $control_file"
-		echo "   This will overright any args set on the command line"
-		echo "##########################################"
-    		echo ""
-		source $control_file || exit 1
-	fi
-
-
+	source $control_file || exit 1
+fi
 
 
 # outputs are held in:
