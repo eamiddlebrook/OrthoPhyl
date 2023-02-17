@@ -66,6 +66,11 @@ source $script_home/script_lib/bash_utils_and_aliases.sh
 if [[ -z ${SINGULARITY_CONTAINER+x} ]]
 then
     source $script_home/control_file.paths
+    # sometimes reqired by HPC submission software
+    # also on a mac ~/.bash*s are not sourced automatically
+    # (just covering all the bases)
+    source $HOME/.bash_profile
+    source $HOME/.bashrc
 fi
 
 
@@ -93,7 +98,12 @@ then
 	"
 	source $script_home/TESTER/control_file.user
 	source $script_home/control_file.defaults
-	source $script_home/control_file.paths
+	# only load control_file.paths if not in singularity
+	if [[ -z ${SINGULARITY_CONTAINER+x} ]]
+	then
+            source $script_home/control_file.paths
+	fi
+
 	if [ -d $store ]
 	then
 		rm -r $store
@@ -101,20 +111,25 @@ then
 elif [[ $TESTER = "TESTER_chloroplast" ]]
 then
 	echo "
-       ################################################
-       #####  Testing Workflow with Control Files  ####
-       ####  and genomes from the TESTER directory  ###
-       ##########   Chloroplast Edition!!!!   #########
+        ################################################
+        #####  Testing Workflow with Control Files  ####
+        ####  and genomes from the TESTER directory  ###
+        ##########   Chloroplast Edition!!!!   #########
 	################################################
         "
 	# NEED TO ADD COMPRESSED GENOME FILES TO TEST NEW FUNC
 	source $script_home/TESTER/control_file.user_chloroplast
-       source $script_home/control_file.defaults
-       source $script_home/control_file.paths
-       if [ -d $store ]
-       then
+        source $script_home/control_file.defaults
+	# only load control_file.paths if not in singularity
+        if [[ -z ${SINGULARITY_CONTAINER+x} ]]
+        then
+ 	       source $script_home/control_file.paths
+        fi
+
+	if [ -d $store ]
+        then
               rm -r $store
-       fi
+        fi
 else
 	echo "PANIC: TESTER was set, but didnt equal 'TESTER' or 'TESTER_chloroplast'"
 fi
