@@ -126,7 +126,12 @@ cd OrthoPhyl
 ### Edit control_file.paths to reflect system specific locations and conda environment name
 
 ## Test install
-### To test 'conda activate' within OrthoPhyl, make sure the conda environment is not activated
+### Test Singularity container
+```
+singularity run OrthoPhyl.0.9.3.sif -T TESTER_chloroplast -s ./tester_chloroplast_output -t 4
+```
+### Test Manual install
+#### To test 'conda activate' within OrthoPhyl, make sure the conda environment is not activated
 ```
 conda deactivate
 ``` 
@@ -135,19 +140,19 @@ conda deactivate
 ```
 bash OrthoPhyl.sh -T TESTER_chloroplast -t 3
 ```
-#### There should be a directory created in OrthoPhyl/TESTER/Workflow_test.chloroplast$(date +%m-%d-%Y)
-#### If the test was successful, there should be 4 species trees found in the FINAL_TREES
+There should be a directory created in OrthoPhyl/TESTER/Workflow_test.chloroplast$(date +%m-%d-%Y)
+If the test was successful, there should be 4 species trees found in the FINAL_TREES
 
-## run bigger test locally
+### run bigger test locally
 ####   this script takes about 20 hr to complete with 20 cores
 ####   Most of this is ML tree building
 ####   will make an artificial set of truncated genomes later
 ```
 bash OrthoPhyl.sh -T TESTER -t 3
 ```
-#### if the test was successful, there should be a file at "OrthoPhyl/TESTER.pass"
-#### and "###### It looks like the install was successful ######" should be sent to stdout 
-#### towards the end of the run
+If the test was successful, there should be a file at "OrthoPhyl/TESTER.pass"
+and "###### It looks like the install was successful ######" should be sent to stdout towards the end of the run
+
 
 ## Running OrthoPhyl on your data
 ```
