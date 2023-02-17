@@ -54,16 +54,14 @@ source $script_home/script_lib/bash_utils_and_aliases.sh
 ####  import control file variables  #######
 ############################################
 
-# if not in a singularity container, import paths to external programs and the conda environment
+# if not in a singularity container, grab the "conda init" section of .bash_profile or .bashrc 
+#    and import paths to external programs and the conda environment
 #    !!! need to make compatable with docker...hopefully just a different variable
 if [[ -z ${SINGULARITY_CONTAINER+x} ]]
 then
-    source $script_home/control_file.paths
-    # sometimes reqired by HPC submission software
-    # also on a mac ~/.bash*s are not sourced automatically
-    # (just covering all the bases)
     source $HOME/.bash_profile
     source $HOME/.bashrc
+    source $script_home/control_file.paths
 fi
 
 
