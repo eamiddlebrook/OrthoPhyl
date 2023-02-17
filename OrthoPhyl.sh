@@ -34,13 +34,6 @@ bash OrthoPhyl.sh -T TESTER -s output_dir -t #threads
 # set up environment #
 ######################
 
-# sometimes reqired by HPC submission software
-# also on a mac ~/.bash*s are not sourced automatically
-# (just covering all the bases)
-source $HOME/.bash_profile
-source $HOME/.bashrc
-
-
 
 # grab the Orthophyl directory no matter where script was run from
 #used for loading stuff from git repo
@@ -97,13 +90,6 @@ then
 	################################################
 	"
 	source $script_home/TESTER/control_file.user
-	source $script_home/control_file.defaults
-	# only load control_file.paths if not in singularity
-	if [[ -z ${SINGULARITY_CONTAINER+x} ]]
-	then
-            source $script_home/control_file.paths
-	fi
-
 	if [ -d $store ]
 	then
 		rm -r $store
@@ -119,13 +105,6 @@ then
         "
 	# NEED TO ADD COMPRESSED GENOME FILES TO TEST NEW FUNC
 	source $script_home/TESTER/control_file.user_chloroplast
-        source $script_home/control_file.defaults
-	# only load control_file.paths if not in singularity
-        if [[ -z ${SINGULARITY_CONTAINER+x} ]]
-        then
- 	       source $script_home/control_file.paths
-        fi
-
 	if [ -d $store ]
         then
               rm -r $store
