@@ -222,6 +222,9 @@ This appeared to be a problem with wget, which was resolved by updating through 
 + allow users to pick which dataset to use for tree building (currently strict and relaxed are used). This would greatly reduce pipeline run time.
 + change how the list of OGs for HMM  searching is inumerated. Currently tries with OG that have be filtered out because of paralogs, then gets mad because there is no multifasta to align (doesnt change outcome, just messy)
 
+## Small fixes
++ PAL2NAL subfunction is declared with the loop. Should have OG name passed in at run, not at declaration...oops
+
 ## OrthoPhyl Citation:
 ### [Coming soon]
 ## Citations for dependencies

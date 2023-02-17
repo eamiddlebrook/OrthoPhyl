@@ -625,13 +625,14 @@ PAL2NAL () {
                 then
 			echo $((J/percent*10))" percent of the way through the PAL2NAL"
                 fi
+		# why the hell gig I delace this function with in the loop...probably because of the "local bass=...". this should be passed in with a variable. 
 		PAL2NAL_subfunc () {
 			#get basename (OG000????)
 			local base=$(basename ${i%.*})
 			cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
 	        	> ./OG_names/${base}.names
 			#pull out trans sequences for each OG
-			filterbyname.sh -XmX60m -Xms60m include=t \
+			filterbyname.sh -Xmx60m -Xms60m include=t \
 	        	names=./OG_names/${base}.names \
 			in=all_trans.nm.fa out=./SequencesTrans/${base}.trans.fa \
 			>> $wd/logs/filterbyname.PAL2NAL 2>&1 # changed a "/" to ">" not sure how the code ran before...
