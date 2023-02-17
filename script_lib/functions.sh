@@ -184,7 +184,7 @@ DEDUP_annot_prots () {
 		do
 			base=$(basename ${I%.*})
 			echo $base >> dedupe.stats
-			bash dedupe.sh in=$I out=$prots/$base.faa --amino minidentity=99.9 2>&1 | grep 'Input\|Result'  >> dedupe.stats
+			bash dedupe.sh -Xmx1g -Xms1g in=$I out=$prots/$base.faa --amino minidentity=99.9 2>&1 | grep 'Input\|Result'  >> dedupe.stats
 		done && touch dedupe.complete
 	fi
 }
@@ -223,7 +223,7 @@ FIX_PROTS_NAMES () {
 
 	if [ -d $prots.fixed ]
 	then
-	        rm $prots.fixed.bk
+	        if [ -d $prots.fixed.bk ]: then rm $prots.fixed.bk ; fi
 	        mv $prots.fixed $prots.fixed.bk
 	fi
 

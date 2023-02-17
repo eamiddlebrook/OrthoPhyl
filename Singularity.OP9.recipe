@@ -21,6 +21,7 @@ AUTHOR earlm@lanl.gov
     bash miniconda.sh -bfp /opt/miniconda3
     rm miniconda.sh
     export PATH="/opt/miniconda3/bin:$PATH"
+    echo "PATH=\"/opt/miniconda3/bin:$PATH\"" >> $SINGULARITY_ENVIRONMENT
     . /opt/miniconda3/etc/profile.d/conda.sh
     conda activate base
     conda install -y -c bioconda -c conda-forge \
@@ -89,3 +90,12 @@ AUTHOR earlm@lanl.gov
     echo "Container was created $NOW"
     echo "Arguments received: $*"
     exec $OrthoPhyl "$@"
+
+%help
+    This container holds OrthoPhyl and all of its dependencies.
+    A test run can be performed with:
+        "singularity run OrthoPhyl.0.X.X.sif -T TESTER_chloroplast -s ./test_sing_chlorophyl3 -t 10"    
+    To see a help message:
+	"singularity run OrthoPhyl.0.X.X.sif -h"
+    For a custom OrthoPhyl run:
+	"singularity run OrthoPhyl.0.X.X.sif -g Path/to/assembly_files/ -s path/to/store/output/ -t #_threads"
