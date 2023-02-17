@@ -409,7 +409,7 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 		###################################################
 		# pull names from hmmout filtering and make multifasta with filterbyname
 		cat hmmout/${I}.list_filter | awk '{print $1}' > hmmout/${I}.names
-		filterbyname.sh overwrite=True include=True ignorejunk=True \
+		filterbyname.sh -Xmx60m -Xms60m overwrite=True include=True ignorejunk=True \
 		names=hmmout/${I}.names \
 		in=$wd/all_prots.nm.fa \
 		out=SequencesProts/${I}.faa >> filterbyname.so_verbose.out 2>&1
@@ -579,7 +579,7 @@ REALIGN_ORTHOGROUP_PROTS () {
 		        cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
 		        > ./OG_names/${base}.names
 			# pulling out prot sequences based on names in orthofinder OGs
-		        filterbyname.sh include=t \
+		        filterbyname.sh -XmX60m -Xms60m include=t \
 		        names=./OG_names/${base}.names ignorejunk=t \
 		        in=$wd/all_prots.nm.fa out=./SequencesProts/${base}.faa \
 			>> $wd/logs/filterbyname.realign_prots 2>&1
@@ -631,7 +631,7 @@ PAL2NAL () {
 			cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
 	        	> ./OG_names/${base}.names
 			#pull out trans sequences for each OG
-			filterbyname.sh include=t \
+			filterbyname.sh -XmX60m -Xms60m include=t \
 	        	names=./OG_names/${base}.names \
 			in=all_trans.nm.fa out=./SequencesTrans/${base}.trans.fa \
 			>> $wd/logs/filterbyname.PAL2NAL 2>&1 # changed a "/" to ">" not sure how the code ran before...
