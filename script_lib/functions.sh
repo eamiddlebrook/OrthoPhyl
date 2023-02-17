@@ -223,7 +223,10 @@ FIX_PROTS_NAMES () {
 
 	if [ -d $prots.fixed ]
 	then
-	        if [ -d $prots.fixed.bk ]: then rm $prots.fixed.bk ; fi
+	        if [ -d $prots.fixed.bk ]
+		then
+			rm $prots.fixed.bk
+		fi
 	        mv $prots.fixed $prots.fixed.bk
 	fi
 
