@@ -25,9 +25,9 @@ else
     	export threads=4
 fi
 
-export Path_to_gits=$HOME/Path_to_gits/
+export Path_to_gits=$HOME/gits/
 #paths to externl programs
-export conda_env=orthophylo
+export conda_env=orthophyl
 export fastANI=~/apps/fastANI
 export ASTRAL_cmd="$Path_to_gits/ASTRAL/Astral/astral.5.7.8.jar"
 export catfasta2phyml_cmd="$Path_to_gits/catfasta2phyml/catfasta2phyml.pl"

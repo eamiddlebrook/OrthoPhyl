@@ -10,13 +10,21 @@
 # multifasta file names will be taken as strain/species name
 export input_genomes=$script_home/TESTER/genomes/
 export output_dir=TESTER/Workflow_test.$(date +%m-%d-%Y) # the name of the main output dir
-export store=$script_home/$output_dir/ # the full path of the main output dir
 if [[ ! -z ${threads+x} ]]
 then
         export threads
 else
 	export threads=4
 fi
+
+# lets user pick an output location of the TESTER run (will crash in singularity if output is sent to OrthoPhyl dir
+if [[ ! -z ${store+x} ]]
+then
+    	export store
+else
+    	export store=$script_home/$output_dir/ # the full path of the main output dir
+fi
+
 
 # other variables to set
 

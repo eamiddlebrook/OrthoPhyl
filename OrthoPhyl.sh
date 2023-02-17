@@ -2,19 +2,21 @@
 
 USAGE () {
 echo "
-USAGE: OrthoPhyl.sh -hgstxrA
+USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_output
 # ALL arguments are optional if set in control_file.required
 #   Many default parameters are set in control_file.defaults
 Required:
 -g	full path to genomes directiory
 -s	full path to the main directory for output
--t	threads to use
 Optional:
--c	path to a control file with required variables and any optional ones to override defaults. Will override values set on command line!
+-t	threads to use [4]
+-c	path to a control file with required variables and any optional ones to override defaults. 
+	Will override values set on command line! [NULL]
 -x	trimal paramerter string (in double "quotes")
--r	flag to rerun orthofinder on the ANI_shorlist (true/false)
--a	max number of genomes to run through OrthoFinder. If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on
--T	run test dataset [TESTER,TESTER_chloroplast]), incompatable with -g|s
+-r	flag to rerun orthofinder on the ANI_shorlist (true/[false])
+-a	max number of genomes to run through OrthoFinder. 
+	If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on [2]
+-T	run test dataset, incompatable with -g|s (TESTER,TESTER_chloroplast)
 -h	display a description and a super useful usage message
 ###############################################################\n
 To run test datasets:
@@ -22,7 +24,8 @@ To run test datasets:
 bash OrthoPhyl.sh -T TESTER -t #threads
 # Big test with ~100 orchid chloroplasts
 bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
-
+# When running through Singularity an output directory is required:
+bash OrthoPhyl.sh -T TESTER -s output_dir -t #threads
 "
 }
 
@@ -71,8 +74,6 @@ tmpfile=$(mktemp)
 declare -p > "$tmpfile"
 
 
-
-
 # import pipeline defaults (will be overridden by command line args or -c control_file)
 source $script_home/control_file.defaults
 
@@ -100,20 +101,20 @@ then
 elif [[ $TESTER = "TESTER_chloroplast" ]]
 then
 	echo "
-       	################################################
-       	#####  Testing Workflow with Control Files  ####
-       	####  and genomes from the TESTER directory  ###
-       	##########   Chloroplast Edition!!!!   ##########
+       ################################################
+       #####  Testing Workflow with Control Files  ####
+       ####  and genomes from the TESTER directory  ###
+       ##########   Chloroplast Edition!!!!   #########
 	################################################
         "
 	# NEED TO ADD COMPRESSED GENOME FILES TO TEST NEW FUNC
 	source $script_home/TESTER/control_file.user_chloroplast
-        source $script_home/control_file.defaults
-        source $script_home/control_file.paths
-        if [ -d $store ]
-        then
-                rm -r $store
-        fi
+       source $script_home/control_file.defaults
+       source $script_home/control_file.paths
+       if [ -d $store ]
+       then
+              rm -r $store
+       fi
 else
 	echo "PANIC: TESTER was set, but didnt equal 'TESTER' or 'TESTER_chloroplast'"
 fi
@@ -283,12 +284,11 @@ fi
 
 # outputs are held in:
 mkdir -p $store || exit 1
+cd $store || exit 1
+
 export genome_dir=$store/genomes
 export wd=$store/phylo_current
 export run_notes=$store/run_notes.txt
-export genome_list=($(ls $genome_dir))
-cd $store || exit 1
-
 export trans=$store/prodigal_nucls/
 export prots=$store/prodigal_prots
 export annots=$store/prodigal_annots
@@ -375,9 +375,8 @@ MAIN_PIPE () {
 #call pipe modules via the MAIN_PIPE function declared at the top of script (for convieniance)
 MAIN_PIPE
 
-echo '
+echo "
 ######################################
 Weelll it finished.  I doubt it worked
 ######################################
-'
-
+"
