@@ -293,7 +293,7 @@ ANI_species_shortlist () {
 	else
 		echo "NOTE: All fastANI output sent to file (too verbose)." 
 		echo "If you think an error occured with FastANI, please check ANI_working_dir/fastANI.stdout"
-		~/apps/fastANI \
+		$FASTANI \
 			--rl ../ANI_working_dir/genome_names \
 			--ql ../ANI_working_dir/genome_names \
 			-o ../ANI_working_dir/$ANI_out --matrix \

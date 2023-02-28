@@ -3,7 +3,7 @@
 # set these paths to match your system
 export Path_to_gits=$HOME/gits/
 #paths to externl programs
-export fastANI=~/apps/fastANI
+export FASTANI=~/apps/fastANI
 export ASTRAL_cmd="$Path_to_gits/ASTRAL/Astral/astral.5.7.8.jar"
 export catfasta2phyml_cmd="$Path_to_gits/catfasta2phyml/catfasta2phyml.pl"
 export Alignment_Assessment="$Path_to_gits/Alignment_Assessment/Alignment_Assessment_v2.py"
