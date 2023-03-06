@@ -17,7 +17,7 @@ export ortho_trial=ortho
 export orthofinder_rerun=false
 export cleanup=TRUE
 # dirs and files to remove at the end of the run (if cleanup==TRUE)
-export clean_me=($store/AlignmentTrans $store/AlignmentTrans.trm $store/phylo_current/SequencesProts $store/phylo_current/SequencesTrans $store/phylo_current/trans_gene_trees)
+export clean_me=(prodigal_prots.preDedup prodigal_nucls.preDedup phylo_current/AlignmentsTrans phylo_current/AlignmentsTrans.trm phylo_current/SequencesProts phylo_current/SequencesTrans phylo_current/trans_gene_trees)
 ###################################
 #ANI specific variables
 export ANI_shortlist=20 # max number of seqs to run through Orthofinder

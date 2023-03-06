@@ -9,6 +9,6 @@ export catfasta2phyml_cmd="$Path_to_gits/catfasta2phyml/catfasta2phyml.pl"
 export Alignment_Assessment="$Path_to_gits/Alignment_Assessment/Alignment_Assessment_v2.py"
 
 # load conda environment
-export conda_env=orthophylo
+export conda_env=orthophyl
 conda activate $conda_env
 

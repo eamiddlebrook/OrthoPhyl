@@ -13,71 +13,80 @@ SET_UP_DIR_STRUCTURE () {
 	'
 	date
 	func_timing_start
-	# set up annotation output directories
-	mkdir $store
-	mkdir $trans
-	mkdir $prots
-	mkdir $annots
 
-	#######################################################################
-	#### Make a directory for links to genomes to place in a phylogeny
-	#### fix names that contain \( or \)
-	#### Can add other chars to fix as needed
-	if [ -d $genome_dir ]
+	if [ -f $store/setup.complete ]
 	then
-	    	rm -r $genome_dir
-	fi
-	mkdir $genome_dir
-	# If genomes are gzipped, uncompress into working dir
-	if compgen -G "$input_genomes/*.gz" > /dev/null
-	then
-		for I in $(ls "${input_genomes}"/*.gz)
-		do
-			base=$(basename ${I%.*})
-			gunzip -c $I > $genome_dir/$base
-		done
-	fi
-	# make symbolic links for input genomes in $genome_dir
-	if compgen -G "$input_genomes/*.fna" > /dev/null
-	then
-	    	ln -s $input_genomes/*.fna $genome_dir/ # make links to input genome dir (should switch to cp'n all the files of m$
-	fi
-	if compgen -G "$input_genomes/*.fa" > /dev/null
-	then
-	    	ln -s $input_genomes/*.fa $genome_dir/
-	fi
-	if compgen -G "$input_genomes/*.fasta" > /dev/null
-        then
-            	ln -s $input_genomes/*.fasta $genome_dir/
-        fi
-	cd $genome_dir || exit
-	#remove parentheses from genomes names
-	#could add additional lines subbing out the "(" for the character to replace
-	for I in $(ls ./ | grep \)); do   mv $I ${I//\)/}; done
-	for I in $(ls ./ | grep \(); do   mv $I ${I//\(/}; done
-	for I in $(ls ./ | grep "_\=_" ); do mv $I ${I//_\=_} ; done
-	#make a file with the genome names for later use
-	ls > $store/genome_list
+		echo "Output folder setup seems to be already completed"
+		echo " If this is not correct please rm $store/setup.complete and restart OrthoPhyl"
+	else
+		# set up annotation output directories
+		mkdir $store
+		mkdir $trans
+		mkdir $prots
+		mkdir $annots
+
+		#######################################################################
+		#### Make a directory for links to genomes to place in a phylogeny
+		#### fix names that contain \( or \)
+		#### Can add other chars to fix as needed
+		if [ -d $genome_dir ]
+		then
+		    	rm -r $genome_dir
+		fi
+		mkdir $genome_dir
+		# If genomes are gzipped, uncompress into working dir
+		if compgen -G "$input_genomes/*.gz" > /dev/null
+		then
+			for I in $(ls "${input_genomes}"/*.gz)
+			do
+				base=$(basename ${I%.*})
+				gunzip -c $I > $genome_dir/$base
+			done
+		fi
+		# make symbolic links for input genomes in $genome_dir
+		if compgen -G "$input_genomes/*.fna" > /dev/null
+		then
+		    	ln -s $input_genomes/*.fna $genome_dir/ # make links to input genome dir (should switch to cp'n all the files of m$
+		fi
+		if compgen -G "$input_genomes/*.fa" > /dev/null
+		then
+		    	ln -s $input_genomes/*.fa $genome_dir/
+		fi
+		if compgen -G "$input_genomes/*.fasta" > /dev/null
+	        then
+	            	ln -s $input_genomes/*.fasta $genome_dir/
+	        fi
+		cd $genome_dir || exit
+		#remove parentheses from genomes names
+		#could add additional lines subbing out the "(" for the character to replace
+		for I in $(ls ./ | grep \)); do   mv $I ${I//\)/}; done
+		for I in $(ls ./ | grep \(); do   mv $I ${I//\(/}; done
+		for I in $(ls ./ | grep "_\=_" ); do mv $I ${I//_\=_} ; done
+		#make a file with the genome names for later use
+		ls > $store/genome_list
 
 
-	echo "Building phylogeny for $(cat $store/genome_list | wc -l) genomes" | tee -a $run_notes
-	export min_num_orthos=$(printf %.0f $(echo "$(cat $store/genome_list | wc -l)*$min_frac_orthos" | bc))
-	echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with ASTRAL and RAxML" | tee -a $run_notes
-	#############################
-	#############################
+		echo "Building phylogeny for $(cat $store/genome_list | wc -l) genomes" | tee -a $run_notes
+		export min_num_orthos=$(printf %.0f $(echo "$(cat $store/genome_list | wc -l)*$min_frac_orthos" | bc))
+		echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with ASTRAL and RAxML" | tee -a $run_notes
+		#############################
+		#############################
 
-	mkdir $wd
-	cd $wd || exit
-	mkdir AlignmentsProts/
-	mkdir AlignmentsTrans/
-	mkdir AlignmentsTrans.trm/
-	mkdir AlignmentsTrans.trm.nm/
-	mkdir SequencesTrans/
-	mkdir SequencesProts/
-	mkdir OG_names/
-	mkdir RAxMLtrees/
-	mkdir SpeciesTree
-	mkdir logs
+		mkdir $wd
+		cd $wd || exit
+		mkdir AlignmentsProts/
+		mkdir AlignmentsTrans/
+		mkdir AlignmentsTrans.trm/
+		mkdir AlignmentsTrans.trm.nm/
+		mkdir SequencesTrans/
+		mkdir SequencesProts/
+		mkdir OG_names/
+		mkdir RAxMLtrees/
+		mkdir SpeciesTree
+		mkdir logs
+
+		touch $store/setup.complete
+	fi
 }
 
 
@@ -163,28 +172,37 @@ CHECK_GENOME_QUALITY () {
 	# Some kinda filtering....
 }
 
-DEDUP_annot_prots () {
+DEDUP_annot_trans () {
         echo "
-	##############################
-        #### RUNNING prot dedupe ####
-        ##############################
+	###################################
+        #### RUNNING annotation dedupe ####
+        ###################################
 	"
-	indir=$prots
-	identity=99.8
+
+	trans=$trans
+	prots=$prots
+	identity=99.9
         cd $store || exit
 	if [ -f $store/dedupe.complete ]
        	then
             	echo "Dedupe previously completed."
                 echo "if rerun is desired, delete $store/dedupe.complete"
 	else
-		mkdir $prots.preDedup
-		mv $prots/*.faa $prots.preDedup/
+		mkdir $trans.preDedup || exit 1
+		mv $trans/*.f*a $trans.preDedup/
+		mkdir $prots.preDedup || exit 1
+        	mv $prots/*.f*a $prots.preDedup/
 		:> dedupe.stats
-		for I in $(ls $prots.preDedup/*.faa)
+		:> dedupe.stats_long
+		for I in $(ls $trans.preDedup/*.f*a)
 		do
 			base=$(basename ${I%.*})
 			echo $base >> dedupe.stats
-			bash dedupe.sh -Xmx1g -Xms1g in=$I out=$prots/$base.faa --amino minidentity=99.9 2>&1 | grep 'Input\|Result'  >> dedupe.stats
+			bash dedupe.sh -Xmx1g -Xms1g in=$I out=$trans/$base.fna minidentity=99.9 2>&1 | grep 'Input\|Result'  \
+				>> dedupe.stats
+			cat $trans/$base.fna | grep ">" | sed 's/>//g' > $trans/$base.deduped.names
+			filterbyname.sh -Xmx1g -Xms1g --amino include=true in=$prots.preDedup/$base.faa out=$prots/$base.faa names=$trans/$base.deduped.names \
+				>> dedupe.stats_long 2>&1
 		done && touch dedupe.complete
 	fi
 }
@@ -255,8 +273,6 @@ ANI_species_shortlist () {
 	date
 	func_timing_start
 
-
-	which bash
 	# set variables
 	#   the mygenome_list stuff is to deal with passing array variable to function
 	local genome_dir=$1
@@ -270,10 +286,7 @@ ANI_species_shortlist () {
 	ANI_out=ANI_out
 
 	mkdir $prots.shortlist/
-
-	# iterate over genome_list to do all pairwise ANI analyses and put into a matrix
-	# this iteration is pretty dumb, could use indecies directly...I are dumb
-	# switching to use fastANI directly for a list vs list comparison
+	# use fastANI directly for a list vs list comparison
 	# it might do all pairwise comparisons (self and other half of matrix)
 	# but testing showed it was way faster then doing it single threaded
 	# and making my script parallel would be a huge pain in the arse
@@ -741,7 +754,7 @@ ALIGNMENT_STATS () {
 	# run modified R script to auto-generate pdf figures
 	Rscript $script_home/Rscripts/Alignment_Assessment_vis.R \
 		Master_Alignment_Assessment.txt \
-		num_genes_per_taxa.tsv
+		num_genes_per_taxa.tsv > verbose_log.txt
 }
 
 SCO_MIN_ALIGN () {
@@ -795,9 +808,10 @@ SCO_MIN_ALIGN () {
 	echo "Concatenating fasta alignments to phylip format"
 	cd $wd/SpeciesTree/ || exit
 	perl $catfasta2phyml_cmd -c ../OG_SCO_$min_num_orthos.align/*.fa \
-	> SCO_$min_num_orthos.codon_aln.trm.sco.nm.phy
+	1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.phy 2>> $store/verbose_log.txt
+	echo "Concatenating fasta alignments to fasta format"
 	perl $catfasta2phyml_cmd -f -c ../OG_SCO_$min_num_orthos.align/*.fa \
-        > SCO_$min_num_orthos.codon_aln.trm.sco.nm.fa
+        1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
 }
 
 #####################################
@@ -852,9 +866,9 @@ SCO_strict () {
 	#cat SCO_strict nuc alignments
 	cd $wd/SpeciesTree/ || exit
 	perl $catfasta2phyml_cmd -c $wd/OG_SCO_strict.align/*.fa \
-	> SCO_strict.codon_aln.trm.sco.nm.phy
+	1> SCO_strict.codon_aln.trm.sco.nm.phy 2>> $store/verbose_log.txt
 	perl $catfasta2phyml_cmd -f -c $wd/OG_SCO_strict.align/*.fa \
-        > SCO_strict.codon_aln.trm.sco.nm.fa
+        1> SCO_strict.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
 }
 
 
@@ -1049,7 +1063,7 @@ astral_TransGENE2SPECIES_TREE () {
 	# use iqtree or fasttree (or both)
 	for method in $gene_tree_methods
 	do
-		concat_tree_method=$concat_trees.${method}.tree
+		concat_tree_method=$concat_trees.${method}.trees
 		astral_tree=${base_list}.${method}.astral.tree
 		#remove concatenated tree file if it exists.
 		if [ -f $concat_tree_method ]
@@ -1083,7 +1097,7 @@ astral_TransGENE2SPECIES_TREE () {
 		cd $wd/$out_dir || exit
 		java -jar $ASTRAL_cmd \
 		-i $concat_tree_method \
-		-o $astral_tree > $astral_tree.log
+		-o $astral_tree 2>&1 >> $astral_tree.log
 	done
 }
 
@@ -1100,10 +1114,23 @@ WRAP_UP () {
 	if [[ $cleanup == "TRUE" ]]
 	then
 		# remove files and dirs. $clean_me declared in control files
-		rm -r "${clean_me[*]}"
+		mkdir $store/tmp_trash || exit
+		for I in ${clean_me[*]}
+		do
+			mv $store/$I $store/tmp_trash
+		done
+		rm -r $store/tmp_trash
 	fi
 	# but keep AlignmentTrans.trm.nm ans AlignemntProt
 	# gather all SpeciesTrees in one place?
+	echo '
+	#######################################################
+        ########## Moving final species trees to  #############
+        ###########  $store/FINAL_SPECIES_TREES ###############
+	#####   And running a Generalized RF comparison  ######
+        #######################################################
+	'
+
 	mkdir $store/FINAL_SPECIES_TREES
 	cp $wd/SpeciesTree/*.tree $store/FINAL_SPECIES_TREES
 	cp $wd/astral_trees/*.tree $store/FINAL_SPECIES_TREES

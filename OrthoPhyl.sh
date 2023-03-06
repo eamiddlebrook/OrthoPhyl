@@ -281,7 +281,7 @@ cd $store || exit 1
 export genome_dir=$store/genomes
 export wd=$store/phylo_current
 export run_notes=$store/run_notes.txt
-export trans=$store/prodigal_nucls/
+export trans=$store/prodigal_nucls
 export prots=$store/prodigal_prots
 export annots=$store/prodigal_annots
 
@@ -312,7 +312,7 @@ MAIN_PIPE () {
 	export ANI=false
 	SET_UP_DIR_STRUCTURE
 	PRODIGAL_PREDICT $genome_dir
-	DEDUP_annot_prots
+	DEDUP_annot_trans
 	FIX_TRANS_NAMES $trans
 	FIX_PROTS_NAMES $prots
 	# find subset of genomes ($ANI_shortlist) that represents diversity of full set
