@@ -56,7 +56,7 @@ source $script_home/script_lib/bash_utils_and_aliases.sh
 
 # if not in a singularity or docker container, grab the "conda init" section of .bash_profile or .bashrc 
 #    and import paths to external programs and the conda environment
-if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ $(cat /proc/1/environ | grep -qa '^container=' | wc -c) -ne 0 ]]
+if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]]
 then
     source $HOME/.bash_profile
     source $HOME/.bashrc

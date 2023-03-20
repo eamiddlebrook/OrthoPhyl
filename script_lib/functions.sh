@@ -128,6 +128,7 @@ PRODIGAL_PREDICT () {
 			echo "$genome"
 		fi
 	done | \
+	echo "apples"
 	parallel -j $threads my_func \
 
 }
