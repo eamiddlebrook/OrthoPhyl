@@ -106,30 +106,30 @@ PRODIGAL_PREDICT () {
 	cd $local_genome_dir || exit
 	# need to switch this to use genome_list...it creates a bunch of *.suffix files if either .fna or .fa files are absent
 
-	# declare annotation function to pass to parrallel
-	my_func () {
-               	prodigal $prodigal_options \
-                -i ${1} \
-                -o $annots/${1%.*}.genes \
-                -a $prots/${1%.*}.faa \
-                -d $trans/${1%.*}.fna \
-               	&& touch $annots/${1%.*}.complete
-       	}
-       	export -f my_func
-	which my_func
-	# enumerate list of genomes to annotate (pipe to parallel)
+	
+	# enumerate list of genomes to annotate, wait if $threads are already running
+	
 	for genome in $(ls $local_genome_dir)
 	do
+		if test "$(jobs | wc -l)" -ge $threads; then
+		        wait -n
+		fi
 		if [ -f $annots/"${genome%.*}".complete ]
 		then
 			echo "${genome%.*} already annotated"\
 			> $annots/notes
 		else
-			echo "$genome"
+			{
+			prodigal $prodigal_options \
+			 -i ${genome} \
+			 -o $annots/${genome%.*}.genes \
+			 -a $prots/${genome%.*}.faa \
+			 -d $trans/${genome%.*}.fna \
+			 && touch $annots/${genome%.*}.complete
+			} &
 		fi
-	done | \
-	parallel -j $threads my_func \
-
+	done 
+	wait
 }
 
 CHECK_GENOME_QUALITY () {
@@ -196,6 +196,10 @@ DEDUP_annot_trans () {
 		:> dedupe.stats_long
 		for I in $(ls $trans.preDedup/*.f*a)
 		do
+			if test "$(jobs | wc -l)" -ge $threads; then
+			        wait -n
+			fi
+			{
 			base=$(basename ${I%.*})
 			echo $base >> dedupe.stats
 			bash dedupe.sh -Xmx1g -Xms1g in=$I out=$trans/$base.fna minidentity=99.9 2>&1 | grep 'Input\|Result'  \
@@ -203,7 +207,10 @@ DEDUP_annot_trans () {
 			cat $trans/$base.fna | grep ">" | sed 's/>//g' > $trans/$base.deduped.names
 			filterbyname.sh -Xmx1g -Xms1g --amino include=true in=$prots.preDedup/$base.faa out=$prots/$base.faa names=$trans/$base.deduped.names \
 				>> dedupe.stats_long 2>&1
+			} &
+
 		done && touch dedupe.complete
+		wait
 	fi
 }
 
@@ -449,34 +456,37 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 	K=0
 		for I in $(cat $input_list)
 		do
+			if test "$(jobs | wc -l)" -ge $threads; then
+			        wait -n
+			fi
+			
 			# Progress sent to stdout
 			if [ $(((J + K) % percent)) -eq 0 ]
 			then
 				echo $(((J+K)/percent*10))" percent of the way through the hmm search"
 			fi
-			# run the OG_hmm_search module for each alignments found in $alignments_TMP
-			#  if number of taxa in alignment is gt $ANI_shortlist_min_OGs
-			# outer if statement avoids errors from reps>1
-			#  where some cat $input_list are not in alignments because of filtering
-			if [ -f $alignments_TMP/${I}.fa ]
-			then
-				if [ $(cat $alignments_TMP/${I}.fa | grep -e ">" | sort | uniq | wc -l) -ge $ANI_shortlist_min_OGs ]
+				# run the OG_hmm_search module for each alignments found in $alignments_TMP
+				#  if number of taxa in alignment is gt $ANI_shortlist_min_OGs
+				# outer if statement avoids errors from reps>1
+				#  where some cat $input_list are not in alignments because of filtering
+				if [ -f $alignments_TMP/${I}.fa ]
 				then
-					OG_hmm_search $outdir $alignments_TMP $all_prots &
-					# count actual jobs runnin gin background
-					J=$((J+1))
+					if [ $(cat $alignments_TMP/${I}.fa | grep -e ">" | sort | uniq | wc -l) -ge $ANI_shortlist_min_OGs ]
+					then
+						OG_hmm_search $outdir $alignments_TMP $all_prots &
+						# count actual jobs runnin gin background
+						J=$((J+1))
+					else
+						# count inputs that are skipped (for % complete counter)
+						K=$((K+1))
+					fi
 				else
-					# count inputs that are skipped (for % complete counter)
-					K=$((K+1))
+	                                # count inputs that are skipped (for % complete counter)
+	                                K=$((K+1))
 				fi
-			else
-                                # count inputs that are skipped (for % complete counter)
-                                K=$((K+1))
-			fi
-			if [ $(($J % $threads)) -eq 0 ]
-			then
-				wait
-			fi
+				
+
+			
 		done
 		wait
 
