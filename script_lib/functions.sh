@@ -116,7 +116,7 @@ PRODIGAL_PREDICT () {
                	&& touch $annots/${1%.*}.complete
        	}
        	export -f my_func
-
+	which my_func
 	# enumerate list of genomes to annotate (pipe to parallel)
 	for genome in $(ls $local_genome_dir)
 	do
@@ -128,7 +128,6 @@ PRODIGAL_PREDICT () {
 			echo "$genome"
 		fi
 	done | \
-	echo "apples"
 	parallel -j $threads my_func \
 
 }
