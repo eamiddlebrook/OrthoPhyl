@@ -11,7 +11,7 @@ conda create -n gather_genomes \
 checkm-genome bbmap entrez-direct ncbi-datasets-cli 
 "
 
-conda activate gather_genomes
+conda activate gather_genomes || exit
 
 #proxy-work
 
@@ -48,17 +48,17 @@ echo "Output will be in $wd"
 #######################################################
 # comment out function calls ass needed
 main () {
-	#get_NCBI_genomes
-	#filter_NCBI_genomes
-	#get_asm_metadata
-	#get_non_datasets_assemblies
-	#get_all_asm_list
-	#get_biosample_GEOdata
-	#merge_metadata_geoloc
-	#all_sample_metadata
-	#aggregate_assemblies "$wd"/assemblies_all.TMP
+	get_NCBI_genomes
+	filter_NCBI_genomes
+	get_asm_metadata
+	get_non_datasets_assemblies
+	get_all_asm_list
+	get_biosample_GEOdata
+	merge_metadata_geoloc
+	all_sample_metadata
+	aggregate_assemblies "$wd"/assemblies_all.TMP
 	#filter_asm_by_taxCheck
-	#get_stats_with_checkM "$wd"/assemblies_all.TMP/ $wd/checkM_out genome fna
+	get_stats_with_checkM "$wd"/assemblies_all.TMP/ $wd/checkM_out genome fna
 	###get_asm_stats # bbmap stats superseded by checkm
 	filter_asm_by_stats $MIN_LEN $MAX_LEN $MIN_N50 $MIN_GC $MAX_GC $MAX_dup $MIN_completeness $MAX_contam
 	get_all_asms_to_remove
