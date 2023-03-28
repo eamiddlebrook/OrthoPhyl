@@ -15,11 +15,14 @@
 ### Dependencies
 #### Either docker or Singularity to run a prebuilt container
 ```
+singularity_images=~/singularity_images/
+mkdir ${singularity_images}
+cd ${singularity_images}
 singularity pull library://earlyevol/default/orthophyl
 ```
 Congradulations! You can skip down to install testing!
 
-#### OR install these dependencies with the instructions bellow.
+#### OR install OrthoPhyl and these dependencies with the instructions bellow.
 + prodigal 
 + orthofinder 
 + bbmap
@@ -39,12 +42,30 @@ Congradulations! You can skip down to install testing!
 + Alignment_Assessment
 
 *depending on tree method used
-### Conda/mamba installable dependencies
-#### If you need to install conda or mamba we recomend mamba:
+
+### Clone the Orthophylo repo, set up control files and run short* test
+Cloning takes a minute because of the large test files
 ```
-cd {path_to_downloads}
+Path_to_gits=~/gits
+mkdir ~/$Path_to_gits
+cd ~/$Path_to_gits/
+git clone https://github.com/eamiddlebrook/OrthoPhyl.git
+cd OrthoPhyl
+```
+
+
+### Conda/mamba installable dependencies
+#### If you need to install conda or mamba we recomend mamba, however the commands are exactly the same (exept running the intall)
+```
+cd ~/Downloads/ # or wherever you want to put the installer
 wget https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-Linux-x86_64.sh
 bash Mambaforge-Linux-x86_64.sh
+```
+#### OR
+```
+cd ~/Downloads/ # or wherever you want to put the installer
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
 ```
 #### Follow on screen instructions
 Set up auto initialize. If you don't, it is up to you to figure out how to make the script happy with your decision, you can also run:
@@ -55,19 +76,18 @@ mamba init bash
 ### Create conda environment and install dependencies
 #### It is highly recomended that you create an separate environment for this install. Might take some time....
 ```
-mamba create -n orthophyl --file orthophyl_env.XXX.txt
+mamba create -n orthophyl --file ~/{Path_to_gits/OrthoPhyl/orthophyl_env.XXX.txt
 ```
-#### OR
+#### OR you can install different versions if neccessary
 ```
 mamba create -n orthophyl -c bioconda -c conda-forge \
 git prodigal=2.6.3 orthofinder=2.5.4 \
 bbmap=39.01 fasttree=2.1.11 hmmer=3.3.2 pal2nal=14.1 \
-prodigal ete3 raxml=8.2.12 trimal=1.4.1 \
+ete3 raxml=8.2.12 trimal=1.4.1 \
 parallel=20160622 r-essentials=4.1
 ```
-#### Sometimes R (r-essentials) can be a pain. If it is causing problems with the conda install, remove it and install manually:
+#### Sometimes R (r-essentials) can be a pain. If it is causing problems with the conda/mamba install, remove it and install manually:
 #### Go to https://cran.r-project.org/mirrors.html and pick an appropriate mirror. Then chose the linux distro you are using, download package files, and follow install instructions.
-
 
 #### To allow conda changes to take effect:
 ```
@@ -87,20 +107,20 @@ Rscript --help
 ### Other dependencies
 This reflects how I like to organize my machine, pick what works for you. The control_file.paths reflects this setup. If you choose to install the bellow packages in different locations, just change control_file.paths to reflect this.
 ```
-Path_to_gits=~/gits
-mkdir ~/$Path_to_gits
-cd ~/$Path_to_gits/
+cd ~/${Path_to_gits}/
+# Install ASTRAL
 git clone https://github.com/smirarab/ASTRAL.git
 cd ASTRAL
 unzip Astral.5.7.8.zip #change to curren version if needed
 
-cd ~/$Path_to_gits/
+cd ~/${Path_to_gits}/
 git clone https://github.com/nylander/catfasta2phyml.git
 git clone https://github.com/dportik/Alignment_Assessment.git
 cd Alignment_Assessment/
 # convert script to python3
 2to3 -w Alignment_Assessment_v2.py 
 
+# install fastANI
 cd ~/Downloads
 wget https://github.com/ParBLiSS/FastANI/releases/download/v1.33/fastANI-Linux64-v1.33.zip
 unzip fastANI-Linux64-v1.33.zip
@@ -111,15 +131,7 @@ mkdir ~/apps/
 mv fastANI ~/apps/ # or anywhere else you would like to put it. Change control_file.required to reflect path
 ```
 
-### Clone the Orthophylo repo, set up control files and run short* test
-
-Cloning takes a minute because of the large test files
-```
-cd ~/$Path_to_gits/
-git clone https://github.com/eamiddlebrook/OrthoPhyl.git
-cd OrthoPhyl
-```
-### Edit control_file.paths to reflect system specific locations and conda environment name
+### Edit ```~/${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name
 
 ## Test install
 ### Test Singularity container
@@ -177,6 +189,17 @@ bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
 # When running through Singularity an output directory is required:
 bash OrthoPhyl.sh -T TESTER -s output_dir -t #threads 
 
+```
+### Example:
+#### Run OrthoPhyl on assemblies in ~/Projects/ASMS/ecoli/ using 12 cores within singularity and place all results and intermediate files in ~/Projects/phylogenetics/ecoli/
+```
+
+singularity run ${singularity_images}/OrthoPhyl.0.9.3.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
+
+```
+#### Run the same OrthoPhyl command from the manual install
+```
+bash OrthoPhyl.sh 
 ```
 
 
