@@ -5,7 +5,7 @@
 #### The software is available through a GLPv3 open source licence. 
 ####
 #### This software is designed to generate phylogenetic trees from bacterial genome assemblies. While many methods use whole genome alignments to generate informative sites to base tress on, OrthoPhyl annotates bacterial genes, identifies orthologous sequences, aligns related proteins to inform transcript alignments, then builds species trees with two methods. The first is a conventional gene concatenation and ML tree estemation method. The second attempts to reconcile gene trees with a unified species tree using quartets (ASTRAL). Both methods allow filtering of gene lists on number of species represented, length, and gappiness in order to tune signal-to-noise ratio for tree estimation. 
-#### The main advantages of this software pipeline are three fold: 1) It extends the evolutionary distance input species can represent (over whole genome alignment and k-mer methods) while maintaining phylogenetic resolution, 2) this software is designed to be very user friendly, requiring mostly "conda" install-able dependencies and just a single input directory of genomes for which to reconstruct the evolutionary history (singularity and Docker images are now available) and 3) this pipleline is amenable to estimating trees for 1000s of bacterial genome assemblies. To handle large numbers of genomes, the pipline calculates a diversity-representing subset of genomes to run orthofinder on, then expands the OrthoGroups to all samples with HMM searches.
+#### The main advantages of this software pipeline are three fold: 1) It extends the evolutionary distance input species can represent (over whole genome alignment and k-mer methods) while maintaining phylogenetic resolution, 2) this software is designed to be very user friendly, requiring just a single to estimate trees from a directory of assemblies. Additionally a Singularity image is now available to avoid dependancy hell and 3) this pipleline is amenable to estimating trees for 1000s of bacterial genome assemblies. To handle large numbers of genomes, the pipline calculates a diversity-representing subset of genomes to run orthofinder on, then expands the found OrthoGroups to all assemblies with iterative HMM searches.
 
 
 # Getting Started
@@ -20,7 +20,7 @@ mkdir ${singularity_images}
 cd ${singularity_images}
 singularity pull library://earlyevol/default/orthophyl
 ```
-Congradulations! You can skip down to install testing!
+Congradulations! You can skip down to testing the install!
 
 #### OR install OrthoPhyl and these dependencies with the instructions bellow.
 + prodigal 
@@ -43,7 +43,7 @@ Congradulations! You can skip down to install testing!
 
 *depending on tree method used
 
-### Clone the Orthophylo repo, set up control files and run short* test
+### Clone the Orthophylo repo
 Cloning takes a minute because of the large test files
 ```
 Path_to_gits=~/gits
@@ -131,10 +131,11 @@ mkdir ~/apps/
 mv fastANI ~/apps/ # or anywhere else you would like to put it. Change control_file.required to reflect path
 ```
 
-### Edit ```~/${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name
+### Edit ```~/${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
 
 ## Test install
 ### Test Singularity container
+You must specify an output directory (-s) if running through singularity, because the script will try to write directly to the container (wont work)
 ```
 singularity run ${singularity_images}/OrthoPhyl.0.9.3.sif -T TESTER_chloroplast -s ./tester_chloroplast_output -t 4
 ```
@@ -187,7 +188,7 @@ bash OrthoPhyl.sh -T TESTER -t #threads
 # Big test with ~100 orchid chloroplasts
 bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
 # When running through Singularity an output directory is required:
-bash OrthoPhyl.sh -T TESTER -s output_dir -t #threads 
+singularity run ${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads 
 
 ```
 ### Example:
@@ -199,7 +200,8 @@ singularity run ${singularity_images}/OrthoPhyl.0.9.3.sif -g ~/Projects/ASMS/eco
 ```
 #### Run the same OrthoPhyl command from the manual install
 ```
-bash OrthoPhyl.sh 
+bash OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
+
 ```
 
 
@@ -244,6 +246,7 @@ This appeared to be a problem with wget, which was resolved by updating through 
 + DONE: add assembly filtering, now very incomplete assemblies will be used, so the number of strict single copy orthologs could be drastically reduced (maybe to zero). Filtering done with gather_filter_asm
 + DONE: Quantify phylogenetic info per gene (https://github.com/dportik/Alignment_Assessment.git)
 + Check genome assembly file not empty at start of Main pipeline....will crash pipe at Orthofinder run. This happened because of a file transfer mishap for me :( 
++ All ow users to submit pre-annotated assemblies. This will open up OrthoPhyl to all taxa (after making sure all software is compatable with alternative codon tables)
 + Test evolutionary models of genes with ete3. Then test GO enrichment, AMR, Virulence genes
 + Look at tree wide paralog numbers. Do GO analysis...
 + Identify HGT from Transcript alignments. HGTs specific to any group?
