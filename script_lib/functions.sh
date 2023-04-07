@@ -900,10 +900,15 @@ TREE_BUILD () {
 	cd $output_dir || exit
 	# subfunction to run RAxml
 	RAxML_run () {
+		mkdir raxml
+		cd raxml
 		raxmlHPC-PTHREADS $RAxML_speciestree_options \
 		-s $input_alignment \
 		-n ${output_name} \
 		> ./RAxML_output.1 2>&1
+		treefile=$(ls RAxML_bipartitionsBranchLabels*)
+		mv $treefile ../${treefile}.tree
+
 	}
 	# subfuncton to run FastTreeMP
 	FASTTREE_run () {
