@@ -916,24 +916,42 @@ TREE_BUILD () {
 		> ./fastTree_log.${output_name} 2>&1
 	}
 	IQTREE_run () {
+		mkdir iqtree
+		cd iqtree
 		iqtree2 -s $input_alignment \
-		--prefix iqtree.${output_name}.tree \
-		-T $threads --seed 1234
+		--prefix iqtree.${output_name} \
+		-T $threads --seed 1234 > iqtree.long_log
+		treefile=$(ls *.treefile)
+		mv $treefile ../${treefile%.*}.tree
+		cd ../
+
 	}
 
 	# decide which tree method to use for the cancatenate gene nuc matrix
+	
+
 	if [[ " ${tree_method[*]} " =~ " raxml " ]]
 	then
+		echo "################################"
+		echo "Building species tree with RAxML"
+		echo "################################"
 		RAxML_run
-	elif [[ " ${tree_method[*]} " =~ " fasttree " ]]
-	then
-		FASTTREE_run
-	elif [[ " ${tree_method[*]} " =~ " iqtree " ]]
-	then
-		IQTREE_run
-	else
-		echo "Species tree estemation from $input_alignment (concatenated genes) not done; tree_method not set to either fasttree, raxml, or iqtree"
 	fi
+	if [[ " ${tree_method[*]} " =~ " fasttree " ]]
+	then
+		echo "###################################"
+		echo "Building species tree with FastTree"
+		echo "###################################"
+		FASTTREE_run
+	fi
+	if [[ " ${tree_method[*]} " =~ " iqtree " ]]
+	then
+		echo "#################################"
+		echo "Building species tree with IQtree"
+		echo "#################################"
+		IQTREE_run
+	fi
+	
 }
 
 orthofinderGENE2SPECIES_TREE () {

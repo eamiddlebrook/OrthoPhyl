@@ -10,6 +10,8 @@ Required:
 -s	full path to the main directory for output
 Optional:
 -t	threads to use [4]
+-p     phylogenetic tree software to use [fasttree, raxml, and/or iqtree] 
+	i.e. -p "fasttree iqtree"
 -c	path to a control file with required variables and any optional ones to override defaults. 
 	Will override values set on command line! [NULL]
 -x	trimal paramerter string (in double "quotes")
@@ -106,8 +108,24 @@ then
         then
               rm -r $store
         fi
+elif [[ $TESTER = "TESTER_fasttest" ]]
+then
+	echo "
+        ################################################
+        #####  Testing Workflow with Control Files  ####
+        ####  and genomes from the TESTER directory  ###
+        ##########   fasttest Edition!!!!   #########
+	################################################
+        "
+	# NEED TO ADD COMPRESSED GENOME FILES TO TEST NEW FUNC
+	source $script_home/TESTER/control_file.user_fasttest
+	if [ -d $store ]
+       then
+              rm -r $store
+       fi
 else
-	echo "PANIC: TESTER was set, but didnt equal 'TESTER' or 'TESTER_chloroplast'"
+	echo "PANIC: TESTER was set, but didnt equal 'TESTER' or 'TESTER_chloroplast'" 
+	exit
 fi
 }
 
@@ -153,11 +171,22 @@ while [[ $N -lt $L ]] ; do
           ARGS_SET+=s
           shift ;;
 
+     'p') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+            USAGE 
+            exit 1 
+          fi
+          tree_method=(${2})
+          echo "#####"
+          echo ${2}
+          echo "#####"
+          ARGS_SET+=p
+          shift ;;
+
      't') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
             USAGE
             exit 1
           fi
-          threads=${2}
+          threads="${2}"
           ARGS_SET+=t
           shift ;;
 
@@ -241,6 +270,15 @@ then
 
 fi
 
+# test if "-p tree_method" is set correctly
+if [[ " ${tree_method[*]} " =~ " raxml " ]] || [[ " ${tree_method[*]} " =~ " fasttree " ]] || [[ " ${tree_method[*]} " =~ " iqtree " ]]
+then
+	echo Running $tree_method to generate Species trees
+else
+	echo "Species tree estemation from $input_alignment (concatenated genes) not done; tree_method not set to either fasttree, raxml, and/or iqtree"
+	USAGE
+	exit 1
+fi
 
 # print all variables set up to this point
 echo "
@@ -266,7 +304,7 @@ else
 	echo ""
 	echo "##########################################"
 	echo "  setting variable found in $control_file"
-	echo "   This will overright any args set on the command line"
+	echo "   This will overwrite any args set on the command line"
 	echo "##########################################"
 		echo ""
 	source $control_file || exit 1
