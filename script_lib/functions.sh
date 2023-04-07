@@ -908,6 +908,7 @@ TREE_BUILD () {
 		> ./RAxML_output.1 2>&1
 		treefile=$(ls RAxML_bipartitionsBranchLabels*)
 		mv $treefile ../${treefile}.tree
+		cd $output_dir || exit
 
 	}
 	# subfuncton to run FastTreeMP
@@ -928,7 +929,7 @@ TREE_BUILD () {
 		-T $threads --seed 1234 > iqtree.long_log
 		treefile=$(ls *.treefile)
 		mv $treefile ../${treefile%.*}.tree
-		cd ../
+		cd $output_dir || exit
 
 	}
 
