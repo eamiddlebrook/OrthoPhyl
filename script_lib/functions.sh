@@ -1012,14 +1012,14 @@ allTransGENE_TREEs () {
 		        #raxmlHPC-PTHREADS -T $threads -s $wd/AlignmentsTrans.trm/${base}.codon_aln.trm.fa \
 			#-n ${base}.tree -m GTRGAMMA
 		        #>> ./RAxML_output.tmp
-        		if [[ " ${tree_method[*]} " =~ " fasttree " ]]
+        		if [[ " ${gene_tree_methods[*]} " =~ " fasttree " ]]
         		then
 				fasttree -gtr -quiet -gamma \
 				-nt $wd/AlignmentsTrans.trm/${base}.codon_aln.trm.fa \
 				> ./${base}.fasttree.tree
 				cat ./${base}.fasttree.tree | sed 's/@[^:]*:/:/g' \
 				> $wd/trans_gene_trees.nm/${base}.fasttree.tree
-			elif [[ " ${tree_method[*]} " =~ " iqtree " ]]
+			elif [[ " ${gene_tree_methods[*]} " =~ " iqtree " ]]
 			then
 				iqtree -s $wd/AlignmentsTrans.trm/${base}.codon_aln.trm.fa \
 				--prefix ${base} -T 1 > ${base}.iqtree.log
@@ -1027,7 +1027,8 @@ allTransGENE_TREEs () {
 				cat ./${base}.iqtree.tree | sed 's/@[^:]*:/:/g' \
 				> $wd/trans_gene_trees.nm/${base}.iqtree.tree
 			else
-			echo "Gene tree estemation from gene alignemtns not done; gene_tree_method not set to either fasttree, raxml or iqtree"
+			echo "Gene tree estemation from gene alignemtns not done; gene_tree_method not set to either fasttree, raxml or iqtree" 
+			exit 1
         		fi
 		}
 
