@@ -372,11 +372,11 @@ MAIN_PIPE () {
 	if [ $annots_provided = "TRUE" ]
 	then	
 		#move provided prots and trans to thier respecive folders
-		for I in ls $input_prots/
+		for I in $(ls $input_prots/)
 		do
  			cp $input_prots/${I}   $prots/${I%.*}.faa || exit
  		done
- 		for I in ls $input_trans/
+ 		for I in $(ls $input_trans/)
 		do
  			cp $input_trans/${I}   $prots/${I%.*}.fna || exit
  		done
