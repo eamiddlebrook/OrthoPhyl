@@ -6,18 +6,21 @@ USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_out
 # ALL arguments are optional if set in control_file.required
 #   Many default parameters are set in control_file.defaults
 Required:
--g	full path to genomes directiory
--s	full path to the main directory for output
+-g	path to genomes directiory
+or
+-a	paths to protien and transcript directories. 
+       They should be delared as \"-a path_to_protien_dir,path_to_transcript_dir\"
+-s	path to the main directory for output
 Optional:
 -t	threads to use [4]
 -p     phylogenetic tree software to use [fasttree, raxml, and/or iqtree] 
-	i.e. -p "fasttree iqtree"
+	i.e. -p \"fasttree iqtree\"
 -c	path to a control file with required variables and any optional ones to override defaults. 
 	Will override values set on command line! [NULL]
--x	trimal paramerter string (in double "quotes")
+-x	trimal paramerter string (in double \"quotes\")
 -r	flag to rerun orthofinder on the ANI_shorlist (true/[false])
--a	max number of genomes to run through OrthoFinder. 
-	If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on [2]
+-n	max number of genomes to run through OrthoFinder. 
+	If more than this many assemblies are provided, a subset of genomes will be chosen for OrthoFinder to chew on [20]
 -T	run test dataset, incompatable with -g|s (TESTER,TESTER_chloroplast)
 -h	display a description and a super useful usage message
 ###############################################################\n
@@ -156,6 +159,7 @@ while [[ $N -lt $L ]] ; do
             exit 1
           fi
           input_genomes="$( cd "$(relative_absolute ${2})" && pwd )"
+          genomes_provided="TRUE"
           if [[ ! -d "${input_genomes}" ]]; then
             echo "WARNING: -g declaring an input genome directory that does not exist...maybe check on that"
             exit 1
@@ -180,6 +184,25 @@ while [[ $N -lt $L ]] ; do
           echo ${2}
           echo "#####"
           ARGS_SET+=p
+          shift ;;
+
+     'a') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
+            USAGE
+            exit 1
+          fi
+          annots_provided="TRUE"
+          prots=$(awk  -F ',' '{print $1}' <<< ${2})
+          trans=$(awk  -F ',' '{print $2}' <<< ${2})
+	   # deal with relative or absolute paths correctly
+	   input_prots="$( cd "$(relative_absolute ${prots})" && pwd )"
+          input_trans="$( cd "$(relative_absolute ${trans})" && pwd )"
+          if [[ ! -d "${input_prots}" ]] || [[ ! -d "${input_trans}" ]] ; then
+            echo "WARNING: -a declared input annoation directories that do not exist...maybe check on that"
+            echo " They should be delared as \"-a path_to_protien_dir,path_to_transcript_dir\""
+            exit 1
+          fi
+          ANNOTS_INPUT="${2}"
+          ARGS_SET+=t
           shift ;;
 
      't') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
@@ -221,7 +244,7 @@ while [[ $N -lt $L ]] ; do
           ARGS_SET+=r
           shift ;;
 
-     'a') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+     'n') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
             USAGE
             exit 1
           fi
@@ -255,15 +278,15 @@ if [[ -n ${1} ]] ; then
 	USAGE 
 	exit 1 
 fi 
-# test for incompatable args
+# test for incompatable args (if) and makes sure required args are present (elif)
 if [[ "$ARGS_SET" == *@(g|c|a)*@(T)* ]] || [[ "$ARGS_SET" == *@(T)*@(g|c|a)* ]]
 then
 	echo "!!!!: -T was set along with -g/c/a, which are incompatable args"
 	USAGE
 	exit 1
-elif [[ ! "$ARGS_SET" == *c* ]] && [[ ! "$ARGS_SET" == *@(g|s)*@(g|s)* ]] && [[ ! "$ARGS_SET" == *T* ]]
+elif [[ ! "$ARGS_SET" == *c* ]] && [[ ! "$ARGS_SET" == *@(g|s)*@(g|s)* ]] && [[ ! "$ARGS_SET" == *T* ]] && [[ ! "$ARGS_SET" == *@(a|s)*@(a|s)* ]]
 then
-	echo -e "WARNING: Required arguments were not given, you need to provied either \n\ta control file with \"-c control_file\"\n\t-g genome_directory -s storage_directory \n\tor \"-T TESTER\" to start a test run"
+	echo -e "WARNING: Required arguments were not given, you need to provied either \n\ta control file with \"-c control_file\"\n\t-g genome_directory -s storage_directory \n\t-n prot_dir,trans_dir -s storage_directory \n\t-g genome_directory -n prot_dir,trans_dir -s storage_directory  \n\tor \"-T TESTER\" to start a test run"
 	echo "Arguments that you set are -"${ARGS_SET}
 	USAGE
 	exit 1
@@ -286,11 +309,10 @@ echo "
 #########  Variables set  ############
 ######################################
 "
+# for debugging arg parsing
 # compare the output of declare -p at the begining and now
 # $tmpfile was created at the top of script
-declare -p | diff "$tmpfile" - | grep "declare" | cut -d " " -f 4-
-echo "#####################################"
-echo "#####################################"
+#declare -p | diff "$tmpfile" - | grep "declare" | cut -d " " -f 4- > varables_set.txt
 rm -f "$tmpfile"
 
 
@@ -348,7 +370,23 @@ MAIN_PIPE () {
 	func_timing_start
 	export ANI=false
 	SET_UP_DIR_STRUCTURE
-	PRODIGAL_PREDICT $genome_dir
+	if [ $genomes_provided = "TRUE" ]
+	then
+		PRODIGAL_PREDICT $genome_dir
+	fi
+	# handle user inputting their own annotations
+	if [ $annots_provided = "TRUE" ]
+	then	
+		#move provided prots and trans to thier respecive folders
+		for I in ls $PROTS_INPUT/
+		do
+ 			cp $PROTS_INPUT/${I}   $prots/${I%.*}.faa || exit
+ 		done
+ 		for I in ls $TRANS_INPUT/
+		do
+ 			cp $TRANS_INPUT/${I}   $prots/${I%.*}.fna || exit
+ 		done
+ 	fi
 	DEDUP_annot_trans
 	FIX_TRANS_NAMES $trans
 	FIX_PROTS_NAMES $prots
