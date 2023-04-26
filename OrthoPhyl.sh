@@ -303,11 +303,6 @@ else
 fi
 
 # print all variables set up to this point
-echo "
-######################################
-#########  Variables set  ############
-######################################
-"
 # for debugging arg parsing
 # compare the output of declare -p at the begining and now
 # $tmpfile was created at the top of script
@@ -377,13 +372,13 @@ MAIN_PIPE () {
 	if [ $annots_provided = "TRUE" ]
 	then	
 		#move provided prots and trans to thier respecive folders
-		for I in ls $PROTS_INPUT/
+		for I in ls $input_prots/
 		do
- 			cp $PROTS_INPUT/${I}   $prots/${I%.*}.faa || exit
+ 			cp $input_prots/${I}   $prots/${I%.*}.faa || exit
  		done
- 		for I in ls $TRANS_INPUT/
+ 		for I in ls $input_trans/
 		do
- 			cp $TRANS_INPUT/${I}   $prots/${I%.*}.fna || exit
+ 			cp $input_trans/${I}   $prots/${I%.*}.fna || exit
  		done
  	fi
 	DEDUP_annot_trans
