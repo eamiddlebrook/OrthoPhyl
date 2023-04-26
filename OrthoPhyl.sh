@@ -201,8 +201,7 @@ while [[ $N -lt $L ]] ; do
             echo " They should be delared as \"-a path_to_protien_dir,path_to_transcript_dir\""
             exit 1
           fi
-          ANNOTS_INPUT="${2}"
-          ARGS_SET+=t
+          ARGS_SET+=a
           shift ;;
 
      't') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
