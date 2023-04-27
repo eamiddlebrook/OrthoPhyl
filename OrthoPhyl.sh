@@ -372,6 +372,7 @@ MAIN_PIPE () {
 	# handle user inputting their own annotations
 	if [[ ${annots_provided+x} ]]
 	then	
+		echo "trying to move genes seqs"
 		#move provided prots and trans to thier respecive folders
 		for I in $(ls $input_prots/)
 		do
@@ -379,7 +380,7 @@ MAIN_PIPE () {
  		done
  		for I in $(ls $input_trans/)
 		do
- 			cp $input_trans/${I}   $prots/${I%.*}.fna || exit
+ 			cp $input_trans/${I}   $trans/${I%.*}.fna || exit
  		done
  	fi
 	DEDUP_annot_trans
