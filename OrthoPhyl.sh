@@ -364,12 +364,12 @@ MAIN_PIPE () {
 	func_timing_start
 	export ANI=false
 	SET_UP_DIR_STRUCTURE
-	if [ $genomes_provided = "TRUE" ]
+	if [[ ${genomes_provided+x} ]] 
 	then
 		PRODIGAL_PREDICT $genome_dir
 	fi
 	# handle user inputting their own annotations
-	if [ $annots_provided = "TRUE" ]
+	if [[ ${annots_provided+x} ]]
 	then	
 		#move provided prots and trans to thier respecive folders
 		for I in $(ls $input_prots/)
