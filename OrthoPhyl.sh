@@ -376,10 +376,12 @@ MAIN_PIPE () {
 		#move provided prots and trans to thier respecive folders
 		for I in $(ls $input_prots/)
 		do
+			echo "moving $I"
  			cp $input_prots/${I}   $prots/${I%.*}.faa || exit
  		done
  		for I in $(ls $input_trans/)
 		do
+			echo "moving $I"
  			cp $input_trans/${I}   $trans/${I%.*}.fna || exit
  		done
  	fi
