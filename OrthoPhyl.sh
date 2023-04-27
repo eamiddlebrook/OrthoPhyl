@@ -195,6 +195,7 @@ while [[ $N -lt $L ]] ; do
           trans=$(awk  -F ',' '{print $2}' <<< ${2})
 	   # deal with relative or absolute paths correctly
 	   input_prots="$( cd "$(relative_absolute ${prots})" && pwd )"
+	   ls $input_prots
           input_trans="$( cd "$(relative_absolute ${trans})" && pwd )"
           if [[ ! -d "${input_prots}" ]] || [[ ! -d "${input_trans}" ]] ; then
             echo "WARNING: -a declared input annoation directories that do not exist...maybe check on that"
