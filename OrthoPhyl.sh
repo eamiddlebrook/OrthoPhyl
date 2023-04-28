@@ -29,8 +29,10 @@ To run test datasets:
 bash OrthoPhyl.sh -T TESTER -t #threads
 # Big test with ~100 orchid chloroplasts
 bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
+# reduced chloroplast dataset
+bash OrthoPhyl.sh -T TESTER_fasttest -t #threads
 # When running through Singularity an output directory is required:
-bash OrthoPhyl.sh -T TESTER -s output_dir -t #threads
+singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads 
 "
 }
 
@@ -65,7 +67,7 @@ if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]]
 then
     source $HOME/.bash_profile
     source $HOME/.bashrc
-    source $script_home/control_file.paths
+    source $script_home/control_file.paths || { echo "cannot open control_file.paths. This file is required for telling OrthoPhyl where to look for manually installed programs"; exit 1 ;}
 fi
 
 
@@ -75,7 +77,7 @@ declare -p > "$tmpfile"
 
 
 # import pipeline defaults (will be overridden by command line args or -c control_file)
-source $script_home/control_file.defaults
+source $script_home/control_file.defaults || { echo "cannot open control_file.refaults. This file is required for telling OrthoPhyl what parameters to use if not provided on the CMD line"; exit 1 ;}
 
 
 ##############################################
@@ -103,7 +105,7 @@ then
         #####  Testing Workflow with Control Files  ####
         ####  and genomes from the TESTER directory  ###
         ##########   Chloroplast Edition!!!!   #########
-	################################################
+		################################################
         "
 	# NEED TO ADD COMPRESSED GENOME FILES TO TEST NEW FUNC
 	source $script_home/TESTER/control_file.user_chloroplast
@@ -117,8 +119,9 @@ then
         ################################################
         #####  Testing Workflow with Control Files  ####
         ####  and genomes from the TESTER directory  ###
-        ##########   fasttest Edition!!!!   #########
-	################################################
+        ##########    fasttest Edition!!!!     #########
+        ##########    (well not that fast)     #########
+        ################################################
         "
 	# NEED TO ADD COMPRESSED GENOME FILES TO TEST NEW FUNC
 	source $script_home/TESTER/control_file.user_fasttest
@@ -127,7 +130,7 @@ then
               rm -r $store
        fi
 else
-	echo "PANIC: TESTER was set, but didnt equal 'TESTER' or 'TESTER_chloroplast'" 
+	echo "PANIC: TESTER was set, but didnt equal 'TESTER', 'TESTER_chloroplast' or TESTER_fasttest" 
 	exit
 fi
 }
@@ -191,19 +194,19 @@ while [[ $N -lt $L ]] ; do
             exit 1
           fi
           annots_provided="TRUE"
-          prots=$(awk  -F ',' '{print $1}' <<< ${2})
-          trans=$(awk  -F ',' '{print $2}' <<< ${2})
+          prots_tmp=$(awk  -F ',' '{print $1}' <<< ${2})
+          trans_tmp=$(awk  -F ',' '{print $2}' <<< ${2})
 	   # deal with relative or absolute paths correctly
-	   input_prots="$( cd "$(relative_absolute ${prots})" && pwd )"
-	   ls $input_prots
-          input_trans="$( cd "$(relative_absolute ${trans})" && pwd )"
-          if [[ ! -d "${input_prots}" ]] || [[ ! -d "${input_trans}" ]] ; then
-            echo "WARNING: -a declared input annoation directories that do not exist...maybe check on that"
-            echo " They should be delared as \"-a path_to_protien_dir,path_to_transcript_dir\""
-            exit 1
-          fi
-          ARGS_SET+=a
-          shift ;;
+	   input_prots="$( cd "$(relative_absolute ${prots_tmp})" && pwd )"
+	
+		input_trans="$( cd "$(relative_absolute ${trans_tmp})" && pwd )"
+		if [[ ! -d "${input_prots}" ]] || [[ ! -d "${input_trans}" ]] ; then
+		echo "WARNING: -a declared input annoation directories that do not exist...maybe check on that"
+		echo " They should be delared as \"-a path_to_protien_dir,path_to_transcript_dir\""
+		exit 1
+		fi
+		ARGS_SET+=a
+		shift ;;
 
      't') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
             USAGE
@@ -335,9 +338,9 @@ cd $store || exit 1
 export genome_dir=$store/genomes
 export wd=$store/phylo_current
 export run_notes=$store/run_notes.txt
-export trans=$store/prodigal_nucls
-export prots=$store/prodigal_prots
-export annots=$store/prodigal_annots
+export trans=$store/annots_nucls
+export prots=$store/annots_prots
+export annots=$store/annots_details
 
 # internal repo programs
 export ANI_genome_picking=$script_home/python_scripts/ANI_genome_picking.py
@@ -347,6 +350,7 @@ export OG_sco_filter=$script_home/python_scripts/OG_sco_filter.py
 shopt -s expand_aliases
 source $script_home/script_lib/bash_utils_and_aliases.sh
 
+# if present, clean-up a file detailing the runtimes for each step 
 if [ -f $store/timing ]
 then
 	rm $store/timing
@@ -437,7 +441,7 @@ MAIN_PIPE () {
 
 
 
-#call pipe modules via the MAIN_PIPE function declared at the top of script (for convieniance)
+#call pipe modules from script_lib/functions.sh via the MAIN_PIPE function declared above
 MAIN_PIPE
 
 echo "

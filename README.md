@@ -55,7 +55,7 @@ cd OrthoPhyl
 
 
 ### Conda/mamba installable dependencies
-#### If you need to install conda or mamba we recomend mamba, however the commands are exactly the same (exept running the intall)
+#### If you need to install conda or mamba we recomend mamba, however the commands are exactly the same (exept running the install)
 ```
 cd ~/Downloads/ # or wherever you want to put the installer
 wget https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-Linux-x86_64.sh
@@ -76,7 +76,7 @@ mamba init bash
 ### Create conda environment and install dependencies
 #### It is highly recomended that you create an separate environment for this install. Might take some time....
 ```
-mamba create -n orthophyl --file ~/{Path_to_gits/OrthoPhyl/orthophyl_env.XXX.txt
+mamba create -n orthophyl --file ~/{Path_to_gits/OrthoPhyl/orthophyl_env.XXX.txt -c bioconda -c conda-forge
 ```
 #### OR you can install different versions if neccessary
 ```
@@ -147,7 +147,7 @@ mamba deactivate
 ### run Chloroplast test locally
 #### Tested on RHEL 8.5 machine with Intel Core i7-8700 CPU and 16gb ram (~8 minute runtime using 3 cores)
 ```
-bash ~/${Path_to_gits/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -t 3
+bash ~/${Path_to_gits}/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -t 3
 ```
 There should be a directory created in OrthoPhyl/TESTER/Workflow_test.chloroplast$(date +%m-%d-%Y)
 If the test was successful, there should be 4 species trees found in the FINAL_TREES
@@ -170,6 +170,9 @@ USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_out
 #   Many default parameters are set in control_file.defaults
 Required:
 -g	full path to genomes directiory
+or
+-a	paths to protien and transcript directories. 
+       They should be delared as \"-a path_to_protien_dir,path_to_transcript_dir\"
 -s	full path to the main directory for output
 Optional:
 -t	threads to use [4]
@@ -187,23 +190,31 @@ To run test datasets:
 bash OrthoPhyl.sh -T TESTER -t #threads
 # Big test with ~100 orchid chloroplasts
 bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
+# reduced chloroplast dataset
+bash OrthoPhyl.sh -T TESTER_fasttest -t #threads
 # When running through Singularity an output directory is required:
 singularity run ${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads 
 
 ```
-### Example:
+### Example1:
 #### Run OrthoPhyl on assemblies in ~/Projects/ASMS/ecoli/ using 12 cores within singularity and place all results and intermediate files in ~/Projects/phylogenetics/ecoli/
 ```
 
-singularity run ${singularity_images}/OrthoPhyl.0.9.3.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
+singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
 
 ```
+### Example2:
 #### Run the same OrthoPhyl command from the manual install
 ```
 bash OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
 
 ```
+### Example3:
+#### Run the same OrthoPhyl command from the manual install, also incorporate preannoated samples with protein seqs in ```~/Projects/annots/protiens/``` and transripts in ```~/Projects/annots/transcripts/"``` 
+```
+bash OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -a ~/Projects/annots/protiens/,~/Projects/annots/transcripts/ -s ~/Projects/phylogenetics/ecoli/ -t 12 
 
+```
 
 
 ## More Notes on OrthoPhyl: 

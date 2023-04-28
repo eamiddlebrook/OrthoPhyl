@@ -10,6 +10,8 @@
 # multifasta file names will be taken as strain/species name
 export input_genomes=$script_home/TESTER/genomes/
 export output_dir=TESTER/Workflow_test.$(date +%m-%d-%Y) # the name of the main output dir
+genomes_provided="TRUE"
+
 if [[ ! -z ${threads+x} ]]
 then
         export threads
