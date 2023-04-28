@@ -175,8 +175,8 @@ CHECK_GENOME_QUALITY () {
 DEDUP_annot_trans () {
         echo "
 	###################################
-        #### RUNNING annotation dedupe ####
-        ###################################
+	#### RUNNING annotation dedupe ####
+	###################################
 	"
 
 	trans=$trans
@@ -191,7 +191,7 @@ DEDUP_annot_trans () {
 		mkdir $trans.preDedup || exit 1
 		mv $trans/*.f*a $trans.preDedup/
 		mkdir $prots.preDedup || exit 1
-        	mv $prots/*.f*a $prots.preDedup/
+        mv $prots/*.f*a $prots.preDedup/
 		:> dedupe.stats
 		:> dedupe.stats_long
 		for I in $(ls $trans.preDedup/*.f*a)
@@ -203,7 +203,7 @@ DEDUP_annot_trans () {
 			base=$(basename ${I%.*})
 			echo $base >> dedupe.stats
 			bash dedupe.sh -Xmx1g -Xms1g in=$I out=$trans/$base.fna minidentity=99.9 2>&1 | grep 'Input\|Result'  \
-				>> dedupe.stats
+				>> dedupe.stats || { echo "dedupe failed for some reason :("; exit 1;}
 			cat $trans/$base.fna | grep ">" | sed 's/>//g' > $trans/$base.deduped.names
 			filterbyname.sh -Xmx1g -Xms1g --amino include=true in=$prots.preDedup/$base.faa out=$prots/$base.faa names=$trans/$base.deduped.names \
 				>> dedupe.stats_long 2>&1
@@ -1099,7 +1099,7 @@ astral_TransGENE2SPECIES_TREE () {
 	for method in $gene_tree_methods
 	do
 		concat_tree_method=$concat_trees.${method}.trees
-		astral_tree=${base_list}.${method}.astral.tree
+		astral_tree=astral.${base_list}.${method}.tree
 		#remove concatenated tree file if it exists.
 		if [ -f $concat_tree_method ]
 		then
@@ -1177,8 +1177,8 @@ WRAP_UP () {
 TESTER_compare () {
         echo "
        	#############################################
-	######   Compare Trees generated with  ######
-	#######  TESTER to prepackaged Trees  #######
+        ######   Compare Trees generated with  ######
+        #######  TESTER to prepackaged Trees  #######
        	#############################################
         "
 	# TODO:
