@@ -1,9 +1,9 @@
 
 # check if dir is absolute or relative to running dir
 relative_absolute () {
-if [[ $1 = ~/* ]] || [[ $1 = /* ]]
+if [[ $1 = "/"* ]] || [[ $1 = "~/"* ]]
 then
-    	echo "$1"
+    	echo $1
 else
     	echo $(pwd)/"$1"
 fi

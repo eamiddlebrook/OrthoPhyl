@@ -194,12 +194,22 @@ while [[ $N -lt $L ]] ; do
             exit 1
           fi
           annots_provided="TRUE"
-          prots_tmp=$(awk  -F ',' '{print $1}' <<< ${2})
-          trans_tmp=$(awk  -F ',' '{print $2}' <<< ${2})
-	   # deal with relative or absolute paths correctly
-	   input_prots="$( cd "$(relative_absolute ${prots_tmp})" && pwd )"
-	   input_trans="$( cd "$(relative_absolute ${trans_tmp})" && pwd )"
-	   if [[ ! -d "${input_prots}" ]] || [[ ! -d "${input_trans}" ]]
+          prots_tmp=$(awk  -F ',' '{print $2}' <<< ${2})
+          trans_tmp=$(awk  -F ',' '{print $1}' <<< ${2})
+	   	  # deal with relative or absolute paths correctly
+          eval prots_tmp=$prots_tmp
+	      eval trans_tmp=$trans_tmp
+          input_prots=$(relative_absolute ${prots_tmp})
+	      input_trans=$(relative_absolute ${trans_tmp})
+	      echo "Building codon based tree for protein in "$input_prots" and CDSs in "$input_trans
+	   prot_num=$(ls $input_prots | wc -l)
+	   nucl_num=$(ls $input_trans | wc -l)
+	   if [[ ! $prot_num == $nucl_num ]]
+	   then
+	     echo "Number of provided Protein files and nucleotide (CDS) files do not match"
+		 echo "Perhaps there are extra files in the directories?"
+		 exit 1
+	   elif [[ ! -d "${input_prots}" ]] || [[ ! -d "${input_trans}" ]]
 	   then
 		echo "WARNING: -a declared input annoation directories that do not exist...maybe check on that"
 		echo " They should be delared as \"-a path_to_protien_dir,path_to_transcript_dir\""
