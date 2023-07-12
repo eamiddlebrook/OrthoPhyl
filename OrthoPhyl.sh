@@ -3,23 +3,24 @@
 USAGE () {
 echo "
 USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_output
-# ALL arguments are optional if set in control_file.required
+# ALL arguments are optional if set with \"-c control_file.your_args\"
 #   Many default parameters are set in control_file.defaults
+#   I will work to expose the more useful ones in later versions of OP
 Required:
 -g	path to genomes directiory
 or
--a	paths to protien and transcript directories. 
-       They should be delared as \"-a path_to_protien_dir,path_to_transcript_dir\"
+-a	paths to protien and transcript directories.
+       They should be delared as \"-a path_to_transcript_dir,path_to_prot_dir\"
 -s	path to the main directory for output
 Optional:
 -t	threads to use [4]
--p     phylogenetic tree software to use [fasttree, raxml, and/or iqtree] 
+-p     phylogenetic tree software to use fasttree, raxml, and/or iqtree [\"fasttree iqtree\"]
 	i.e. -p \"fasttree iqtree\"
--c	path to a control file with required variables and any optional ones to override defaults. 
+-c	path to a control file with required variables and any optional ones to override defaults.
 	Will override values set on command line! [NULL]
 -x	trimal paramerter string (in double \"quotes\")
 -r	flag to rerun orthofinder on the ANI_shorlist (true/[false])
--n	max number of genomes to run through OrthoFinder. 
+-n	max number of genomes to run through OrthoFinder.
 	If more than this many assemblies are provided, a subset of genomes will be chosen for OrthoFinder to chew on [20]
 -T	run test dataset, incompatable with -g|s (TESTER,TESTER_chloroplast)
 -h	display a description and a super useful usage message
@@ -32,7 +33,7 @@ bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
 # reduced chloroplast dataset
 bash OrthoPhyl.sh -T TESTER_fasttest -t #threads
 # When running through Singularity an output directory is required:
-singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads 
+singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads
 "
 }
 
@@ -40,7 +41,7 @@ singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir
 ######################
 # set up environment #
 ######################
-
+echo "Loading required files..."
 
 # grab the Orthophyl directory no matter where script was run from
 #used for loading stuff from git repo
@@ -202,6 +203,7 @@ while [[ $N -lt $L ]] ; do
           input_prots=$(relative_absolute ${prots_tmp})
 	      input_trans=$(relative_absolute ${trans_tmp})
 	      echo "Building codon based tree for protein in "$input_prots" and CDSs in "$input_trans
+	   # running some simple checks...
 	   prot_num=$(ls $input_prots | wc -l)
 	   nucl_num=$(ls $input_trans | wc -l)
 	   if [[ ! $prot_num == $nucl_num ]]
@@ -291,7 +293,10 @@ if [[ -n ${1} ]] ; then
 	USAGE 
 	exit 1 
 fi 
-# test for incompatable args (if) and makes sure required args are present (elif)
+
+####################################################################################
+# test for incompatable args (if) and makes sure required args are present (elif) ##
+####################################################################################
 if [[ "$ARGS_SET" == *@(g|c|a)*@(T)* ]] || [[ "$ARGS_SET" == *@(T)*@(g|c|a)* ]]
 then
 	echo "!!!!: -T was set along with -g/c/a, which are incompatable args"
@@ -306,7 +311,9 @@ then
 
 fi
 
-# test if "-p tree_method" is set correctly
+#############################################
+# test if "-p tree_method" is set correctly #
+#############################################
 if [[ " ${tree_method[*]} " =~ " raxml " ]] || [[ " ${tree_method[*]} " =~ " fasttree " ]] || [[ " ${tree_method[*]} " =~ " iqtree " ]]
 then
 	echo Running $tree_method to generate Species trees
@@ -316,16 +323,19 @@ else
 	exit 1
 fi
 
-# print all variables set up to this point
-# for debugging arg parsing
-# compare the output of declare -p at the begining and now
-# $tmpfile was created at the top of script
+############################################################
+# print all variables set up to this point                #
+# for debugging arg parsing                               #
+# compare the output of declare -p at the begining and now#
+# $tmpfile was created at the top of script               #
+############################################################
 #declare -p | diff "$tmpfile" - | grep "declare" | cut -d " " -f 4- > varables_set.txt
 rm -f "$tmpfile"
 
 
-
-#import control_file arguments
+#################################
+# import control_file arguments #
+#################################
 if [[ -z ${control_file+x} ]]
 then
 	#nothing
@@ -340,6 +350,9 @@ else
 	source $control_file || exit 1
 fi
 
+#######################
+## set up some stuff ##
+#######################
 
 # outputs are held in:
 mkdir -p $store || exit 1
@@ -379,14 +392,14 @@ MAIN_PIPE () {
 	func_timing_start
 	export ANI=false
 	SET_UP_DIR_STRUCTURE
-	if [[ ${genomes_provided+x} ]] 
+	if [[ ${genomes_provided+x} ]]
 	then
 		PRODIGAL_PREDICT $genome_dir
 	fi
 	# handle user inputting their own annotations
 	if [[ ${annots_provided+x} ]]
-	then	
-		echo "trying to move genes seqs"
+	then
+		echo "trying to move gene seqs"
 		#move provided prots and trans to thier respecive folders
 		for I in $(ls $input_prots/)
 		do

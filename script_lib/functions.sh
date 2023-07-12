@@ -62,16 +62,28 @@ SET_UP_DIR_STRUCTURE () {
 		for I in $(ls ./ | grep \)); do   mv $I ${I//\)/}; done
 		for I in $(ls ./ | grep \(); do   mv $I ${I//\(/}; done
 		for I in $(ls ./ | grep "_\=_" ); do mv $I ${I//_\=_} ; done
-		#make a file with the genome names for later use
-		ls > $store/genome_list
 
+		#make a file with the genome and protein file names (if input) for later use
+		if compgen -G "$genome_dir/*.*a" > /dev/null
+                then
+                    	ls > $store/genome_list
+			genome_list=$store/genome_list
+                fi
+		if [[ ${annots_provided+x} ]]
+		then
+			ls $input_prots > $store/pre_annotated_list
+			preannotated_list=$store/preannotated_list
+		fi
+		# make final input list
+		cat $genome_list $preannotated_list > $store/all_input_list
 
-		echo "Building phylogeny for $(cat $store/genome_list | wc -l) genomes" | tee -a $run_notes
-		export min_num_orthos=$(printf %.0f $(echo "$(cat $store/genome_list | wc -l)*$min_frac_orthos" | bc))
-		echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with ASTRAL and RAxML" | tee -a $run_notes
-		#############################
-		#############################
-
+		# calculate and report how many input assemblies there are
+		echo "Building phylogeny for $(cat $store/all_input_list | wc -l) assemblies" | tee -a $run_notes
+		export min_num_orthos=$(printf %.0f $(echo "$(cat $store/all_input_list | wc -l)*$min_frac_orthos" | bc))
+		echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with ASTRAL and ML method chosen" | tee -a $run_notes
+		###########################################
+		# just setting up the directory structure #
+		###########################################
 		mkdir $wd
 		cd $wd || exit
 		mkdir AlignmentsProts/
@@ -105,10 +117,7 @@ PRODIGAL_PREDICT () {
 	local_genome_dir=$1
 	cd $local_genome_dir || exit
 	# need to switch this to use genome_list...it creates a bunch of *.suffix files if either .fna or .fa files are absent
-
-	
 	# enumerate list of genomes to annotate, wait if $threads are already running
-	
 	for genome in $(ls $local_genome_dir)
 	do
 		if test "$(jobs | wc -l)" -ge $threads; then
@@ -356,7 +365,7 @@ ORTHO_RUN () {
 			mv $orthodir $orthodir.bk
 		fi
 		cd $store || exit
-		orthofinder -t $threads -S diamond -n $ortho_trial \
+		orthofinder -y -oa -t $threads -S diamond -n $ortho_trial \
 		-M msa -A mafft -X \
 		-f "$local_prots_fixed" > $wd/logs/orthofinder.stdout \
 		&& touch orthofinder.complete \
