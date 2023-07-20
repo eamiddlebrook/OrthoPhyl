@@ -217,10 +217,11 @@ DEDUP_annot_trans () {
 			filterbyname.sh -Xmx1g -Xms1g --amino include=true in=$prots.preDedup/$base.faa out=$prots/$base.faa names=$trans/$base.deduped.names \
 				>> dedupe.stats_long 2>&1
 			} &
-
 		done && touch dedupe.complete
 		wait
 	fi
+	# remove the files telling filterbyname which prots to keep
+	rm $trans/*.deduped.names
 }
 
 FIX_TRANS_NAMES () {
@@ -314,7 +315,7 @@ ANI_species_shortlist () {
         do
           	echo "$genome1" >> genome_names
         done
-	cd ../genomes/ || exit
+	cd $genome_dir || exit
 	if [ -f ../ANI_working_dir/$ANI_complete ]
 	then
 		echo "fastANI already run"

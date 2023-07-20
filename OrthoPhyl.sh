@@ -22,11 +22,10 @@ Optional:
 -r	flag to rerun orthofinder on the ANI_shorlist (true/[false])
 -n	max number of proteomes to run through OrthoFinder.
 	If more than this many assemblies are provided, a subset of proteomes (based on genomes/transcripts ANI) will be chosen for OrthoFinder to chew on [20]
--d  Force ANI subsetting to run on transcript or genome Datasets. 
-	Default is "genome". 
-	Using "-a" implies "-d transcript".
-	If "-a" is declared but you want to use the assemblies you have provided, set "-d genome"
-	If "-a" not used but you want to use transcripts (annotated within OrthoPhyl) for ANI subsetting, set "-d transcript"
+-d  Force ANI subsetting to run on transcript or genome Datasets. ([genome],transcript)
+	Using \"-a\" implies \"-d transcript\".
+	If \"-a\" is declared but you want to use the assemblies you have also provided, set \"-d genome\"
+	If \"-a\" not used but you want to use transcripts (annotated within OrthoPhyl) for ANI subsetting, set \"-d transcript\"
 -T	run test dataset, incompatable with -g|s (TESTER,TESTER_chloroplast)
 -h	display a description and a super useful usage message
 ###############################################################\n
@@ -200,7 +199,7 @@ while [[ $N -lt $L ]] ; do
             exit 1
           fi
           annots_provided=true
-		  ANI_trans=true
+          ANI_trans=true
           prots_tmp=$(awk  -F ',' '{print $2}' <<< ${2})
           trans_tmp=$(awk  -F ',' '{print $1}' <<< ${2})
 	   	  # deal with relative or absolute paths correctly
@@ -257,38 +256,38 @@ while [[ $N -lt $L ]] ; do
           ARGS_SET+=x
           shift ;;
 
-     'r') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-            USAGE
-            exit 1 
-          fi 
-          orthofinder_rerun=${2} 
-          ARGS_SET+=r
-          shift ;;
-
-	 'd') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+     'r') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
             USAGE
             exit 1
           fi
-		  if [ ${2} == "genome" ]
-		  then	
-			ANI_genome=true
-          elif [ ${2} == "transcript" ]
-		  then
-		 	ANI_trans=true
-		  else
-		  	echo "Looks like your arg for -d is invalid, check usage\n"
-			USAGE
-			exit 1
-		  fi
-		  ARGS_SET+=d
+          orthofinder_rerun=${2}
+          ARGS_SET+=r
           shift ;;
 
-     'n') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+      'd') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
+            USAGE
+            exit 1
+          fi
+	  if [ ${2} == "genome" ]
+	  then
+	     ANI_genome=true
+          elif [ ${2} == "transcript" ]
+	  then
+	     ANI_trans=true
+          else
+             echo "Looks like your arg for -d is invalid, check usage\n"
+	     USAGE
+             exit 1
+          fi
+          ARGS_SET+=d
+          shift ;;
+
+     'n') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
             USAGE
             exit 1
           fi
           ANI_shortlist=${2} 
-          ARGS_SET+=a
+          ARGS_SET+=n
           shift ;;
 
      'T') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
@@ -305,18 +304,18 @@ while [[ $N -lt $L ]] ; do
          echo "Error: Invalid option"
          USAGE
          exit;;
-     *) USAGE 
-        exit 1 ;; 
-  esac 
-  N=$(($N+1)) 
-done 
-shift 
-done 
-if [[ -n ${1} ]] ; then 
+     *) USAGE
+        exit 1 ;;
+  esac
+  N=$(($N+1))
+done
+shift
+done
+if [[ -n ${1} ]] ; then
 	echo "!!!!: you have a hanging argument without a flag!"
-	USAGE 
-	exit 1 
-fi 
+	USAGE
+	exit 1
+fi
 
 ####################################################################################
 # test for incompatable args (if) and makes sure required args are present (elif) ##
@@ -439,21 +438,25 @@ MAIN_PIPE () {
 	DEDUP_annot_trans
 	FIX_TRANS_NAMES $trans
 	FIX_PROTS_NAMES $prots
-	# find subset of genomes ($ANI_shortlist) that represents diversity of full set
-	if [[ $(cat $store/genome_list | wc -l)  -gt $ANI_shortlist ]]
+
+	# test if user input preannotated transcripts 
+        #   or wants to use transcripts for the ANI subsetting
+	if [ "$ANI_genome" = true ]
+	then
+		ANI_dataset=$genome_dir
+	elif [ "$ANI_trans" = true ]
+	then
+		ANI_dataset=$trans
+	fi
+       	# find subset of genomes or transcripts that represents diversity of full set
+	#   if number of sequence files is greater than the max number to send through orthofinder
+	if [[ $(ls $ANI_dataset | wc -l)  -gt $ANI_shortlist ]]
 	then
 		export ANI=true
-		# test if user input preannotated transcripts or wants to use transcripts for the ANI subsetting
-		if {[ "$ANI_trans" = true ] && [ ! "$ANI_genome" = true ]} || 
-		then
-			ANI_dataset=$trans
-		else
-			ANI_dataset=$genome_dir
-		fi 
 		#ANI script makes a prot directory from shortlist for orthofinder ($prots.shortlist)
 		ANI_species_shortlist $ANI_dataset $ANI_shortlist
 		prots4ortho=${prots}.shortlist
-		ORTHO_RUN $prots4ortho # do not comment out, robust to reruns
+		ORTHO_RUN $prots4ortho
 		# find genes from full set for each OG (make HMM profile and search against all prots)
 		ANI_ORTHOFINDER_TO_ALL_SEQS
 	else
