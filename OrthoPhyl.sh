@@ -327,7 +327,7 @@ then
 	exit 1
 elif [[ ! "$ARGS_SET" == *c* ]] && [[ ! "$ARGS_SET" == *@(g|s)*@(g|s)* ]] && [[ ! "$ARGS_SET" == *T* ]] && [[ ! "$ARGS_SET" == *@(a|s)*@(a|s)* ]]
 then
-	echo -e "WARNING: Required arguments were not given, you need to provied either \n\ta control file with \"-c control_file\"\n\t-g genome_directory -s storage_directory \n\t-n prot_dir,trans_dir -s storage_directory \n\t-g genome_directory -n prot_dir,trans_dir -s storage_directory  \n\tor \"-T TESTER\" to start a test run"
+	echo -e "WARNING: Required arguments were not given, you need to provied either \n\ta control file with \"-c control_file\"\n\t-g genome_directory -s storage_directory \n\t-n prot_dir,trans_dir -s storage_directory \n\t-g genome_directory -a prot_dir,trans_dir -s storage_directory  \n\tor \"-T TESTER\" to start a test run"
 	echo "Arguments that you set are -"${ARGS_SET}
 	USAGE
 	exit 1
@@ -369,7 +369,7 @@ else
 	echo "  setting variable found in $control_file"
 	echo "   This will overwrite any args set on the command line"
 	echo "##########################################"
-		echo ""
+	echo ""
 	source $control_file || exit 1
 fi
 

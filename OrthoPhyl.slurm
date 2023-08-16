@@ -3,7 +3,7 @@
 ### PART 1: Requests resources to run your job.
 # --------------------------------------------------------------
 ### Optional. Set the job name
-#SBATCH --job-name=OP_tester.5.19.23
+#SBATCH --job-name=volvox.8.15.23
 ### Optional. Set the output filename.
 ### SLURM reads %x as the job name and %j as the job ID
 #SBATCH --output=slurm_out/%x-%j.out
