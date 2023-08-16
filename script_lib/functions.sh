@@ -72,7 +72,7 @@ SET_UP_DIR_STRUCTURE () {
 		if [[ ${annots_provided+x} ]]
 		then
 			ls $input_prots > $store/pre_annotated_list
-			preannotated_list=$store/preannotated_list
+			preannotated_list=$store/pre_annotated_list
 		fi
 		# make final input list
 		cat $genome_list $preannotated_list > $store/all_input_list
