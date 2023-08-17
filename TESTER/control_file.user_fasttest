@@ -11,6 +11,7 @@
 export input_genomes=$script_home/TESTER/genomes_fasttest
 export output_dir=TESTER/Workflow_test.fasttest$(date +%m-%d-%Y) # the name of the main output dir
 export genomes_provided="TRUE"
+export ANI_genome=true
 
 # let users overwrite number of threads to use
 if [[ ! -z ${threads+x} ]]
