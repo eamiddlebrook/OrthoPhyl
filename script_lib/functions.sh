@@ -902,7 +902,8 @@ TREE_BUILD () {
 	'
 	date
 	func_timing_start
-
+	echo "Building trees from...."
+	echo "$2"
 	output_dir=$1
 	input_alignment=$2
 	threads=$3
