@@ -857,23 +857,23 @@ SCO_strict () {
 	if [ $ANI == "true" ]
 	then
 		echo "Finding all proper SCOs from ANI Orthogroups"
-                # make list of all proper SCOs directly from fasta
-                cd $wd || exit
-                # Iterate over trimmed alignments and pull out the number of samples per multifasta
-                # this has the assumption that there is only one sequence per genome
-                # should be enforced by ORTHOFINDER_TO_ALL_SEQS
-                # could add an error || exit if it becomes a problem
-                for I in AlignmentsTrans.trm.nm/OG0*.codon_aln.trm.nm.fa
-                do
-                  	final_seqs=$(cat $I | grep -e ">" | wc -l)
-                        if [ $final_seqs -ge $(cat $store/genome_list | wc -l) ]
-                        then
+		# make list of all proper SCOs directly from fasta
+		cd $wd || exit
+		# Iterate over trimmed alignments and pull out the number of samples per multifasta
+		# this has the assumption that there is only one sequence per genome
+		# should be enforced by ORTHOFINDER_TO_ALL_SEQS
+		# could add an error || exit if it becomes a problem
+		for I in AlignmentsTrans.trm.nm/OG0*.codon_aln.trm.nm.fa
+		do
+			final_seqs=$(cat $I | grep -e ">" | wc -l)
+			if [ $final_seqs -ge $(cat $store/all_input_list | wc -l) ]
+			then
 				# add SCO_strict alignemtns to a specific DIR
 				cp $I ./OG_SCO_strict.align/
-                            	base=$(basename ${I%.*.*.*.*})
-                        	echo $base >> $OG_SCO_strict
-                        fi
-                done
+				base=$(basename ${I%.*.*.*.*})
+				echo $base >> $OG_SCO_strict
+			fi
+		done
 	else
 		for I in $orthodir/Single_Copy_Orthologue_Sequences/OG0*.fa
 		do
@@ -886,7 +886,7 @@ SCO_strict () {
 	#cat SCO_strict nuc alignments
 	cd $wd/SpeciesTree/ || exit
 	perl $catfasta2phyml_cmd -c $wd/OG_SCO_strict.align/*.fa \
-	1> SCO_strict.codon_aln.trm.sco.nm.phy 2>> $store/verbose_log.txt
+		1> SCO_strict.codon_aln.trm.sco.nm.phy 2>> $store/verbose_log.txt
 	perl $catfasta2phyml_cmd -f -c $wd/OG_SCO_strict.align/*.fa \
         1> SCO_strict.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
 }

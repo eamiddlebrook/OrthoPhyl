@@ -26,7 +26,7 @@ Optional:
 	Using \"-a\" implies \"-d transcript\".
 	If \"-a\" is declared but you want to use the assemblies you have also provided, set \"-d genome\"
 	If \"-a\" not used but you want to use transcripts (annotated within OrthoPhyl) for ANI subsetting, set \"-d transcript\"
--T	run test dataset, incompatable with -g|s (TESTER,TESTER_chloroplast)
+-T	run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast)
 -h	display a description and a super useful usage message
 ###############################################################\n
 To run test datasets:
