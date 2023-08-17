@@ -3,14 +3,14 @@
 ### PART 1: Requests resources to run your job.
 # --------------------------------------------------------------
 ### Optional. Set the job name
-#SBATCH --job-name=volvox.8.15.23
+#SBATCH --job-name=TAXON_of_interest
 ### Optional. Set the output filename.
 ### SLURM reads %x as the job name and %j as the job ID
 #SBATCH --output=slurm_out/%x-%j.out
 ### REQUIRED. Specify the PI group for this job
-#SBATCH --account=earlm
+#SBATCH --account=USERNAME
 ### REQUIRED. Set the partition for your job.
-#SBATCH --partition=fast
+#SBATCH --partition=QUEUE
 ### REQUIRED. Set the number of cores that will be used for this job.
 #SBATCH --nodes=1
 #SBATCH --ntasks=28
@@ -19,5 +19,5 @@
 ### REQUIRED. Specify the time required for this job, hhh:mm:ss
 #SBATCH --time=200:00:00
 
-# Use 1st positional arg to specify running test ($1="-T TESTER")
+# Use 1st positional arg to specify parameter string for OrthoPhyl.sh or running test with: $1="-T TESTER"
 bash OrthoPhyl.sh $1
