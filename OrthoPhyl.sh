@@ -441,12 +441,12 @@ MAIN_PIPE () {
 
 	# test if user input preannotated transcripts 
         #   or wants to use transcripts for the ANI subsetting
-	if [ "$ANI_genome" = true ]
-	then
-		ANI_dataset=$genome_dir
-	elif [ "$ANI_trans" = true ]
+	if [ "$ANI_trans" = true ]
 	then
 		ANI_dataset=$trans
+	elif [ "$ANI_genome" = true ]
+	then
+		ANI_dataset=$genome_dir
 	fi
        	# find subset of genomes or transcripts that represents diversity of full set
 	#   if number of sequence files is greater than the max number to send through orthofinder
