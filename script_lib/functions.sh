@@ -908,7 +908,11 @@ TREE_BUILD () {
 	input_alignment=$2
 	threads=$3
 	output_name=$(basename ${input_alignment%.*.*.*.*})
-	partition_file=$(basename ${input_alignment%.*}.partitions)
+	partition_file=${input_alignment%.*}.partitions
+	echo "\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+	echo $input_alignment
+	echo $partition_file
+	echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"	
 	cd $output_dir || exit
 	# subfunction to run RAxml
 	RAxML_run () {
