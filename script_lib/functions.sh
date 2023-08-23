@@ -886,9 +886,11 @@ SCO_strict () {
 	#cat SCO_strict nuc alignments
 	cd $wd/SpeciesTree/ || exit
 	perl $catfasta2phyml_cmd -c $wd/OG_SCO_strict.align/*.fa \
-		1> SCO_strict.codon_aln.trm.sco.nm.phy 2> SCO_strict.codon_aln.trm.sco.nm.partitions
+		1> SCO_strict.codon_aln.trm.sco.nm.phy 2> SCO_strict.codon_aln.trm.sco.nm.partitions.tmp
 	perl $catfasta2phyml_cmd -f -c $wd/OG_SCO_strict.align/*.fa \
         1> SCO_strict.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
+	cat SCO_strict.codon_aln.trm.sco.nm.partitions.tmp | awk '{print "DNA,\t"$0}' \
+		> SCO_strict.codon_aln.trm.sco.nm.partitions && rm SCO_strict.codon_aln.trm.sco.nm.partitions.tmp
 }
 
 
@@ -909,10 +911,6 @@ TREE_BUILD () {
 	threads=$3
 	output_name=$(basename ${input_alignment%.*.*.*.*})
 	partition_file=${input_alignment%.*}.partitions
-	echo "\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-	echo $input_alignment
-	echo $partition_file
-	echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"	
 	cd $output_dir || exit
 	# subfunction to run RAxml
 	RAxML_run () {
@@ -945,7 +943,7 @@ TREE_BUILD () {
 		cd iqtree
 		iqtree2 -s $input_alignment \
 		--prefix iqtree.${output_name} \
-		-Q $partition_file \
+		-Q $partition_file -m MFP+MERGE \
 		-T $threads --seed 1234 > iqtree.long_log
 		treefile=$(ls *.treefile)
 		mv $treefile ../${treefile%.*}.tree
