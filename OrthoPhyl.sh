@@ -14,7 +14,7 @@ or
 -s	path to the main directory for output
 Optional:
 -t	threads to use [4]
--p     phylogenetic tree software to use fasttree, raxml, and/or iqtree [\"fasttree iqtree\"]
+-p  phylogenetic tree software to use fasttree, raxml, and/or iqtree [\"fasttree iqtree\"]
 	i.e. -p \"fasttree iqtree\"
 -c	path to a control file with required variables and any optional ones to override defaults.
 	Will override values set on command line! [NULL]

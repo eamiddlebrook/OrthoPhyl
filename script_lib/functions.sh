@@ -658,7 +658,7 @@ PAL2NAL () {
                 then
 			echo $((J/percent*10))" percent of the way through the PAL2NAL"
                 fi
-		# why the hell gig I delace this function with in the loop...probably because of the "local bass=...". this should be passed in with a variable. 
+		# why the hell did I declare this function with in the loop...probably because of the "local bass=...". this should be passed in with a variable. 
 		PAL2NAL_subfunc () {
 			#get basename (OG000????)
 			local base=$(basename ${i%.*})
@@ -828,7 +828,7 @@ SCO_MIN_ALIGN () {
 	echo "Concatenating fasta alignments to phylip format"
 	cd $wd/SpeciesTree/ || exit
 	perl $catfasta2phyml_cmd -c ../OG_SCO_$min_num_orthos.align/*.fa \
-	1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.phy 2>> $store/verbose_log.txt
+		1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.phy 2> SCO_$min_num_orthos.codon_aln.trm.sco.nm.partitions
 	echo "Concatenating fasta alignments to fasta format"
 	perl $catfasta2phyml_cmd -f -c ../OG_SCO_$min_num_orthos.align/*.fa \
         1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
@@ -886,7 +886,7 @@ SCO_strict () {
 	#cat SCO_strict nuc alignments
 	cd $wd/SpeciesTree/ || exit
 	perl $catfasta2phyml_cmd -c $wd/OG_SCO_strict.align/*.fa \
-		1> SCO_strict.codon_aln.trm.sco.nm.phy 2>> $store/verbose_log.txt
+		1> SCO_strict.codon_aln.trm.sco.nm.phy 2> SCO_strict.codon_aln.trm.sco.nm.partitions
 	perl $catfasta2phyml_cmd -f -c $wd/OG_SCO_strict.align/*.fa \
         1> SCO_strict.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
 }
@@ -908,6 +908,7 @@ TREE_BUILD () {
 	input_alignment=$2
 	threads=$3
 	output_name=$(basename ${input_alignment%.*.*.*.*})
+	partition_file=$(basename ${input_alignment%.*}.partitions)
 	cd $output_dir || exit
 	# subfunction to run RAxml
 	RAxML_run () {
@@ -924,19 +925,23 @@ TREE_BUILD () {
 	}
 	# subfuncton to run FastTreeMP
 	FASTTREE_run () {
-		# fastTree doesnt like an of the phylip formats I have tried. using .fa
+		# fastTree doesnt like any of the phylip formats I have tried. using .fa
 		#    A bit clunky...
 		export OMP_NUM_THREADS=$threads
 		FastTreeMP $fasttree_speciestree_options \
-		-out ./fastTree.${output_name}.tree \
+		-out ./fastTree.${output_name}.tree_working \
 		-nt ${input_alignment%.*}.fa \
 		> ./fastTree_log.${output_name} 2>&1
+		treefile=fastTree.${output_name}.tree_working
+		mv $treefile ./${treefile%.*}.tree
+		cd $output_dir || exit
 	}
 	IQTREE_run () {
 		mkdir iqtree
 		cd iqtree
 		iqtree2 -s $input_alignment \
 		--prefix iqtree.${output_name} \
+		-Q $partition_file \
 		-T $threads --seed 1234 > iqtree.long_log
 		treefile=$(ls *.treefile)
 		mv $treefile ../${treefile%.*}.tree
