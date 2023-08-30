@@ -918,6 +918,7 @@ TREE_BUILD () {
 		cd raxml
 		raxmlHPC-PTHREADS $RAxML_speciestree_options \
 		-s $input_alignment \
+		-q $partition_file \
 		-n ${output_name} \
 		> ./RAxML_output.1 2>&1
 		treefile=$(ls RAxML_bipartitionsBranchLabels*)

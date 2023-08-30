@@ -25,7 +25,7 @@ Optional:
 -d  Force ANI subsetting to run on transcript or genome Datasets. ([genome],transcript)
 	Using \"-a\" implies \"-d transcript\".
 	If \"-a\" is declared but you want to use the assemblies you have also provided, set \"-d genome\"
-	If \"-a\" not used but you want to use transcripts (annotated within OrthoPhyl) for ANI subsetting, set \"-d transcript\"
+	If \"-a\" not used but you want to use transcripts (annotated within OrthoPhyl by Prodigal) for ANI subsetting, set \"-d transcript\"
 -T	run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast)
 -h	display a description and a super useful usage message
 ###############################################################\n
@@ -168,6 +168,7 @@ while [[ $N -lt $L ]] ; do
           fi
           input_genomes="$( cd "$(relative_absolute ${2})" && pwd )"
           genomes_provided=true
+		  ANI_genome = true
           if [[ ! -d "${input_genomes}" ]]; then
             echo "WARNING: -g declaring an input genome directory that does not exist...maybe check on that"
             exit 1
@@ -447,6 +448,9 @@ MAIN_PIPE () {
 	elif [ "$ANI_genome" = true ]
 	then
 		ANI_dataset=$genome_dir
+	else
+		echo "PANIC: no dataset declared for ANI_species_shortlist to chew on"
+		exit
 	fi
        	# find subset of genomes or transcripts that represents diversity of full set
 	#   if number of sequence files is greater than the max number to send through orthofinder
