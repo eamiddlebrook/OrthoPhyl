@@ -168,7 +168,7 @@ while [[ $N -lt $L ]] ; do
           fi
           input_genomes="$( cd "$(relative_absolute ${2})" && pwd )"
           genomes_provided=true
-		  ANI_genome = true
+		  ANI_genome=true
           if [[ ! -d "${input_genomes}" ]]; then
             echo "WARNING: -g declaring an input genome directory that does not exist...maybe check on that"
             exit 1

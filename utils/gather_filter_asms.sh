@@ -551,3 +551,17 @@ filter_for_redundancy () {
 
 # run main pipe
 main
+
+
+######################
+##### notes ##########
+#####################
+# change file names
+rename_asm_files () {
+	while IFS= read -r line 
+		do new_name=$(echo -e $line | awk '{print $3_$1}') 
+		name=$(echo -e $line | awk '{print $1}') ; echo $new_name 
+		echo $name
+		cp Glutamicibacter_genomes.8.28.23/assemblies_all.TMP/$name* Paeniglutamicibacter_genomes4manuscript_tree/$new_name.fna
+		done < Glutamicibacter_genomes.8.28.23/all_asm_acc_metadata
+}
