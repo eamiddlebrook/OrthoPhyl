@@ -18,7 +18,7 @@ conda activate gather_genomes || exit
 export taxon="$1"
 export NCBI_assemblies=$2
 wd=$(pwd)/$NCBI_assemblies
-threads=2
+threads=$3
 # Set these if you hav a good idea of the expected values
 # if not, set to "default" and they will be set as the average+-(3*stddev)
 # of course stddev is a bit weird because the values are almost surely not normal..
@@ -38,8 +38,8 @@ MAX_contam_default="0.2"
 
 #taxonomy_check=FALSE
 
-mkdir $NCBI_assemblies
-cd $NCBI_assemblies
+mkdir $wd
+cd $wd || (echo $wd "doesnt exist...exiting" ; exit)
 mkdir ./assemblies_datasets_uniq
 echo "Output will be in $wd"
 
