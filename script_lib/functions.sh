@@ -17,6 +17,8 @@ SET_UP_DIR_STRUCTURE () {
 	if [ -f $store/setup.complete ]
 	then
 		echo "Output folder setup seems to be already completed"
+		echo "   Resetting min_num_orthos in case OrthoPhyl crashed between Setup and SCO_min_num_orthos"
+		export min_num_orthos=$(printf %.0f $(echo "$(cat $store/all_input_list | wc -l)*$min_frac_orthos" | bc))
 		echo " If this is not correct please rm $store/setup.complete and restart OrthoPhyl"
 	else
 		# set up annotation output directories
