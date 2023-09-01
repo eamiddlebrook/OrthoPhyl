@@ -834,6 +834,9 @@ SCO_MIN_ALIGN () {
 	echo "Concatenating fasta alignments to fasta format"
 	perl $catfasta2phyml_cmd -f -c ../OG_SCO_$min_num_orthos.align/*.fa \
         1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
+	# fixing partion file to make compatable with iqtree
+	cat SCO_$min_num_orthos.codon_aln.trm.sco.nm.partitions.tmp | awk '{print "DNA,\t"$0}' \
+		> SCO_$min_num_orthos.codon_aln.trm.sco.nm.partitions && rm SCO_$min_num_orthos.codon_aln.trm.sco.nm.partitions.tmp
 }
 
 #####################################
@@ -891,6 +894,7 @@ SCO_strict () {
 		1> SCO_strict.codon_aln.trm.sco.nm.phy 2> SCO_strict.codon_aln.trm.sco.nm.partitions.tmp
 	perl $catfasta2phyml_cmd -f -c $wd/OG_SCO_strict.align/*.fa \
         1> SCO_strict.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
+	# fixing partion file to make compatable with iqtree
 	cat SCO_strict.codon_aln.trm.sco.nm.partitions.tmp | awk '{print "DNA,\t"$0}' \
 		> SCO_strict.codon_aln.trm.sco.nm.partitions && rm SCO_strict.codon_aln.trm.sco.nm.partitions.tmp
 }
@@ -913,6 +917,12 @@ TREE_BUILD () {
 	threads=$3
 	output_name=$(basename ${input_alignment%.*.*.*.*})
 	partition_file=${input_alignment%.*}.partitions
+	if [ $use_partitions == "true" ]
+	then
+		# edge-unlinked partition merging for IQTREE
+		IQtree_partitions="-Q $partition_file -m MFP+MERGE"
+		RAxML_partitions="-q $partition_file"
+	fi
 	cd $output_dir || exit
 	# subfunction to run RAxml
 	RAxML_run () {
@@ -920,11 +930,11 @@ TREE_BUILD () {
 		cd raxml
 		raxmlHPC-PTHREADS $RAxML_speciestree_options \
 		-s $input_alignment \
-		-q $partition_file \
+		$RAxML_partitions \
 		-n ${output_name} \
 		> ./RAxML_output.1 2>&1
 		treefile=$(ls RAxML_bipartitionsBranchLabels*)
-		mv $treefile ../${treefile}.tree
+		mv $treefile ../${treefile}.tree && touch ./${treefile%.*}.complete || echo -e "\n!!!!!!!!\nWARNING\n!!!!!!!!!!\n\tRAxML failed to run on "$input_alignment
 		cd $output_dir || exit
 
 	}
@@ -938,18 +948,17 @@ TREE_BUILD () {
 		-nt ${input_alignment%.*}.fa \
 		> ./fastTree_log.${output_name} 2>&1
 		treefile=fastTree.${output_name}.tree_working
-		mv $treefile ./${treefile%.*}.tree
+		mv $treefile ./${treefile%.*}.tree && touch ./${treefile%.*}.complete || echo -e "\n!!!!!!!!\nWARNING\n!!!!!!!!!!\n\tFastTree failed to run on "$input_alignment
 		cd $output_dir || exit
 	}
 	IQTREE_run () {
 		mkdir iqtree
 		cd iqtree
 		iqtree2 -s $input_alignment \
-		--prefix iqtree.${output_name} \
-		-Q $partition_file -m MFP+MERGE \
-		-T $threads --seed 1234 > iqtree.long_log
+		--prefix iqtree.${output_name} $IQtree_partitions $IQtree_speciestree_options\
+		-T $threads --seed 1234 > iqtree.${output_name}.long_log
 		treefile=$(ls *.treefile)
-		mv $treefile ../${treefile%.*}.tree
+		cp $treefile ../${treefile%.*}.tree && touch ../${treefile%.*}.complete || echo -e "\n!!!!!!!!\nWARNING\n!!!!!!!!!!\n\tIQTree failed to run on "$input_alignment
 		cd $output_dir || exit
 
 	}
