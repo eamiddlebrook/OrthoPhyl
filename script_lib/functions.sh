@@ -830,7 +830,7 @@ SCO_MIN_ALIGN () {
 	echo "Concatenating fasta alignments to phylip format"
 	cd $wd/SpeciesTree/ || exit
 	perl $catfasta2phyml_cmd -c ../OG_SCO_$min_num_orthos.align/*.fa \
-		1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.phy 2> SCO_$min_num_orthos.codon_aln.trm.sco.nm.partitions
+		1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.phy 2> SCO_$min_num_orthos.codon_aln.trm.sco.nm.partitions.tmp
 	echo "Concatenating fasta alignments to fasta format"
 	perl $catfasta2phyml_cmd -f -c ../OG_SCO_$min_num_orthos.align/*.fa \
         1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
