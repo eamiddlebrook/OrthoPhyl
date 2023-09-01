@@ -17,7 +17,7 @@ export use_partitions=true # allow users to turn off (with "false") the use of p
 # options to add to standard species tree software runs. Will exopse properly at some point...
 export fasttree_speciestree_options="-gtr -gamma" # inherits number of threads from env variable $threads durring execution
 export RAxML_speciestree_options="-T $threads -f a  -m GTRGAMMA -x 1234 -N 100"
-export IQtree_speciestree_options="-lmap --symtest"
+export IQtree_speciestree_options="-lmap 2000 --symtest"
 # program to generate gene trees for running ASTRAL
 export gene_tree_methods=("fasttree")
 # structural gene annotation options
