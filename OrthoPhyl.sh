@@ -18,6 +18,10 @@ Optional:
 -r	flag to rerun orthofinder on the ANI_shorlist (true/[false])
 -a	max number of genomes to run through OrthoFinder. 
 	If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on [2]
+-m minimum number of taxa per orthogroup to consider it for the relaxed SCO dataset. 
+	A value of <0 will lead to only estimating trees for the SCO_stict dataset.
+	expects a float less than (not equal!) 1 
+	[0.30]
 -T	run test dataset, incompatable with -g|s (TESTER,TESTER_chloroplast)
 -h	display a description and a super useful usage message
 ###############################################################\n
@@ -228,8 +232,16 @@ while [[ $N -lt $L ]] ; do
           ANI_shortlist=${2} 
           ARGS_SET+=a
           shift ;;
-
-     'T') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
+     
+	 'm') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+            USAGE
+            exit 1
+          fi
+          min_num_orthos=${2} 
+          ARGS_SET+=m
+          shift ;;
+     
+	 'T') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
 	    USAGE
 	    exit 1
 	  fi
@@ -370,8 +382,11 @@ MAIN_PIPE () {
 	PAL2NAL
 	TRIM_TRANS
 	ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
-	SCO_MIN_ALIGN $min_num_orthos
-	ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+	if [ $min_num_orthos -gt 0 ]
+	then
+		SCO_MIN_ALIGN $min_num_orthos
+		ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+	fi
 	SCO_strict
 	ALIGNMENT_STATS $wd/OG_SCO_strict.align
 	for I in $wd/SpeciesTree/*.trm.sco.nm.phy
@@ -386,7 +401,10 @@ MAIN_PIPE () {
         fi
 	allTransGENE_TREEs
 	# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
-	astral_TransGENE2SPECIES_TREE $wd/OG_SCO_$min_num_orthos
+	if [ $min_num_orthos -gt 0 ]
+	then
+		astral_TransGENE2SPECIES_TREE $wd/OG_SCO_$min_num_orthos
+	fi
 	astral_TransGENE2SPECIES_TREE $wd/OG_SCO_strict
 	WRAP_UP
 	if [[ $TESTER == "TESTER" ]]
