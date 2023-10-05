@@ -18,7 +18,7 @@ Optional:
 -r	flag to rerun orthofinder on the ANI_shorlist (true/[false])
 -a	max number of genomes to run through OrthoFinder. 
 	If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on [2]
--m minimum number of taxa per orthogroup to consider it for the relaxed SCO dataset. 
+-m 	minimum number of taxa per orthogroup to consider it for the relaxed SCO dataset. 
 	Expects a float from 0-1
 	A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset. 
 	[0.30]
@@ -243,7 +243,7 @@ while [[ $N -lt $L ]] ; do
 			USAGE
 			exit 1
 		  fi
-		  if [[ $2 -eg 0 || $2 -eg 1 ]]
+		  if [[ $2 -eq 0 || $2 -eq 1 ]]
 		  then
 		  	relaxed=false
 		  else
