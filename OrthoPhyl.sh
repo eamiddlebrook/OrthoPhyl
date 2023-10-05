@@ -6,8 +6,8 @@ USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_out
 # ALL arguments are optional if set in control_file.required
 #   Many default parameters are set in control_file.defaults
 Required:
--g	full path to genomes directiory
--s	full path to the main directory for output
+-g	path to genomes directiory
+-s	path to the main directory for output
 Optional:
 -t	threads to use [4]
 -p     phylogenetic tree software to use [fasttree, raxml, and/or iqtree] 
@@ -19,8 +19,8 @@ Optional:
 -a	max number of genomes to run through OrthoFinder. 
 	If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on [2]
 -m minimum number of taxa per orthogroup to consider it for the relaxed SCO dataset. 
-	A value of <0 will lead to only estimating trees for the SCO_stict dataset.
-	expects a float less than (not equal!) 1 
+	Expects a float from 0-1
+	A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset. 
 	[0.30]
 -T	run test dataset, incompatable with -g|s (TESTER,TESTER_chloroplast)
 -h	display a description and a super useful usage message
@@ -237,9 +237,20 @@ while [[ $N -lt $L ]] ; do
             USAGE
             exit 1
           fi
-          min_num_orthos=${2} 
-          ARGS_SET+=m
-          shift ;;
+		  if [[ $2 -gt 1 || $2 -lt 0 ]]
+		  then
+		  	echo "-m set to $2, but should be between 0-1"
+			USAGE
+			exit 1
+		  fi
+		  if [[ $2 -eg 0 || $2 -eg 1 ]]
+		  then
+		  	relaxed=false
+		  else
+          	min_num_orthos=${2} 
+          	ARGS_SET+=m
+          fi
+		  shift ;;
      
 	 'T') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
 	    USAGE
@@ -382,7 +393,7 @@ MAIN_PIPE () {
 	PAL2NAL
 	TRIM_TRANS
 	ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
-	if [ $min_num_orthos -gt 0 ]
+	if [[ ! $relaxed -eq false ]]
 	then
 		SCO_MIN_ALIGN $min_num_orthos
 		ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
@@ -401,7 +412,7 @@ MAIN_PIPE () {
         fi
 	allTransGENE_TREEs
 	# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
-	if [ $min_num_orthos -gt 0 ]
+	if [[ ! $relaxed -eq false ]]
 	then
 		astral_TransGENE2SPECIES_TREE $wd/OG_SCO_$min_num_orthos
 	fi
