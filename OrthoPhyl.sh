@@ -20,8 +20,12 @@ Optional:
 	Will override values set on command line! [NULL]
 -x	trimal paramerter string (in double \"quotes\")
 -r	flag to rerun orthofinder on the ANI_shorlist (true/[false])
--n	max number of proteomes to run through OrthoFinder.
+-n	Max number of proteomes to run through OrthoFinder.
 	If more than this many assemblies are provided, a subset of proteomes (based on genomes/transcripts ANI) will be chosen for OrthoFinder to chew on [20]
+-m 	Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
+        Expects a float from 0-1
+        A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
+        [0.30]
 -d  Force ANI subsetting to run on transcript or genome Datasets. ([genome],transcript)
 	Using \"-a\" implies \"-d transcript\".
 	If \"-a\" is declared but you want to use the assemblies you have also provided, set \"-d genome\"
@@ -225,7 +229,24 @@ while [[ $N -lt $L ]] ; do
 	   fi
 	   ARGS_SET+=a
           shift ;;
-
+    'm') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
+            USAGE
+            exit 1
+          fi
+                  if [[ $2 -gt 1 || $2 -lt 0 ]]
+                  then
+                        echo "-m set to $2, but should be between 0-1"
+                        USAGE
+                        exit 1
+                  fi
+                  if [[ $2 -eg 0 || $2 -eg 1 ]]
+                  then
+                        relaxed=false
+                  else
+                min_num_orthos=${2}
+                ARGS_SET+=m
+          fi
+                  shift ;;
      't') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
             USAGE
             exit 1
@@ -471,8 +492,11 @@ MAIN_PIPE () {
 	PAL2NAL
 	TRIM_TRANS
 	ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
-	SCO_MIN_ALIGN $min_num_orthos
-	ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+	if [[ ! $relaxed -eq false ]]
+        then
+		SCO_MIN_ALIGN $min_num_orthos
+		ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+	fi
 	SCO_strict
 	ALIGNMENT_STATS $wd/OG_SCO_strict.align
 	for I in $wd/SpeciesTree/*.trm.sco.nm.phy
@@ -487,7 +511,10 @@ MAIN_PIPE () {
         fi
 	allTransGENE_TREEs
 	# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
-	astral_TransGENE2SPECIES_TREE $wd/OG_SCO_$min_num_orthos
+	if [[ ! $relaxed -eq false ]]
+        then
+		astral_TransGENE2SPECIES_TREE $wd/OG_SCO_$min_num_orthos
+	fi
 	astral_TransGENE2SPECIES_TREE $wd/OG_SCO_strict
 	WRAP_UP
 	if [[ $TESTER == "TESTER" ]]
