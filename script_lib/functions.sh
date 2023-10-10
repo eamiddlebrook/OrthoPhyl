@@ -607,7 +607,7 @@ REALIGN_ORTHOGROUP_PROTS () {
 		# Progress sent to stdout
                	if [ $((J % percent)) -eq 0 ]
                 then
-			echo $((J/percent*10))" percent of the way through the hmm search"
+			echo $((J/percent*10))" percent of the way through the extraction and realignment of OG prots"
                	fi
 		filter_and_Align_subfunc () {
 			local base=$(basename "${i%.*}")

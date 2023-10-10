@@ -239,7 +239,7 @@ while [[ $N -lt $L ]] ; do
                         USAGE
                         exit 1
                   fi
-                  if [[ $2 -eg 0 || $2 -eg 1 ]]
+                  if [[ $2 -eq 0 || $2 -eq 1 ]]
                   then
                         relaxed=false
                   else
