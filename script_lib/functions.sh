@@ -611,13 +611,13 @@ REALIGN_ORTHOGROUP_PROTS () {
                	fi
 		filter_and_Align_subfunc () {
 			local base=$(basename "${i%.*}")
-		        cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
+		    cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
 		        > ./OG_names/${base}.names
 			# pulling out prot sequences based on names in orthofinder OGs
-		        filterbyname.sh -XmX60m -Xms60m include=t \
+		    filterbyname.sh -Xmx60m -Xms60m include=t \
 		        names=./OG_names/${base}.names ignorejunk=t \
 		        in=$wd/all_prots.nm.fa out=./SequencesProts/${base}.faa \
-			>> $wd/logs/filterbyname.realign_prots 2>&1
+				>> $wd/logs/filterbyname.realign_prots 2>&1
 			# realign prots with mafft
 			mafft --quiet $wd/SequencesProts/${base}.faa > \
                 	$wd/AlignmentsProts/${base}.faa
