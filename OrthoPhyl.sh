@@ -243,7 +243,7 @@ while [[ $N -lt $L ]] ; do
                   then
                         relaxed=false
                   else
-                min_num_orthos=${2}
+            	min_num_orthos=${2}
                 ARGS_SET+=m
           fi
                   shift ;;
@@ -492,7 +492,7 @@ MAIN_PIPE () {
 	PAL2NAL
 	TRIM_TRANS
 	ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
-	if [[ ! $relaxed -eq false ]]
+	if [[ "$relaxed" != false ]]
         then
 		SCO_MIN_ALIGN $min_num_orthos
 		ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
@@ -511,7 +511,7 @@ MAIN_PIPE () {
         fi
 	allTransGENE_TREEs
 	# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
-	if [[ ! $relaxed -eq false ]]
+	if [[ "$relaxed" != false ]]
         then
 		astral_TransGENE2SPECIES_TREE $wd/OG_SCO_$min_num_orthos
 	fi
