@@ -10,6 +10,7 @@ export rerun=false # if rerunning post-Orthofinder with a different $ortho_trial
 export trimal_parameter="-resoverlap .5 -seqoverlap 50 -gt .80 -cons 60 -w 3"
 # the minimum fraction of taxa per gene alignment to be considered for the "relaxed" SCO category: "SCO_###"
 export min_frac_orthos=0.30
+export relaxed=true # need to set this for "-m 0" or "-m 1" to work (not not change)
 # methods to run for generating final species trees 
 export tree_method=("fasttree" "iqtree")
 #species tree options
