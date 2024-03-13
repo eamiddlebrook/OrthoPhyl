@@ -924,7 +924,8 @@ TREE_BUILD () {
 	IQTREE_run () {
 		mkdir iqtree
 		cd iqtree
-		iqtree2 -s $input_alignment \
+		iqtree2 $iqtree_speciestree_options \
+		-s $input_alignment \
 		--prefix iqtree.${output_name} \
 		-T $threads --seed 1234 > iqtree.long_log
 		treefile=$(ls *.treefile)

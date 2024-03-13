@@ -8,10 +8,15 @@ export threads=4
 export rerun=false # if rerunning post-Orthofinder with a different $ortho_trial, this will ensure $orthodir is declared correctly
 export trimal_parameter="-resoverlap .5 -seqoverlap 50 -gt .80 -cons 60 -w 3"
 export min_frac_orthos=0.30 #minimum fraction of total species with gene to count OG as relaxed SCO
+export gene_tree_methods=("fasttree") # used for building gene trees used by ASTRAL
+# Species tree building options
+# Note: inout, output, and Threads variable are handeled by OrthoPhyl
 export tree_method=("fasttree" "iqtree")
 export gene_tree_methods=("fasttree")
-export fasttree_speciestree_options="-gtr -gamma"
-export RAxML_speciestree_options="-T $threads -f a  -m GTRGAMMA -x 1234 -N 100"
+export iqtree_speciestree_options="-B 1000" # uses ModelFinder to pick model
+export fasttree_speciestree_options="-gtr -gamma" # does 1000 bootstraps by default
+export RAxML_speciestree_options="-T $threads -f a  -m GTRGAMMA -x 1234 -N 100" # set to 100 bootstraps, more will take a long time....
+# miscellaneous options
 export prodigal_options="-m -q"
 export ortho_trial=ortho
 export orthofinder_rerun=false
