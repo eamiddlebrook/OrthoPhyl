@@ -18,7 +18,7 @@
 singularity_images=~/singularity_images/
 mkdir ${singularity_images}
 cd ${singularity_images}
-singularity pull library://earlyevol/default/orthophyl
+singularity pull library://earlyevol/default/orthophyl:0.9.3
 ```
 Congradulations! You can skip down to testing the install!
 
@@ -76,7 +76,7 @@ mamba init bash
 ### Create conda environment and install dependencies
 #### It is highly recomended that you create an separate environment for this install. Might take some time....
 ```
-mamba create -n orthophyl --file ~/{Path_to_gits/OrthoPhyl/orthophyl_env.XXX.txt
+mamba create -n orthophyl --file ~/${Path_to_gits}/OrthoPhyl/orthophyl_env.XXX.txt
 ```
 #### OR you can install different versions if neccessary
 ```
@@ -137,7 +137,7 @@ mv fastANI ~/apps/ # or anywhere else you would like to put it. Change control_f
 ### Test Singularity container
 You must specify an output directory (-s) if running through singularity, because the script will try to write directly to the container (wont work)
 ```
-singularity run ${singularity_images}/OrthoPhyl.0.9.3.sif -T TESTER_chloroplast -s ./tester_chloroplast_output -t 4
+singularity run ${singularity_images}/orthophyl_0.9.3.sif -T TESTER_chloroplast -s ./tester_chloroplast_output -t 4
 ```
 ### Test Manual install
 #### To test 'conda activate' within OrthoPhyl, make sure the conda environment is not activated
@@ -147,7 +147,7 @@ mamba deactivate
 ### run Chloroplast test locally
 #### Tested on RHEL 8.5 machine with Intel Core i7-8700 CPU and 16gb ram (~8 minute runtime using 3 cores)
 ```
-bash ~/${Path_to_gits/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -t 3
+bash ~/${Path_to_gits}/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -t 3
 ```
 There should be a directory created in OrthoPhyl/TESTER/Workflow_test.chloroplast$(date +%m-%d-%Y)
 If the test was successful, there should be 4 species trees found in the FINAL_TREES
@@ -195,7 +195,7 @@ singularity run ${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir 
 #### Run OrthoPhyl on assemblies in ~/Projects/ASMS/ecoli/ using 12 cores within singularity and place all results and intermediate files in ~/Projects/phylogenetics/ecoli/
 ```
 
-singularity run ${singularity_images}/OrthoPhyl.0.9.3.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
+singularity run ${singularity_images}/orthophyl_0.9.3.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
 
 ```
 #### Run the same OrthoPhyl command from the manual install
