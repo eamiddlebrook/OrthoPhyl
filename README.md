@@ -115,8 +115,12 @@ unzip Astral.5.7.8.zip #change to curren version if needed
 
 cd ~/${Path_to_gits}/
 git clone https://github.com/nylander/catfasta2phyml.git
+cd catfasta2phyml
+checkout c2d04ee
+cd ../
 git clone https://github.com/dportik/Alignment_Assessment.git
 cd Alignment_Assessment/
+checkout ad5576c
 # convert script to python3
 2to3 -w Alignment_Assessment_v2.py 
 
