@@ -1,5 +1,6 @@
 # OrthoPhyl
 ## (previously OrthoPhylo...OrthoPhyl sounds better)
+## For the version of OrthoPhyl used in the publication ____, see the OrthoPhyl_1.0 branch.
 ### Developed at Los Alamos National Labs (LANL - C22064)
 #### Written by Earl Middlbrook with input from Robab Katani at Penn State and Jeanne Fair at LANL.
 #### The software is available through a GLPv3 open source licence. 
@@ -269,10 +270,10 @@ This appeared to be a problem with wget, which was resolved by updating through 
 
 
 ## OrthoPhyl Citation:
-### [Comming soon]
+### [Coming soon]
 ## Citations for dependencies
 ### If there are nested dependencies that I am missing citations for, please let me know
-### [Comming soon]
+### [Coming soon]
 + prodigal 
 + orthofinder 
 + bbmap
