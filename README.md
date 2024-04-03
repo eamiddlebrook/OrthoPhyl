@@ -1,5 +1,5 @@
 # OrthoPhyl_1.0
-
+## !!!This is the static version of OrthoPhyl used in the publication ______. Current working branch is "main"!!!
 ### Developed at Los Alamos National Labs (LANL - C22064)
 #### Written by Earl Middlbrook with input from Robab Katani at Penn State and Jeanne Fair at LANL.
 #### The software is available through a GLPv3 open source licence. 
