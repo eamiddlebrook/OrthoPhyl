@@ -1,6 +1,6 @@
 # OrthoPhyl
 ## (previously OrthoPhylo...OrthoPhyl sounds better)
-## For the version of OrthoPhyl used in the publication ____, see the OrthoPhyl_1.0 branch.
+## For the version used in *OrthoPhyl – Streamlining large scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales* see the OrthoPhyl_1.0 branch.
 ### Developed at Los Alamos National Labs (LANL - C22064)
 #### Written by Earl Middlbrook with input from Robab Katani at Penn State and Jeanne Fair at LANL.
 #### The software is available through a GLPv3 open source licence. 
