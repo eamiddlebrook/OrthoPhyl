@@ -412,32 +412,23 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 		#   This means that a distantly related ortholog will be arteficially thrown out
 		#   However, if a paralog fits this restricted  model very well, it is likey a "true" paralog in that clade
 		#	Conclusion? - it is a self limiting problem?
-		cat hmmout/${I}.hmmout | grep -ve "^#" |awk '{print $1,$6}' \
-			> hmmout/${I}.list
-		cat hmmout/${I}.list \
+		no_para_score=$(cat hmmout/${I}.hmmout | grep -ve "^#" | sed '/@/ /' | awk '{print $1,$7}' |\
+			sort -rnk2,1 |\
+			awk '{if ($1==prev) print $1,$2} {prev=$1}' |\
+			sort -rnk2 |\
+			head -n 1 | \
+			awk '{print $2}')
+		cat hmmout/${I}.hmmout |\
+			grep -ve "^#" | \
+			awk -v no_para_seq=$no_para_seq '{if ($6>no_para_seq) print $1,$6}' \
 			> hmmout/${I}.list_filter
 		# get number of putative paralogs per taxa
 		cat hmmout/${I}.list | \
 			sed 's/@/\t/g' | awk '{print $1}' | \
 			sort | uniq -c | sed 's/^ *//g' | sort -nk1,1 \
 			> ${I}.paralogs
-		# Init file for HMM-filtering output
-		echo -e "OG\thmm_score\tnum_species\tnum_seqs" > hmmout/${I}.filtering_out
-		# get number of represented species in hmmout
-		local species=$(cat hmmout/${I}.list_filter | awk 'BEGIN { FS="@" } {print $1}' | sort | uniq | wc -l)
-		# get total number of seqs in hmm output
-		local seqs=$(cat hmmout/${I}.list_filter | wc -l)
-		local score=25
-		while [ ! $seqs -eq $species ]
-		do
-	            	cat hmmout/${I}.list_filter | awk -v score="$score" '{if ($2 > score) print $1,$2}' > hmmout/${I}.list_filter_iter
-			mv hmmout/${I}.list_filter_iter hmmout/${I}.list_filter
-			local species=$(cat hmmout/${I}.list_filter | awk 'BEGIN { FS="@" } {print $1}' | sort | uniq | wc -l)
-			local seqs=$(cat hmmout/${I}.list_filter | wc -l)
-			echo -e "$I\t$score\t$species\t$seqs" >> hmmout/${I}.filtering_out
-			local score=$((score+25))
-		done
-		echo "${I} ${seqs} ${score}" >> OG_fullset_scores
+		#under construction
+		#echo "${I} ${seqs} ${score}" >> OG_fullset_scores
 		###################################################
 		# pull names from hmmout filtering and make multifasta with filterbyname
 		cat hmmout/${I}.list_filter | awk '{print $1}' > hmmout/${I}.names
