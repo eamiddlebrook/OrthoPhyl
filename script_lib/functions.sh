@@ -394,9 +394,9 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 
 	# run this block ass a function to use multiple cores and local variables
 	OG_hmm_search () {
-		local_wd=$1
-		aligned_dir=$2
-		all_prots=$3
+		local local_wd=$1
+		local aligned_dir=$2
+		local all_prots=$3
 		cd $local_wd || exit
 		# build HMM model and run search
 		hmmbuild hmms/${I}.hmm ../alignments/${I}.fa > hmmbuild_out.tmp
@@ -412,7 +412,7 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 		#   This means that a distantly related ortholog will be arteficially thrown out
 		#   However, if a paralog fits this restricted  model very well, it is likey a "true" paralog in that clade
 		#	Conclusion? - it is a self limiting problem?
-		no_para_score=$(cat hmmout/${I}.hmmout | grep -ve "^#" | sed 's/@/ /g' | awk '{print $1,$7}' |\
+		local no_para_score=$(cat hmmout/${I}.hmmout | grep -ve "^#" | sed 's/@/ /g' | awk '{print $1,$7}' |\
 			sort -rnk2,1 |\
 			awk '{if ($1==prev) print $1,$2} {prev=$1}' |\
 			sort -rnk2 |\
@@ -420,7 +420,8 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 			awk '{print $2}')
 		cat hmmout/${I}.hmmout |\
 			grep -ve "^#" | \
-			awk -v no_para_seq=$no_para_seq '{if ($6>no_para_seq) print $1,$6}' \
+			awk -v no_para_seq=$no_para_seq '{if ($6>no_para_seq) print $1,$6}' |\
+			sort -k1 \
 			> hmmout/${I}.list_filter
 		# get number of putative paralogs per taxa
 		cat hmmout/${I}.list | \
@@ -445,13 +446,13 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 	### Run $threads number of jobs at a time
 	###   Waits for all $threads jobs to finish, then starts a new round
 	###   some squishy test made this seem faster. Perhaps because file I/O was the bottleneck?
-	local_wd=$1
-	input_list=$local_wd/$2
-	alignments_TMP=$3
-	outdir=$4
-	all_prots=$5
-	threads=$6
-        percent=$(( $(cat $input_list | wc -l) / 10))
+	local local_wd=$1
+	local input_list=$local_wd/$2
+	local alignments_TMP=$3
+	local outdir=$4
+	local all_prots=$5
+	local threads=$6
+    local percent=$(( $(cat $input_list | wc -l) / 10))
 	echo "Expanding OrthoFinder OGs to full genome set if found in at least $ANI_shortlist_min_OGs taxa" | tee $run_notes
 	cd $outdir || exit
 
