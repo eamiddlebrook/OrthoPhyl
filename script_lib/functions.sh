@@ -413,7 +413,7 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 		#   However, if a paralog fits this restricted  model very well, it is likey a "true" paralog in that clade
 		#	Conclusion? - it is a self limiting problem?
 		local no_para_score=$(cat hmmout/${I}.hmmout | grep -ve "^#" | sed 's/@/ /g' | awk '{print $1,$7}' |\
-			sort -rnk2,1 |\
+			sort -k1,1 -k2,2rn |\
 			awk '{if ($1==prev) print $1,$2} {prev=$1}' |\
 			sort -rnk2 |\
 			head -n 1 | \
