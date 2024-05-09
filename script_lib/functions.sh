@@ -412,7 +412,7 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 		#   This means that a distantly related ortholog will be arteficially thrown out
 		#   However, if a paralog fits this restricted  model very well, it is likey a "true" paralog in that clade
 		#	Conclusion? - it is a self limiting problem?
-		no_para_score=$(cat hmmout/${I}.hmmout | grep -ve "^#" | sed '/@/ /' | awk '{print $1,$7}' |\
+		no_para_score=$(cat hmmout/${I}.hmmout | grep -ve "^#" | sed 's/@/ /g' | awk '{print $1,$7}' |\
 			sort -rnk2,1 |\
 			awk '{if ($1==prev) print $1,$2} {prev=$1}' |\
 			sort -rnk2 |\
