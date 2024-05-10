@@ -420,7 +420,7 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 			awk '{print $2}')
 		cat hmmout/${I}.hmmout |\
 			grep -ve "^#" | \
-			awk -v no_para_seq=$no_para_seq '{if ($6>no_para_seq) print $1,$6}' |\
+			awk -v no_para_score=$no_para_score '{if ($6>no_para_score) print $1,$6}' |\
 			sort -k1 \
 			> hmmout/${I}.list_filter
 		# get number of putative paralogs per taxa
