@@ -8,7 +8,7 @@ export output_dir=TESTER/Workflow_test.fasttest$(date +%m-%d-%Y) # the name of t
 export genomes_provided="TRUE"
 export ANI_genome=true
 export IQtree_speciestree_options="--fast"
-export use_partitions=true
+export use_partitions=false
 
 # let users overwrite number of threads to use
 if [[ ! -z ${threads+x} ]]
