@@ -1,19 +1,14 @@
 #!/bin/bash
 
-# invoked at the beginning of orthophylo.X.slurm with
-# source $script_home/control_file.required
+#### This is the control file for the TESTER_chloroplast diagnostic ####
+# please do not edit
 
-###################################
-# Required user specified options
-#   Will eventually expose all with standard -X bash style
-# genome_dir should contain multifastas (1 file per species/strain) with .fa or .fna as extention
-# multifasta file names will be taken as strain/species name
 export input_genomes=$script_home/TESTER/genomes/
 export output_dir=TESTER/Workflow_test.$(date +%m-%d-%Y) # the name of the main output dir
 genomes_provided="TRUE"
 export ANI_genome=true
 export IQtree_speciestree_options="--fast"
-
+export use_partitions=true
 
 if [[ ! -z ${threads+x} ]]
 then
