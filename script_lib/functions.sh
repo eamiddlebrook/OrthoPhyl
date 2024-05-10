@@ -424,7 +424,7 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 			sort -k1 \
 			> hmmout/${I}.list_filter
 		# get number of putative paralogs per taxa
-		cat hmmout/${I}.list | \
+		cat hmmout/${I}.hmmout | \
 			sed 's/@/\t/g' | awk '{print $1}' | \
 			sort | uniq -c | sed 's/^ *//g' | sort -nk1,1 \
 			> ${I}.paralogs
