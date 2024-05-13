@@ -1,5 +1,5 @@
 # OrthoPhyl_1.0
-## !!!This is the static version of OrthoPhyl used in the publication ______. Current working branch is "main"!!!
+## !!!This is the static version of OrthoPhyl used in the G3 publication *OrthoPhyl - Streamlining large scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales*. Current working branch is "main"!!!
 ### Developed at Los Alamos National Labs (LANL - C22064)
 #### Written by Earl Middlbrook with input from Robab Katani at Penn State and Jeanne Fair at LANL.
 #### The software is available through a GLPv3 open source licence. 
@@ -11,7 +11,7 @@
 # Getting Started
 ## Install
 ### Compatability and Dependencies
-#### This workflow has been tested on a CentOS8 machine, but should be pretty portable. Testing is starting on diverse *nix systems. There will likely be some errors due to the wrapper having moderate bash complexity. Unfortunately fastANI seems to be incompatable with MacOS, so I will need to find an alternative before the pipeline can be run on that architecture.
+#### This workflow has been tested on a CentOS8 machine, but should be pretty portable to other Linux OS systems. Testing is starting on diverse *nix systems. There will likely be some errors due to the wrapper having moderate bash complexity. Unfortunately fastANI seems to be incompatable with MacOS, so I will need to integrate an alternative before the pipeline can be run on that architecture.
 ### Dependencies
 #### If you have Singularity you can run a prebuilt container. Grab the container with (requires ~1.5gb space at the moment):
 ```
@@ -47,8 +47,8 @@ Congradulations! You can skip down to testing the install!
 Cloning takes a minute because of the large test files
 ```
 Path_to_gits=~/gits
-mkdir ~/${Path_to_gits}
-cd ~/${Path_to_gits}/
+mkdir ${Path_to_gits}
+cd ${Path_to_gits}
 git clone https://github.com/eamiddlebrook/OrthoPhyl.git
 cd OrthoPhyl
 ```
@@ -76,7 +76,7 @@ mamba init bash
 ### Create conda environment and install dependencies
 #### It is highly recomended that you create an separate environment for this install. Might take some time....
 ```
-mamba create -n orthophyl --file ~/${Path_to_gits}/OrthoPhyl/orthophyl_env.XXX.txt
+mamba create -n orthophyl --file ${Path_to_gits}/OrthoPhyl/orthophyl_env.XXX.txt
 ```
 #### OR you can install different versions if neccessary
 ```
@@ -107,14 +107,14 @@ Rscript --help
 ### Other dependencies
 This reflects how I like to organize my machine, pick what works for you. The control_file.paths reflects this setup. If you choose to install the below packages in different locations, just change control_file.paths to reflect this.
 ```
-cd ~/${Path_to_gits}/
+cd ${Path_to_gits}/
 # Install ASTRAL
 git clone https://github.com/smirarab/ASTRAL.git
 cd ASTRAL
 git checkout d5995c64
 unzip Astral.5.15.5.zip #change to curren version if needed
 
-cd ~/${Path_to_gits}/
+cd ${Path_to_gits}/
 git clone https://github.com/nylander/catfasta2phyml.git
 cd catfasta2phyml
 git checkout 2427867
@@ -136,7 +136,7 @@ mkdir ~/apps/
 mv fastANI ~/apps/ # or anywhere else you would like to put it. Change control_file.required to reflect path
 ```
 
-### Edit ```~/${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
+### Edit ``${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
 
 ## Test install
 ### Test Singularity container
@@ -152,7 +152,7 @@ mamba deactivate
 ### run Chloroplast test locally
 #### Tested on RHEL 8.5 machine with Intel Core i7-8700 CPU and 16gb ram (~8 minute runtime using 3 cores)
 ```
-bash ~/${Path_to_gits}/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -t 3
+bash ${Path_to_gits}/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -t 3
 ```
 There should be a directory created in OrthoPhyl/TESTER/Workflow_test.chloroplast$(date +%m-%d-%Y)
 If the test was successful, there should be 4 species trees found in the FINAL_TREES
