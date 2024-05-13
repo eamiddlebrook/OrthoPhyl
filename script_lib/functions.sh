@@ -62,6 +62,8 @@ SET_UP_DIR_STRUCTURE () {
 		for I in $(ls ./ | grep \)); do   mv $I ${I//\)/}; done
 		for I in $(ls ./ | grep \(); do   mv $I ${I//\(/}; done
 		for I in $(ls ./ | grep "_\=_" ); do mv $I ${I//_\=_} ; done
+		# fix contig names with "|" what breaks everything post annotion
+		for I in $(grep -lm 1 -d recurse ./ -e "|");do sed -i 's/|/_/g' $I; done
 		#make a file with the genome names for later use
 		ls > $store/genome_list
 
