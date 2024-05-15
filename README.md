@@ -136,7 +136,7 @@ mkdir ~/apps/
 mv fastANI ~/apps/ # or anywhere else you would like to put it. Change control_file.required to reflect path
 ```
 
-### Edit ``${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
+### Edit ``${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than described above
 
 ## Test install
 ### Test Singularity container
