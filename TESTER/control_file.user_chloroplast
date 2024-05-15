@@ -10,6 +10,8 @@
 # multifasta file names will be taken as strain/species name
 export input_genomes=$script_home/TESTER/genomes_chloroplast
 export output_dir=TESTER/Workflow_test.chloroplast$(date +%m-%d-%Y) # the name of the main output dir
+export iqtree_speciestree_options="--fast" # uses ModelFinder to pick model
+
 
 if [[ ! -z ${threads+x} ]]
 then

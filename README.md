@@ -76,7 +76,7 @@ mamba init bash
 ### Create conda environment and install dependencies
 #### It is highly recomended that you create an separate environment for this install. Might take some time....
 ```
-mamba create -n orthophyl --file ${Path_to_gits}/OrthoPhyl/orthophyl_env.XXX.txt
+mamba create -n orthophyl --file ${Path_to_gits}/OrthoPhyl/orthophyl_env.XXX.yml
 ```
 #### OR you can install different versions if neccessary
 ```
