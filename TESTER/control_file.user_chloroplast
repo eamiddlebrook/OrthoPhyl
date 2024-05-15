@@ -11,6 +11,7 @@ export ANI_genome=true
 export IQtree_speciestree_options="--fast"
 export use_partitions=false
 
+# let users overwrite number of threads to use
 if [[ ! -z ${threads+x} ]]
 then
         export threads
