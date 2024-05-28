@@ -48,8 +48,8 @@ Congradulations! You can skip down to testing the install!
 Cloning takes a minute because of the large test files
 ```
 Path_to_gits=~/gits
-mkdir ~/${Path_to_gits}
-cd ~/${Path_to_gits}/
+mkdir ${Path_to_gits}
+cd ${Path_to_gits}/
 git clone https://github.com/eamiddlebrook/OrthoPhyl.git
 cd OrthoPhyl
 ```
@@ -77,7 +77,7 @@ mamba init bash
 ### Create conda environment and install dependencies
 #### It is highly recomended that you create an separate environment for this install. Might take some time....
 ```
-mamba create -n orthophyl --file ~/{Path_to_gits/OrthoPhyl/orthophyl_env.XXX.txt -c bioconda -c conda-forge
+mamba create -n orthophyl --file $Path_to_gits/OrthoPhyl/orthophyl_env.XXX.txt -c bioconda -c conda-forge
 ```
 #### OR you can install different versions if neccessary
 ```
@@ -108,13 +108,13 @@ Rscript --help
 ### Other dependencies
 This reflects how I like to organize my machine, pick what works for you. The control_file.paths reflects this setup. If you choose to install the below packages in different locations, just change control_file.paths to reflect this.
 ```
-cd ~/${Path_to_gits}/
+cd ${Path_to_gits}/
 # Install ASTRAL
 git clone https://github.com/smirarab/ASTRAL.git
 cd ASTRAL
 unzip Astral.5.7.8.zip #change to curren version if needed
 
-cd ~/${Path_to_gits}/
+cd ${Path_to_gits}/
 git clone https://github.com/nylander/catfasta2phyml.git
 git clone https://github.com/dportik/Alignment_Assessment.git
 cd Alignment_Assessment/
@@ -132,7 +132,7 @@ mkdir ~/apps/
 mv fastANI ~/apps/ # or anywhere else you would like to put it. Change control_file.required to reflect path
 ```
 
-### Edit ```~/${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
+### Edit ```${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
 
 ## Test install
 ### Test Singularity container
@@ -148,7 +148,7 @@ mamba deactivate
 ### run Chloroplast test locally
 #### Tested on RHEL 8.5 machine with Intel Core i7-8700 CPU and 16gb ram (~8 minute runtime using 3 cores)
 ```
-bash ~/${Path_to_gits}/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -t 3
+bash ${Path_to_gits}/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -t 3
 ```
 There should be a directory created in OrthoPhyl/TESTER/Workflow_test.chloroplast$(date +%m-%d-%Y)
 If the test was successful, there should be 4 species trees found in the FINAL_TREES
