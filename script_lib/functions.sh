@@ -915,7 +915,7 @@ TREE_BUILD () {
 	if [ $use_partitions == "true" ]
 	then
 		# edge-unlinked partition merging for IQTREE
-		IQtree_partitions="-Q $partition_file -m MFP+MERGE"
+		IQtree_partitions="-Q $partition_file $IQtree_partition_options"
 		RAxML_partitions="-q $partition_file"
 	fi
 	cd $output_dir || exit
@@ -958,7 +958,7 @@ TREE_BUILD () {
 
 	}
 
-	# decide which tree method to use for the cancatenate gene nuc matrix
+	# decide which tree method(s) to use for the cancatenate gene nuc matrix
 	
 
 	if [[ " ${tree_method[*]} " =~ " raxml " ]]
