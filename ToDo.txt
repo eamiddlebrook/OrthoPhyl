@@ -1,4 +1,9 @@
 # Tasks to better OP
+## working on...
+protein trees
+    check that CDS,prot,both options work in main function
+    rename CDS specific parameters 
+
 ## big task
 [] synteny aware orthology (like genespace)
 [] add "best genomes" choice to ANI subsample 

@@ -16,6 +16,9 @@ Optional:
 -t	threads to use [4]
 -p  phylogenetic tree software to use fasttree, raxml, and/or iqtree [\"fasttree iqtree\"]
 	i.e. -p \"fasttree iqtree\"
+-o  "omics" data to use for tree building ([CDS], prot, both)
+	for divergent sequences, it is good to compare protein trees to 
+	nucleotide trees to identify artifacts of saturation (long branch attraction)
 -c	path to a control file with required variables and any optional ones to override defaults.
 	Will override values set on command line! [NULL]
 -x	trimal paramerter string (in double \"quotes\")
@@ -187,7 +190,15 @@ while [[ $N -lt $L ]] ; do
           store=$(relative_absolute ${2})
           ARGS_SET+=s
           shift ;;
-
+	 'o') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
+            USAGE 
+            exit 1 
+          fi
+          if [ ${2} == "CDS" || ${2} == "prot" || ${2} == "both" ]
+			TREE_DATA=${2}
+			ARGS_SET+=o
+          fi
+		  shift ;;
      'p') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
             USAGE 
             exit 1 
@@ -293,7 +304,7 @@ while [[ $N -lt $L ]] ; do
 	  if [ ${2} == "genome" ]
 	  then
 	     ANI_genome=true
-          elif [ ${2} == "transcript" ]
+      elif [ ${2} == "transcript" ]
 	  then
 	     ANI_trans=true
           else
@@ -489,7 +500,7 @@ MAIN_PIPE () {
 		ORTHO_RUN ${prots4ortho}
 		REALIGN_ORTHOGROUP_PROTS
 	fi
-	
+
 	# pick whether to make prot, trans or both trees
 	if [ "$PROT_TREE" = true ]
 	then
