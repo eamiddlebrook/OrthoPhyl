@@ -952,7 +952,7 @@ TREE_BUILD () {
 		iqtree2 -s $input_alignment \
 		--prefix iqtree.${output_name} $IQtree_partitions $IQtree_speciestree_options\
 		-T $threads --seed 1234 > iqtree.${output_name}.long_log
-		treefile=$(ls *.treefile)
+		treefile=$(ls iqtree.${output_name}.treefile)
 		cp $treefile ../${treefile%.*}.tree && touch ../${treefile%.*}.complete || echo -e "\n!!!!!!!!\nWARNING\n!!!!!!!!!!\n\tIQTree failed to run on "$input_alignment
 		cd $output_dir || exit
 
