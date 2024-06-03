@@ -489,39 +489,53 @@ MAIN_PIPE () {
 		ORTHO_RUN ${prots4ortho}
 		REALIGN_ORTHOGROUP_PROTS
 	fi
-	PAL2NAL
-	TRIM_TRANS
-	ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
-	if [[ "$relaxed" != false ]]
-        then
-		SCO_MIN_ALIGN $min_num_orthos
-		ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
-	fi
-	SCO_strict
-	ALIGNMENT_STATS $wd/OG_SCO_strict.align
-	for I in $wd/SpeciesTree/*.trm.sco.nm.phy
-        do
-		TREE_BUILD $wd/SpeciesTree/ $I $threads
-	done
-	if [ ! $ANI = true ]
-        then
-                # at the moment it doesnt make sense to make trees from OF if using ANI
-                # (only a shortlist genomes will be in the tree)
-                orthofinderGENE2SPECIES_TREE
-        fi
-	allTransGENE_TREEs
-	# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
-	if [[ "$relaxed" != false ]]
-        then
-		astral_TransGENE2SPECIES_TREE $wd/OG_SCO_$min_num_orthos
-	fi
-	astral_TransGENE2SPECIES_TREE $wd/OG_SCO_strict
-	WRAP_UP
-	if [[ $TESTER == "TESTER" ]]
+	
+	# pick whether to make prot, trans or both trees
+	if [ "$PROT_TREE" = true ]
 	then
-		TESTER_compare
+		echo "placeholder for prot tree workflow
+		TRIM_PROTS
+		concatenate_prots
+		build_ML_trees
+		build_gene_trees
+		build_ASTRAL_trees
+		"
 	fi
-
+	if [ "$TRANS_TREE" = true ]
+	then
+		PAL2NAL
+		TRIM_TRANS
+		ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
+		if [[ "$relaxed" != false ]]
+		then
+			SCO_MIN_ALIGN $min_num_orthos
+			ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+		fi
+		SCO_strict
+		ALIGNMENT_STATS $wd/OG_SCO_strict.align
+		for I in $wd/SpeciesTree/*.trm.sco.nm.phy
+			do
+			TREE_BUILD $wd/SpeciesTree/ $I $threads
+		done
+		if [ ! $ANI = true ]
+			then
+					# at the moment it doesnt make sense to make trees from OF if using ANI
+					# (only a shortlist genomes will be in the tree)
+					orthofinderGENE2SPECIES_TREE
+			fi
+		allTransGENE_TREEs
+		# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
+		if [[ "$relaxed" != false ]]
+			then
+			astral_TransGENE2SPECIES_TREE $wd/OG_SCO_$min_num_orthos
+		fi
+		astral_TransGENE2SPECIES_TREE $wd/OG_SCO_strict
+		WRAP_UP
+		if [[ $TESTER == "TESTER" ]]
+		then
+			TESTER_compare
+		fi
+	fi
 }
 ##################################################
 ##################################################
