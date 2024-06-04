@@ -190,15 +190,21 @@ while [[ $N -lt $L ]] ; do
           store=$(relative_absolute ${2})
           ARGS_SET+=s
           shift ;;
-	 'o') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
-            USAGE 
-            exit 1 
+     'o') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
+            USAGE
+            exit 1
           fi
-          if [ ${2} == "CDS" || ${2} == "prot" || ${2} == "both" ]
-			TREE_DATA=${2}
-			ARGS_SET+=o
-          fi
-		  shift ;;
+          if [[ ${2} == "CDS" || ${2} == "PROT" || ${2} == "BOTH" ]]
+	  then
+            TREE_DATA=${2}
+	    echo "Will build trees with $TREE_DATA (CDS,PROT, or BOTH)"
+            ARGS_SET+=o
+	  else
+	    USAGE
+            echo "WARNING: -o flag was used with a value other than CDS,PROT, or BOTH. You put '-o ${2}', should be e.g. '-o BOTH'"
+            exit 1
+	  fi
+	  shift ;;
      'p') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
             USAGE 
             exit 1 
@@ -502,7 +508,7 @@ MAIN_PIPE () {
 	fi
 
 	# pick whether to make prot, trans or both trees
-	if [ "$PROT_TREE" = true ]
+	if [[ "$TREE_DATA" = "PROT" || "$TREE_DATA" = "BOTH" ]]
 	then
 		echo "placeholder for prot tree workflow
 		TRIM_PROTS
@@ -512,7 +518,7 @@ MAIN_PIPE () {
 		build_ASTRAL_trees
 		"
 	fi
-	if [ "$TRANS_TREE" = true ]
+	if [[ "$TREE_DATA" = "CDS" || "$TREE_DATA" = "BOTH" ]]
 	then
 		PAL2NAL
 		TRIM_TRANS

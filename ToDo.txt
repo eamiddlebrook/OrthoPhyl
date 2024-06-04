@@ -1,8 +1,14 @@
 # Tasks to better OP
 ## working on...
 protein trees
-    check that CDS,prot,both options work in main function
+    [X] check that CDS,PROT,BOTH options work in main function
     rename CDS specific parameters 
+    [] write functions for prot specific workflow
+	TRIM_PROTS
+	concatenate_prots
+	build_ML_trees
+	build_gene_trees
+	build_ASTRAL_trees
 
 ## big task
 [] synteny aware orthology (like genespace)
