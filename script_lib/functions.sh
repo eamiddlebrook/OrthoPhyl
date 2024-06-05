@@ -843,7 +843,7 @@ SCO_MIN_ALIGN () {
 	fi
 
 }
-	
+
 cat_alignments () {
 	echo '
         ####################################################
@@ -956,7 +956,7 @@ TREE_BUILD () {
 	partition_file=${input_alignment%.*}.partitions
 	
 	# grab tree options based on what type of data (CDS vs PROT)
-	if [[ $alignment_type == "CDS"]]
+	if [[ $alignment_type == "CDS" ]]
 	then
 		# load CDS specific options
 		RAxML_speciestree_options=$RAxML_CDS_speciestree_options
