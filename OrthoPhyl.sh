@@ -509,7 +509,7 @@ MAIN_PIPE () {
 	fi
 
 	# trim protein sequences
-	TRIM $wd/AlignmentsProt "PROT"
+	TRIM $wd/AlignmentsProts "PROT"
 
 	# identify single copy orthologs in protein alignments
 	#  create files with OG names 

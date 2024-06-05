@@ -700,7 +700,7 @@ TRIM () {
 	local alignment_dir=${1}
 	local alignment_type=${2}
 	
-	echo "\nTrimming $alignment_type alignments in $alignment_dir with: 'trimal $trimal_parameter'\n"
+	echo -e "\nTrimming $alignment_type alignments in $alignment_dir with: 'trimal $trimal_parameter'\n"
 
 	cd $wd/ || exit
 	num_OGs=$(ls $alignment_dir/OG* | wc -l) # this is 1+ the real num
@@ -967,13 +967,16 @@ TREE_BUILD () {
 		fasttree_speciestree_options=$fasttree_PROT_speciestree_options
 		IQtree_speciestree_options=$IQtree_PROT_speciestree_options
 		IQtree_partition_options=$IQtree_PROT_partition_options
-	
+	fi
+
+	# if using partitions set up IQtree and RAxML options
 	if [ $use_partitions == "true" ]
 	then
 		# edge-unlinked partition merging for IQTREE
 		IQtree_partitions="-Q $partition_file $IQtree_partition_options"
 		RAxML_partitions="-q $partition_file"
 	fi
+
 	cd $output_dir || exit
 	# subfunction to run RAxml
 	RAxML_run () {
