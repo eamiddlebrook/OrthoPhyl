@@ -842,6 +842,7 @@ SCO_MIN_ALIGN () {
 		mv OG_SCO_$outstring $wd/OG_SCO_$outstring
 	fi
 
+}
 	
 cat_alignments () {
 	echo '
