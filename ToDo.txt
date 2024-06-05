@@ -3,6 +3,7 @@
 protein trees
     [X] check that CDS,PROT,BOTH options work in main function
     rename CDS specific parameters 
+    [] fix OrthoFinder only SCO ident
     [] write functions for prot specific workflow
 	TRIM_PROTS
 	concatenate_prots

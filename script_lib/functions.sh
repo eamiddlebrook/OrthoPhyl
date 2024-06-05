@@ -637,18 +637,22 @@ PAL2NAL () {
 	#####  Use PAL2NAL to produce Nuc alignments ######
 	############### from AA alignemtns ################
 	###################################################
-	#loops of all Orthogroups to#	make file with OG gene names
+	#loops of all Orthogroups to
 	#	extract transcripts sequences from a contatentated transcript file
 	#	do codon alignments with pal2nal
 	'
 	date
 	func_timing_start
+	local prot_alignment=${1}
+	local CDS_file=${3}
+	local CDS_codon_alignment=${2}
+
 	#aligning transcripts based on orthogroup protien alignments
 	cd $wd || exit
-	num_OGs=$(ls $wd/AlignmentsProts/OG*.faa | wc -l) # this is 1+ the real num
+	num_OGs=$(ls $prot_alignment/OG*.faa | wc -l) # this is 1+ the real num
 	percent=$(( num_OGs / 10))
         J=0
-	for i in $wd/AlignmentsProts/OG*.faa
+	for i in $prot_alignment/OG*.faa
 	do
 		# Progress sent to stdout
                 if [ $((J % percent)) -eq 0 ]
@@ -664,11 +668,14 @@ PAL2NAL () {
 			#pull out trans sequences for each OG
 			filterbyname.sh -Xmx60m -Xms60m include=t \
 	        	names=./OG_names/${base}.names \
-			in=all_trans.nm.fa out=./SequencesTrans/${base}.trans.fa \
+			in=$CDS_file out=./SequencesCDS/${base}.CDS.fa \
 			>> $wd/logs/filterbyname.PAL2NAL 2>&1 # changed a "/" to ">" not sure how the code ran before...
 			# protein to nuc alignments
-			pal2nal.pl $i ./SequencesTrans/${base}.trans.fa -codontable 11 -output fasta \
-			> ./AlignmentsTrans/${base}.codon_aln.fa 2> pal2nal.stderr.tmp
+			pal2nal.pl $i ./SequencesCDS/${base}.CDS.fa -codontable 11 -output fasta \
+			> $CDS_codon_alignment/${base}.codon_aln.fa 2> pal2nal.stderr.tmp
+			# fix names to only have assembly name
+			cat $CDS_codon_alignment/${base}.codon_aln.fa \
+	           	| sed 's/@.*$//g' > $CDS_codon_alignment.nm/${base}.codon_aln.nm.fa 
 		}
 		PAL2NAL_subfunc &
                 J=$((J+1))
@@ -681,44 +688,50 @@ PAL2NAL () {
 }
 
 
-TRIM_TRANS () {
-	echo '
+TRIM () {
+	echo "
 	##############################################
-	#### trim all Tran alignments with Trimal ####
+	#### trim all ${2} alignments with Trimal ####
 	####### and remove gene specific names #######
 	##############################################
-	'
+	"
 	date
 	func_timing_start
+	local alignment_dir=${1}
+	local alignment_type=${2}
+	
+	echo "\nTrimming $alignment_type alignments in $alignment_dir with: 'trimal $trimal_parameter'\n"
+
 	cd $wd/ || exit
-	num_OGs=$(ls $wd/AlignmentsTrans/OG*.fa | wc -l) # this is 1+ the real num
+	num_OGs=$(ls $alignment_dir/OG* | wc -l) # this is 1+ the real num
         percent=$(( num_OGs / 10))
         J=0
-	for I in AlignmentsTrans/OG0*.fa
+	for I in $alignment_dir/OG*
 	do
 		# Progress sent to stdout
-                if [ $((J % percent)) -eq 0 ]
-                then
-                    	echo $((J/percent*10))" percent of the way through trimming"
-                fi
-                TRIM_TRANS_subfunc () {
-			base=$(basename ${I%.*.*})
+		if [ $((J % percent)) -eq 0 ]
+		then
+				echo $((J/percent*10))" percent of the way through trimming"
+		fi
+        TRIM_subfunc () {
+			base=$(basename ${I%.*})
 			trimal \
 			-in $I -fasta \
-			-out AlignmentsTrans.trm/${base}.codon_aln.trm.fa \
+			-out $alignment_dir.trm/${base}.trm.fa \
 			$trimal_parameter > $wd/logs/trimmal_logs 2>&1
 			#remove all gene info from header for concat
 			#this is really janky: relies on adding the @ during renaming...
 			# Removes everything after the @ to leave just the sample name
-			cat AlignmentsTrans.trm/${base}.codon_aln.trm.fa \
-			| sed 's/@.*$//g' > AlignmentsTrans.trm.nm/${base}.codon_aln.trm.nm.fa
+			#cat $alignment_dir.trm/${base}.trm.fa \
+			#| sed 's/@.*$//g' > $alignment_dir.trm.nm/${base}.trm.nm.fa
+			# moved to PAL2NAL
 		}
-                TRIM_TRANS_subfunc &
-               	J=$((J+1))
-                if [ $(($J % $threads)) -eq 0 ]
-                then
-                        wait
-                fi
+		TRIM_subfunc &
+		J=$((J+1))
+		if [ $(($J % $threads)) -eq 0 ]
+		then
+				wait
+		fi
 	done
 	wait
 }
@@ -783,17 +796,27 @@ SCO_MIN_ALIGN () {
 	'
 	date
 	func_timing_start
-	min_num_orthos=$1
+	# takes folder of fasta alignments and will pull alingment names with > $min_num_orthos constituents
+	local alignment_dir=${1}
+	local min_num_orthos=${2}
+
+	if [[ $min_num_orthos == $(cat $store/all_input_list | wc -l) ]]
+	then
+		outstring="strict"
+	else
+		outstring=$min_num_orthos
+	fi
+
 	if [ "$ANI" = true ]
 	then
-		echo "Finding all ANI OGs with $min_num_orthos representetives"
+		echo "Finding all ANI OGs with $min_num_orthos representetives in $alignment_dir"
 		# make list of SCO $min_num_orthos directly from fasta
 		cd $wd || exit
-		# Iterate over trimmed alignments and pull out the number of samples per multifasta
+		# Iterate over alignments and pull out the number of samples per multifasta
 		# this has the assumption that there is only one sequence per genome
 		# should be enforced by ORTHOFINDER_TO_ALL_SEQS
 		# could add an error || exit if it becomes a problem
-		for I in AlignmentsTrans.trm.nm/OG0*.codon_aln.trm.nm.fa
+		for I in $alignment_dir/OG0*
 		do
 			# test transcript alignment for number of homologs (should have no paralogs)
 			# if greater than min_num_orthos (samples*min_frac_ortho) 
@@ -802,36 +825,58 @@ SCO_MIN_ALIGN () {
 			if [ $final_seqs -ge $min_num_orthos ]
 			then
 				base=$(basename ${I%.*.*.*.*})
-				echo $base >> $wd/OG_SCO_$min_num_orthos
+				echo $base >> $wd/OG_SCO_$outstring
 			fi
 		done
 	else
+		# going to ignore this for now...
 		cd $orthodir/ || exit
 		gene_counts="$orthodir/Orthogroups/Orthogroups.GeneCount.tsv"
 		echo "Finding all OGs directly from OrthoFinder with $min_num_orthos representetives"
 		# finds OGs with at least $min_orthologs SCOs
 		# and writes to $orthodir/OG_SCO_$min_num_orthos
 		python $OG_sco_filter $gene_counts $min_num_orthos
-		mv OG_SCO_$min_num_orthos $wd/OG_SCO_$min_num_orthos
+		mv OG_SCO_$outstring $wd/OG_SCO_$outstring
 	fi
 
+	
+cat_alignments () {
+	echo '
+        ####################################################
+        ############ Identify Single Copy Orthos ###########
+        ########### And Place in SCO_strict.align ##########
+        #### and make concattenated alignment for RAxML ####
+        ####################################################
+        '
+	date
+	func_timing_start
+	# function inputs
+	local SCO_list=${1}
+	local alignment_dir=${2}
+	local output_dir=${3}
+	local alignment_type=${4}
+
+	# output valiable
+	local SCO_dir=$SCO_list.$alignment_type.align
+	local cat_alignment_file=$SCO_list.$alignment_type.trm.sco.nm
+	
 	cd $wd || exit
-	mkdir OG_SCO_$min_num_orthos.align
+	mkdir $SCO_dir
 	echo "Creating directory with alignments of OGs with at least $min_num_orthos orthos"
-	for I in $(cat $wd/OG_SCO_$min_num_orthos):
+	for I in $(cat $SCO_list):
 	do
-		cp AlignmentsTrans.trm.nm/${I}.codon_aln.trm.nm.fa ./OG_SCO_$min_num_orthos.align/
+		cp $alignment_dir/${I}.* ./$SCO_dir/
 	done
 	echo "Concatenating fasta alignments to phylip format"
-	cd $wd/SpeciesTree/ || exit
-	perl $catfasta2phyml_cmd -c ../OG_SCO_$min_num_orthos.align/*.fa \
-		1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.phy 2> SCO_$min_num_orthos.codon_aln.trm.sco.nm.partitions.tmp
+	cd $output_dir || exit
+	perl $catfasta2phyml_cmd -c $SCO_dir/*.fa \
+		1> $cat_alignment_file.phy 2> $cat_alignment_file.partitions.tmp
 	echo "Concatenating fasta alignments to fasta format"
-	perl $catfasta2phyml_cmd -f -c ../OG_SCO_$min_num_orthos.align/*.fa \
-        1> SCO_$min_num_orthos.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
+	perl $catfasta2phyml_cmd -f -c $SCO_dir/*.fa \
+        1> $cat_alignment_file.fa 2>> $store/verbose_log.txt
 	# fixing partion file to make compatable with iqtree
-	cat SCO_$min_num_orthos.codon_aln.trm.sco.nm.partitions.tmp | awk '{print "DNA,\t"$0}' \
-		> SCO_$min_num_orthos.codon_aln.trm.sco.nm.partitions && rm SCO_$min_num_orthos.codon_aln.trm.sco.nm.partitions.tmp
+	cat $cat_alignment_file.partitions.tmp | awk '{print "DNA,\t"$0}' \
+		> $cat_alignment_file.partitions && rm $cat_alignment_file.partitions.tmp
 }
 
 #####################################
@@ -875,6 +920,7 @@ SCO_strict () {
 			fi
 		done
 	else
+		# going to ignore this for now...
 		for I in $orthodir/Single_Copy_Orthologue_Sequences/OG0*.fa
 		do
 		  	base=$(basename ${I%.*})
@@ -883,15 +929,6 @@ SCO_strict () {
 			echo $base >> $OG_SCO_strict
 		done
 	fi
-	#cat SCO_strict nuc alignments
-	cd $wd/SpeciesTree/ || exit
-	perl $catfasta2phyml_cmd -c $wd/OG_SCO_strict.align/*.fa \
-		1> SCO_strict.codon_aln.trm.sco.nm.phy 2> SCO_strict.codon_aln.trm.sco.nm.partitions.tmp
-	perl $catfasta2phyml_cmd -f -c $wd/OG_SCO_strict.align/*.fa \
-        1> SCO_strict.codon_aln.trm.sco.nm.fa 2>> $store/verbose_log.txt
-	# fixing partion file to make compatable with iqtree
-	cat SCO_strict.codon_aln.trm.sco.nm.partitions.tmp | awk '{print "DNA,\t"$0}' \
-		> SCO_strict.codon_aln.trm.sco.nm.partitions && rm SCO_strict.codon_aln.trm.sco.nm.partitions.tmp
 }
 
 
@@ -910,8 +947,27 @@ TREE_BUILD () {
 	output_dir=$1
 	input_alignment=$2
 	threads=$3
+	alignment_type=$4
 	output_name=$(basename ${input_alignment%.*.*.*.*})
 	partition_file=${input_alignment%.*}.partitions
+	
+	# grab tree options based on what type of data (CDS vs PROT)
+	if [[ $alignment_type == "CDS"]]
+	then
+		# load CDS specific options
+		RAxML_speciestree_options=$RAxML_CDS_speciestree_options
+		fasttree_speciestree_options=$fasttree_CDS_speciestree_options
+		IQtree_speciestree_options=$IQtree_CDS_speciestree_options
+		IQtree_partition_options=$IQtree_CDS_partition_options
+	
+	elif [[ $alignment_type == "PROT" ]]
+	then
+		# load PROT specific parameters
+		RAxML_speciestree_options=$RAxML_PROT_speciestree_options
+		fasttree_speciestree_options=$fasttree_PROT_speciestree_options
+		IQtree_speciestree_options=$IQtree_PROT_speciestree_options
+		IQtree_partition_options=$IQtree_PROT_partition_options
+	
 	if [ $use_partitions == "true" ]
 	then
 		# edge-unlinked partition merging for IQTREE

@@ -462,7 +462,7 @@ MAIN_PIPE () {
 	if [[ ${annots_provided+x} ]]
 	then
 		echo "trying to move gene seqs"
-		#move provided prots and trans to thier respecive folders
+		#move provided prots and trans to their respecive folders
 		for I in $(ls $input_prots/)
 		do
 			echo "moving $I"
@@ -490,7 +490,8 @@ MAIN_PIPE () {
 		echo "PANIC: no dataset declared for ANI_species_shortlist to chew on"
 		exit
 	fi
-       	# find subset of genomes or transcripts that represents diversity of full set
+    
+	# find subset of genomes or transcripts that represents diversity of full set
 	#   if number of sequence files is greater than the max number to send through orthofinder
 	if [[ $(ls $ANI_dataset | wc -l)  -gt $ANI_shortlist ]]
 	then
@@ -507,47 +508,85 @@ MAIN_PIPE () {
 		REALIGN_ORTHOGROUP_PROTS
 	fi
 
-	# pick whether to make prot, trans or both trees
+	# trim protein sequences
+	TRIM $wd/AlignmentsProt "PROT"
+
+	# identify single copy orthologs in protein alignments
+	#  create files with OG names 
+	if [[ "$relaxed" != false ]]
+		then
+			SCO_MIN_ALIGN $wd/AlignmentsProt.trm $min_num_orthos
+			#ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+	fi
+	SCO_strict $wd/AlignmentsProt.trm
+
+	# Run Prot workflow
 	if [[ "$TREE_DATA" = "PROT" || "$TREE_DATA" = "BOTH" ]]
 	then
 		echo "placeholder for prot tree workflow
-		TRIM_PROTS
-		concatenate_prots
-		build_ML_trees
-		build_gene_trees
-		build_ASTRAL_trees
+		for I in $wd/OG_SCO_*
+			do
+			cat_alignments $I $wd/AlignmentsProt.trm $wd/concatenated_alignments PROT
+			done
+		for I in $wd/concatenated_alignments/*.PROT.*.phy
+		do
+			TREE_BUILD $wd/concatenated_alignments/ $I $threads "PROT"
+		# for later...
+		#build_gene_trees
+		#build_ASTRAL_trees
 		"
 	fi
+
+	# Run CDS workflow
 	if [[ "$TREE_DATA" = "CDS" || "$TREE_DATA" = "BOTH" ]]
 	then
-		PAL2NAL
-		TRIM_TRANS
-		ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
+		# make Codon alignments for all OGs (could just do SCO_relaxed and that would grab all SCO_strict)
+		#  Its pretty fast, who cares, and might want to make SCO_very_relaxed trees
+		PAL2NAL $wd/AlignmentsProt.trm $wd/all_trans.nm.fa $wd/AlignmentTrans.trm
+		
+		# concatenate SCO alignments (only do SCO_$min_num_orthos if relaxed != false)
 		if [[ "$relaxed" != false ]]
 		then
-			SCO_MIN_ALIGN $min_num_orthos
-			ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+			cat_alignments $wd/OG_SCO_$min_num_orthos $wd/AlignmentsProt $wd/concatenated_alignments CDS
+			#ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
 		fi
-		SCO_strict
-		ALIGNMENT_STATS $wd/OG_SCO_strict.align
-		for I in $wd/SpeciesTree/*.trm.sco.nm.phy
-			do
-			TREE_BUILD $wd/SpeciesTree/ $I $threads
+		cat_alignments $wd/OG_SCO_strict $wd/AlignmentsProt $wd/concatenated_alignments CDS
+
+
+		# Build ML Species Treeeeees
+		for I in $wd/concatenated_alignments/*.CDS.*.phy
+		do
+			cat_alignments $wd/AlignmentsProt $wd/concatenated_alignments CDS
+			#ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
+			TREE_BUILD $wd/concatenated_alignments/ $I $threads "CDS"
 		done
+
+		# Not really useful, will probably remove (sort of redundant)
 		if [ ! $ANI = true ]
 			then
 					# at the moment it doesnt make sense to make trees from OF if using ANI
 					# (only a shortlist genomes will be in the tree)
 					orthofinderGENE2SPECIES_TREE
 			fi
+		
+		# build gene trees for all CDS alignments
 		allTransGENE_TREEs
+
 		# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
+		
+		# build ASTRAL tree from SCO_relaxed gene trees
 		if [[ "$relaxed" != false ]]
 			then
 			astral_TransGENE2SPECIES_TREE $wd/OG_SCO_$min_num_orthos
 		fi
+
+		# Build ASTRAL tree from SCO_strict
 		astral_TransGENE2SPECIES_TREE $wd/OG_SCO_strict
+		
+		# clean up some files
 		WRAP_UP
+
+		# if running tester script, compare trees to reference to make sure stuff worked
 		if [[ $TESTER == "TESTER" ]]
 		then
 			TESTER_compare

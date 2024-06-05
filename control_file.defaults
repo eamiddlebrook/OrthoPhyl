@@ -20,27 +20,34 @@ export prodigal_options="-m -q"
 # prefix for OrthoFinder output (legacy)
 export ortho_trial=ortho
 export orthofinder_rerun=false
+#ANI specific variables
+export ANI_shortlist=20 # max number of seqs to run through Orthofinder
 
 ### Options for CDS tree methods
 # methods to run for generating final species trees 
 export tree_method=("fasttree" "iqtree")
 # options to add to standard species tree software runs. Will exopse properly at some point...
-export fasttree_speciestree_options="-gtr -gamma" # inherits number of threads from env variable $threads durring execution
-export RAxML_speciestree_options="-T $threads -f a  -m GTRGAMMA -x 1234 -N 100"
-export IQtree_speciestree_options="-lmap 2000 --symtest -B 1000 -t PARS -ninit 2 " # --sampling GENESITE" add after current run
-export IQtree_partition_options="-m MFP+MERGE -rclusterf 10" # cluster partitions with FreeRate models using a faster (rcluster) option
+export fasttree_CDS_speciestree_options="-gtr -gamma" # inherits number of threads from env variable $threads durring execution
+export RAxML_CDS_speciestree_options="-T $threads -f a  -m GTRGAMMA -x 1234 -N 100"
+export IQtree_CDS_speciestree_options="-lmap 2000 --symtest -B 1000 -t PARS -ninit 2 " # --sampling GENESITE" add after current run
+export IQtree_CDS_partition_options="-m MFP+MERGE -rclusterf 10" # cluster partitions with FreeRate models using a faster (rcluster) option
 # program to generate gene trees for running ASTRAL
 export gene_tree_methods=("fasttree")
 
+### Protein tree specific options
+# options to add to standard species tree software runs. Will exopse properly at some point...
+export fasttree_PROT_speciestree_options="" # inherits number of threads from env variable $threads durring execution
+export IQtree_PROT_speciestree_options="-lmap 2000 --symtest -B 1000 -t PARS -ninit 2 " # --sampling GENESITE" add after current run
+export IQtree_PROT_partition_options="-m MFP+MERGE -rclusterf 10" # cluster partitions with FreeRate models using a faster (rcluster) option
 
 
+### other general stuff...
 # do you want to cleanup some intermediate files?
 export cleanup=TRUE
 # dirs and files to remove at the end of the run (if cleanup==TRUE)
 export clean_me=(prodigal_prots.preDedup prodigal_nucls.preDedup phylo_current/AlignmentsTrans phylo_current/AlignmentsTrans.trm phylo_current/SequencesProts phylo_current/SequencesTrans phylo_current/trans_gene_trees)
 ###################################
-#ANI specific variables
-export ANI_shortlist=20 # max number of seqs to run through Orthofinder
+
 
 #number of bootstraps replicates for cancatenated gene alignments tree building
 # EXPOSE LATER RAxML_bootstrap=100
