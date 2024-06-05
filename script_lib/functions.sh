@@ -699,8 +699,11 @@ TRIM () {
 	func_timing_start
 	local alignment_dir=${1}
 	local alignment_type=${2}
-	
+
 	echo -e "\nTrimming $alignment_type alignments in $alignment_dir with: 'trimal $trimal_parameter'\n"
+
+	# make output dir
+	$alignment_dir.trm
 
 	cd $wd/ || exit
 	num_OGs=$(ls $alignment_dir/OG* | wc -l) # this is 1+ the real num
