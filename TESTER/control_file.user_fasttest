@@ -34,5 +34,5 @@ fi
 # example
 export min_frac_orthos=0.50 #minimum fraction of species with SCOs to count OG
 export ANI_shortlist=4 # max number of seqs to run through Orthofinder
-export tree_method=("fasttree" "iqtree")
+export tree_method=("fasttree" "iqtree" "astral")
 export gene_tree_methods=("fasttree")

@@ -631,63 +631,6 @@ REALIGN_ORTHOGROUP_PROTS () {
 }
 
 
-PAL2NAL () {
-	echo '
-	###################################################
-	#####  Use PAL2NAL to produce Nuc alignments ######
-	############### from AA alignemtns ################
-	###################################################
-	#loops of all Orthogroups to
-	#	extract transcripts sequences from a contatentated transcript file
-	#	do codon alignments with pal2nal
-	'
-	date
-	func_timing_start
-	local prot_alignment=${1}
-	local CDS_file=${3}
-	local CDS_codon_alignment=${2}
-
-	#aligning transcripts based on orthogroup protien alignments
-	cd $wd || exit
-	num_OGs=$(ls $prot_alignment/OG*.faa | wc -l) # this is 1+ the real num
-	percent=$(( num_OGs / 10))
-        J=0
-	for i in $prot_alignment/OG*.faa
-	do
-		# Progress sent to stdout
-                if [ $((J % percent)) -eq 0 ]
-                then
-			echo $((J/percent*10))" percent of the way through the PAL2NAL"
-                fi
-		# why the hell did I declare this function with in the loop...probably because of the "local bass=...". this should be passed in with a variable. 
-		PAL2NAL_subfunc () {
-			#get basename (OG000????)
-			local base=$(basename ${i%.*})
-			cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
-	        	> ./OG_names/${base}.names
-			#pull out trans sequences for each OG
-			filterbyname.sh -Xmx60m -Xms60m include=t \
-	        	names=./OG_names/${base}.names \
-			in=$CDS_file out=./SequencesCDS/${base}.CDS.fa \
-			>> $wd/logs/filterbyname.PAL2NAL 2>&1 # changed a "/" to ">" not sure how the code ran before...
-			# protein to nuc alignments
-			pal2nal.pl $i ./SequencesCDS/${base}.CDS.fa -codontable 11 -output fasta \
-			> $CDS_codon_alignment/${base}.codon_aln.fa 2> pal2nal.stderr.tmp
-			# fix names to only have assembly name
-			cat $CDS_codon_alignment/${base}.codon_aln.fa \
-	           	| sed 's/@.*$//g' > $CDS_codon_alignment.nm/${base}.codon_aln.nm.fa 
-		}
-		PAL2NAL_subfunc &
-                J=$((J+1))
-                if [ $(($J % $threads)) -eq 0 ]
-                then
-                    	wait
-		fi
-	done
-	wait
-}
-
-
 TRIM () {
 	echo "
 	##############################################
@@ -703,12 +646,16 @@ TRIM () {
 	echo -e "\nTrimming $alignment_type alignments in $alignment_dir with: 'trimal $trimal_parameter'\n"
 
 	# make output dir
-	$alignment_dir.trm
+	mkdir $alignment_dir.trm
 
+	# set up percent complete updater 
 	cd $wd/ || exit
 	num_OGs=$(ls $alignment_dir/OG* | wc -l) # this is 1+ the real num
         percent=$(( num_OGs / 10))
         J=0
+	
+	# iterate over alignment dir OG files works in chunks of %thread 
+	#   Need to change it to start next job if there are < $threads trimming operations running
 	for I in $alignment_dir/OG*
 	do
 		# Progress sent to stdout
@@ -727,7 +674,7 @@ TRIM () {
 			# Removes everything after the @ to leave just the sample name
 			#cat $alignment_dir.trm/${base}.trm.fa \
 			#| sed 's/@.*$//g' > $alignment_dir.trm.nm/${base}.trm.nm.fa
-			# moved to PAL2NAL
+			# moved to TRIMAL_backtrans
 		}
 		TRIM_subfunc &
 		J=$((J+1))
@@ -792,10 +739,10 @@ ALIGNMENT_STATS () {
 
 SCO_MIN_ALIGN () {
 	echo '
-	#######################################################
-	###### cat alignments 4 genes that are single copy ####
-	############# and in at least X samples ###############
-	#######################################################
+	###################################################
+	########## Identify single copy orthologs #########
+	###### with at least ${2} taxon representation ####
+	###################################################
 	'
 	date
 	func_timing_start
@@ -827,7 +774,8 @@ SCO_MIN_ALIGN () {
 			final_seqs=$(cat $I | grep -e ">" | wc -l)
 			if [ $final_seqs -ge $min_num_orthos ]
 			then
-				base=$(basename ${I%.*.*.*.*})
+				# this basename call  is too specific and easy to break...should clean up
+				base=$(basename ${I%.*.*})
 				echo $base >> $wd/OG_SCO_$outstring
 			fi
 		done
@@ -843,15 +791,91 @@ SCO_MIN_ALIGN () {
 	fi
 
 }
+TRIMAL_backtrans () {
+	echo '
+	###################################################
+	#####  Use TRIMAL_backtrans to produce Nuc alignments ######
+	############### from AA alignemtns ################
+	###################################################
+	#loops of all Orthogroups to
+	#	extract transcripts sequences from a contatentated transcript file
+	#	do codon alignments with TRIMAL_backtrans
+	'
+	date
+	func_timing_start
+	local prot_alignment=${1}
+	local CDS_file=${2}
+	local CDS_codon_alignment=${3}
 
+	#aligning transcripts based on orthogroup protien alignments
+	cd $wd || exit
+	num_OGs=$(ls $prot_alignment/OG*.fa | wc -l) # this is 1+ the real num
+	percent=$(( num_OGs / 10))
+        J=0
+	for i in $prot_alignment/OG*.fa
+	do
+		# Progress sent to stdout
+                if [ $((J % percent)) -eq 0 ]
+                then
+					echo $((J/percent*10))" percent of the way through the TRIMAL_backtrans"
+                fi
+		# why the hell did I declare this function with in the loop...probably because of the "local bass=...". this should be passed in with a variable. 
+		TRIMAL_backtrans_subfunc () {
+			#get basename (OG000????)
+			local file=${i##*/}
+			local base=${file%%.*}
+
+			cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
+	        	> ./OG_names/${base}.names
+			#pull out trans sequences for each OG
+			filterbyname.sh -Xmx60m -Xms60m include=t \
+	        	names=./OG_names/${base}.names \
+			in=$CDS_file out=./SequencesCDS/${base}.CDS.fa \
+			>> $wd/logs/filterbyname.TRIMAL_backtrans 2>&1 # changed a "/" to ">" not sure how the code ran before...
+			# protein to nuc alignments
+			#pal2nal.pl $i ./SequencesCDS/${base}.CDS.fa -codontable 11 -output fasta \
+			#> $CDS_codon_alignment/${base}.codon_aln.fa 2> TRIMAL_backtrans.stderr.tmp
+			trimal -in $i \
+				-backtrans SequencesCDS/${base}.CDS.fa \
+				-out $CDS_codon_alignment/${base}.codon_aln.fa \
+				-ignorestopcodon > $wd/logs/trimal.TRIMAL_backtrans 2>&1
+			# fix names to only have assembly name
+			cat $CDS_codon_alignment/${base}.codon_aln.fa \
+	           	| sed 's/@.*$//g' > $CDS_codon_alignment.nm/${base}.codon_aln.nm.fa 
+		}
+		TRIMAL_backtrans_subfunc &
+                J=$((J+1))
+                if [ $(($J % $threads)) -eq 0 ]
+                then
+                    	wait
+		fi
+	done
+	wait
+}
+prot_rename () {
+	echo "
+	#################################
+	### Removing gene specific ###
+	#### info from prot fasta ####
+	##############################
+	"
+	mkdir AlignmentsProts.trm.nm
+	for I in $wd/AlignmentsProts.trm/OG*
+	do
+		file=${I##*/}
+		base=${file%%.*}
+		cat $I \
+	    	| sed 's/@.*$//g' > AlignmentsProts.trm.nm/${base}.trm.nm.fa
+	done
+}
 cat_alignments () {
 	echo '
-        ####################################################
-        ############ Identify Single Copy Orthos ###########
-        ########### And Place in SCO_strict.align ##########
-        #### and make concattenated alignment for RAxML ####
-        ####################################################
-        '
+		##############################################
+		####### Place SCOs in dedicated folder #######
+		############ SCO_*.align and make ############
+		####### concattenated alignment for ML #######
+		##############################################
+		'
 	date
 	func_timing_start
 	# function inputs
@@ -862,15 +886,17 @@ cat_alignments () {
 
 	# output valiable
 	local SCO_dir=$SCO_list.$alignment_type.align
-	local cat_alignment_file=$SCO_list.$alignment_type.trm.sco.nm
+	local cat_alignment_file=$output_dir/$(basename $SCO_list.$alignment_type.trm.sco.nm)
 	
 	cd $wd || exit
 	mkdir $SCO_dir
-	echo "Creating directory with alignments of OGs with at least $min_num_orthos orthos"
+	echo "Creating directory with alignments of OGs from $SCO_list"
 	for I in $(cat $SCO_list):
 	do
-		cp $alignment_dir/${I}.* ./$SCO_dir/
+		cp $alignment_dir/${I}.* $SCO_dir/
 	done
+ 
+	mkdir $output_dir 
 	echo "Concatenating fasta alignments to phylip format"
 	cd $output_dir || exit
 	perl $catfasta2phyml_cmd -c $SCO_dir/*.fa \
@@ -886,54 +912,6 @@ cat_alignments () {
 #####################################
 #####################################
 
-SCO_strict () {
-	echo '
-        ####################################################
-        ############ Identify Single Copy Orthos ###########
-        ########### And Place in SCO_strict.align ##########
-        #### and make concattenated alignment for RAxML ####
-        ####################################################
-        '
-	date
-	func_timing_start
-	OG_SCO_strict=$wd/OG_SCO_strict
-	if [ -f $OG_SCO_strict ]
-	then
-		rm $OG_SCO_strict
-	fi
-	cd $wd || exit
-	mkdir OG_SCO_strict.align
-	if [ $ANI == "true" ]
-	then
-		echo "Finding all proper SCOs from ANI Orthogroups"
-		# make list of all proper SCOs directly from fasta
-		cd $wd || exit
-		# Iterate over trimmed alignments and pull out the number of samples per multifasta
-		# this has the assumption that there is only one sequence per genome
-		# should be enforced by ORTHOFINDER_TO_ALL_SEQS
-		# could add an error || exit if it becomes a problem
-		for I in AlignmentsTrans.trm.nm/OG0*.codon_aln.trm.nm.fa
-		do
-			final_seqs=$(cat $I | grep -e ">" | wc -l)
-			if [ $final_seqs -ge $(cat $store/all_input_list | wc -l) ]
-			then
-				# add SCO_strict alignemtns to a specific DIR
-				cp $I ./OG_SCO_strict.align/
-				base=$(basename ${I%.*.*.*.*})
-				echo $base >> $OG_SCO_strict
-			fi
-		done
-	else
-		# going to ignore this for now...
-		for I in $orthodir/Single_Copy_Orthologue_Sequences/OG0*.fa
-		do
-		  	base=$(basename ${I%.*})
-		  	cp AlignmentsTrans.trm.nm/${base}.codon_aln.trm.nm.fa ./OG_SCO_strict.align/
-			#used later for ASTRAL gene tree selection
-			echo $base >> $OG_SCO_strict
-		done
-	fi
-}
 
 
 TREE_BUILD () {
@@ -994,8 +972,8 @@ TREE_BUILD () {
 		treefile=$(ls RAxML_bipartitionsBranchLabels*)
 		mv $treefile ../${treefile}.tree && touch ./${treefile%.*}.complete || echo -e "\n!!!!!!!!\nWARNING\n!!!!!!!!!!\n\tRAxML failed to run on "$input_alignment
 		cd $output_dir || exit
-
 	}
+
 	# subfuncton to run FastTreeMP
 	FASTTREE_run () {
 		# fastTree doesnt like any of the phylip formats I have tried. using .fa
@@ -1010,7 +988,7 @@ TREE_BUILD () {
 		cd $output_dir || exit
 	}
 	IQTREE_run () {
-		mkdir iqtree
+		if [ ! -d "$DIRECTORY" ]; then mkdir iqtree ; fi
 		cd iqtree
 		iqtree2 -s $input_alignment \
 		--prefix iqtree.${output_name} $IQtree_partitions $IQtree_speciestree_options\
@@ -1072,57 +1050,73 @@ orthofinderGENE2SPECIES_TREE () {
 	-t $threads
 }
 
-allTransGENE_TREEs () {
+allGENE_TREEs () {
 	echo '
 	##################################################
-	###### Build Gene trees for all Transcript #######
+	####### Build Gene trees for CDS or PROT  ########
 	########## Alignments to use for Astral ##########
 	############# Species Tree Estemation ############
 	##################################################
 	'
 	date
 	func_timing_start
-	if [ -d $wd/trans_gene_trees/ ]
+	local alignment_type=$1
+	local gene_alignment_dir=$2
+	local out_dir=$3
+
+
+	echo "Using "$alignment_type" alignments with "${gene_tree_methods[@]}
+	if [ -d $out_dir/ ]
 	then
-	   rm -r ${wd}/trans_gene_trees.bk
-	   mv $wd/trans_gene_trees/ ${wd}/trans_gene_trees.bk
+	   rm -r $out_dir.bk
+	   mv $out_dir/ $out_dir.bk
 	fi
-	mkdir $wd/trans_gene_trees/
-	mkdir $wd/trans_gene_trees.nm/
-	cd $wd/trans_gene_trees || exit
-	num_OGs=$(ls $wd/AlignmentsTrans.trm/OG00*.codon_aln.trm.fa | wc -l) # this is 1+ the real num
+	mkdir $out_dir/
+	mkdir $out_dir.nm/
+	cd $out_dir || exit
+	num_OGs=$(ls $gene_alignment_dir/OG* | wc -l) # this is 1+ the real num
         percent=$(( num_OGs / 10))
         J=0
-	for i in $wd/AlignmentsTrans.trm/OG00*.codon_aln.trm.fa
+
+
+	#set some tree building parameters for CDS vs Prot
+	if [[ $alignment_type == "CDS" ]]
+	then
+		local fasttree_options="-gtr -quiet -gamma -nt"
+	elif [[ $alignment_type == "PROT" ]]
+	then
+		local fasttree_options="-quiet -nopr"
+	fi
+
+	# loops through all alignments
+	for i in $gene_alignment_dir/OG*
 	do
 		# Progress sent to stdout
                 if [ $((J % percent)) -eq 0 ]
                 then
-                    	echo $((J/percent*10))" percent of the way through building trans trees"
+                    	echo $((J/percent*10))" percent of the way through building gene trees"
                 fi
 		TRANS_TREE_subfunc () {
-		        base=$(basename ${i%.*.*.*})
-		        #add partition finder?
-		        #raxmlHPC-PTHREADS -T $threads -s $wd/AlignmentsTrans.trm/${base}.codon_aln.trm.fa \
-			#-n ${base}.tree -m GTRGAMMA
-		        #>> ./RAxML_output.tmp
+		        local file=${i##*/}
+				local base=${file%%.*}
+		        
         		if [[ " ${gene_tree_methods[*]} " =~ " fasttree " ]]
         		then
-				fasttree -gtr -quiet -gamma \
-				-nt $wd/AlignmentsTrans.trm/${base}.codon_aln.trm.fa \
-				> ./${base}.fasttree.tree
-				cat ./${base}.fasttree.tree | sed 's/@[^:]*:/:/g' \
-				> $wd/trans_gene_trees.nm/${base}.fasttree.tree
-			elif [[ " ${gene_tree_methods[*]} " =~ " iqtree " ]]
-			then
-				iqtree -s $wd/AlignmentsTrans.trm/${base}.codon_aln.trm.fa \
-				--prefix ${base} -T 1 > ${base}.iqtree.log
-				mv ./${base}.treefile ./${base}.iqtree.tree
-				cat ./${base}.iqtree.tree | sed 's/@[^:]*:/:/g' \
-				> $wd/trans_gene_trees.nm/${base}.iqtree.tree
-			else
-			echo "Gene tree estemation from gene alignemtns not done; gene_tree_method not set to either fasttree, raxml or iqtree" 
-			exit 1
+					fasttree $fasttree_options \
+					$gene_alignment_dir/${base}.*.fa \
+					> ./${base}.fasttree.tree 
+					cat ./${base}.fasttree.tree | sed 's/@[^:]*:/:/g' \
+					> $out_dir.nm/${base}.fasttree.tree
+				elif [[ " ${gene_tree_methods[*]} " =~ " iqtree " ]]
+				then
+					iqtree -s $gene_alignment_dir/${base}.*.fa \
+					--prefix ${base} -T 1 > ${base}.iqtree.log
+					mv ./${base}.treefile ./${base}.iqtree.tree
+					cat ./${base}.iqtree.tree | sed 's/@[^:]*:/:/g' \
+					> $out_dir.nm/${base}.iqtree.tree
+				else
+					echo "Gene tree estemation from gene alignemtns not done; gene_tree_method not set to either fasttree, raxml or iqtree" 
+					exit 1
         		fi
 		}
 
@@ -1140,9 +1134,9 @@ allTransGENE_TREEs () {
 
 astral_allTransGENE2SPECIES_TREE () {
 	echo '
-	##########################################################
-	Species tree reconstruction from all trans alignments
-	##########################################################
+	#######################################################
+	Species tree reconstruction from CDS or PROT alignments
+	#######################################################
 	'
 
 	#astral all genes
@@ -1158,22 +1152,20 @@ astral_allTransGENE2SPECIES_TREE () {
 }
 
 
-astral_TransGENE2SPECIES_TREE () {
+astral_GENE2SPECIES_TREE () {
 	echo '
-	###############################################################
-	Species tree reconstruction from SCO_min_align trans alignments
-	###############################################################
+	#######################################################
+	Species tree reconstruction from CDS or PROT gene trees 
+	#######################################################
 	'
 	date
 	func_timing_start
-	local genelist=$1
-	echo "
-	Running Astral on ${genelist} genelist
-	"
-	#inputs
-	# in_dir=$2
-	#genelist=$orthodir/OG_SCO_$min_num_orthos
-	local in_dir=$wd/trans_gene_trees.nm
+	local alignment_type=$1
+	local in_dir=$2
+	local genelist=$3
+
+	echo -e "\nRunning Astral on "${genelist}" genelist for "$alignment_type" using "${gene_tree_methods[@]}" gene trees.\n"
+
 	local base_list=$(basename ${genelist})
 	local ASTRAL_cmd=$ASTRAL_cmd
 	#outputs
@@ -1187,7 +1179,7 @@ astral_TransGENE2SPECIES_TREE () {
 	for method in $gene_tree_methods
 	do
 		concat_tree_method=$concat_trees.${method}.trees
-		astral_tree=astral.${base_list}.${method}.tree
+		astral_tree=astral.${base_list}.${alignment_type}.${method}.tree
 		#remove concatenated tree file if it exists.
 		if [ -f $concat_tree_method ]
 		then
@@ -1195,13 +1187,17 @@ astral_TransGENE2SPECIES_TREE () {
 		   mv $concat_tree_method concat_tree_method.bk
 		fi
 
-		# remove list of genes ommited because trimming reduced the number of leaves to > 4
-		rm $excluded
+		# Delete previous file of genes ommited because trimming reduced the number of leaves to > 4
+		# (in case of rerun)
+		if [ -f $excluded ]
+		then 
+			rm $excluded
+		fi
 
 		# concatenate gene trees in $in_dir with names in $genelist
 		for I in $(cat $genelist)
 		do
-                        base=$(basename ${I%.*})
+            base=$(basename ${I%.*})
 			OG_tree=$in_dir/${base}.${method}.tree
 			if [ -f $OG_tree ]
 			then
@@ -1240,7 +1236,10 @@ WRAP_UP () {
 		mkdir $store/tmp_trash || exit
 		for I in ${clean_me[*]}
 		do
-			mv $store/$I $store/tmp_trash
+			if [ -f $I ]
+			then
+				mv $store/$I $store/tmp_trash
+			fi
 		done
 		rm -r $store/tmp_trash
 	fi
@@ -1248,27 +1247,27 @@ WRAP_UP () {
 	# gather all SpeciesTrees in one place?
 	echo '
 	#######################################################
-        ########## Moving final species trees to  #############
-        ###########  $store/FINAL_SPECIES_TREES ###############
+	########## Moving final species trees to  #############
+	###########  $store/FINAL_SPECIES_TREES ###############
 	#####   And running a Generalized RF comparison  ######
-        #######################################################
+	#######################################################
 	'
 
 	mkdir $store/FINAL_SPECIES_TREES
 	cp $wd/SpeciesTree/*.tree $store/FINAL_SPECIES_TREES
 	cp $wd/astral_trees/*.tree $store/FINAL_SPECIES_TREES
 	ete3 compare --unrooted --taboutput \
-                -t $store/FINAL_SPECIES_TREES/*tree -r $store/FINAL_SPECIES_TREES/*tree \
-                >> $store/FINAL_SPECIES_TREES/trees.compare
+		-t $store/FINAL_SPECIES_TREES/*tree -r $store/FINAL_SPECIES_TREES/*tree \
+		>> $store/FINAL_SPECIES_TREES/trees.compare
 }
 
 TESTER_compare () {
-        echo "
-       	#############################################
-        ######   Compare Trees generated with  ######
-        #######  TESTER to prepackaged Trees  #######
-       	#############################################
-        "
+	echo "
+	#############################################
+	######   Compare Trees generated with  ######
+    #######  TESTER to prepackaged Trees  #######
+	#############################################
+	"
 	# TODO:
 	## generalize for full pipeline
 	cd $store/FINAL_SPECIES_TREES || exit

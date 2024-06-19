@@ -25,7 +25,7 @@ export ANI_shortlist=20 # max number of seqs to run through Orthofinder
 
 ### Options for CDS tree methods
 # methods to run for generating final species trees 
-export tree_method=("fasttree" "iqtree")
+export tree_method=("fasttree" "iqtree" "astral")
 # options to add to standard species tree software runs. Will exopse properly at some point...
 export fasttree_CDS_speciestree_options="-gtr -gamma" # inherits number of threads from env variable $threads durring execution
 export RAxML_CDS_speciestree_options="-T $threads -f a  -m GTRGAMMA -x 1234 -N 100"
