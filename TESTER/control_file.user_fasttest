@@ -10,6 +10,8 @@ export genomes_provided="TRUE"
 export ANI_genome=true
 export IQtree_speciestree_options="--fast"
 export use_partitions=false
+# data set to use for tree building (CDS,PROT,BOTH)
+export TREE_DATA=BOTH
 
 # let users overwrite number of threads to use
 if [[ ! -z ${threads+x} ]]
@@ -31,6 +33,6 @@ fi
 
 # example
 export min_frac_orthos=0.50 #minimum fraction of species with SCOs to count OG
-export ANI_shortlist=15 # max number of seqs to run through Orthofinder
-export tree_method=("fasttree" "iqtree")
+export ANI_shortlist=4 # max number of seqs to run through Orthofinder
+export tree_method=("fasttree" "iqtree" "astral")
 export gene_tree_methods=("fasttree")

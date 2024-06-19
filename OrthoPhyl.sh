@@ -7,22 +7,25 @@ USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_out
 #   Many default parameters are set in control_file.defaults
 #   I will work to expose the more useful ones in later versions of OP
 Required:
--g	path to genomes directiory
+-g  path to genomes directiory
 or
--a	paths to protien and transcript directories.
+-a  paths to protien and transcript directories.
        They should be delared as \"-a path_to_transcript_dir,path_to_prot_dir\"
--s	path to the main directory for output
+-s  path to the main directory for output
 Optional:
--t	threads to use [4]
--p  phylogenetic tree software to use fasttree, raxml, and/or iqtree [\"fasttree iqtree\"]
-	i.e. -p \"fasttree iqtree\"
+-t  threads to use [4]
+-p  phylogenetic tree software to use astral, fasttree, raxml, and/or iqtree [\"fasttree iqtree astral\"]
+	i.e. -p \"fasttree iqtree astral\"
+-o  "omics" data to use for tree building ([CDS], PROT, BOTH)
+	for divergent sequences, it is good to compare protein trees to 
+	nucleotide trees to identify artifacts of saturation (long branch attraction)
 -c	path to a control file with required variables and any optional ones to override defaults.
 	Will override values set on command line! [NULL]
--x	trimal paramerter string (in double \"quotes\")
--r	flag to rerun orthofinder on the ANI_shorlist (true/[false])
--n	Max number of proteomes to run through OrthoFinder.
+-x  trimal paramerter string (in double \"quotes\")
+-r  flag to rerun orthofinder on the ANI_shorlist (true/[false])
+-n  Max number of proteomes to run through OrthoFinder.
 	If more than this many assemblies are provided, a subset of proteomes (based on genomes/transcripts ANI) will be chosen for OrthoFinder to chew on [20]
--m 	Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
+-m  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
         Expects a float from 0-1
         A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
         [0.30]
@@ -30,8 +33,8 @@ Optional:
 	Using \"-a\" implies \"-d transcript\".
 	If \"-a\" is declared but you want to use the assemblies you have also provided, set \"-d genome\"
 	If \"-a\" not used but you want to use transcripts (annotated within OrthoPhyl by Prodigal) for ANI subsetting, set \"-d transcript\"
--T	run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast)
--h	display a description and a super useful usage message
+-T  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast)
+-h  display a description and a super useful usage message
 ###############################################################\n
 To run test datasets:
 # Test of full bacterial genomes
@@ -187,7 +190,21 @@ while [[ $N -lt $L ]] ; do
           store=$(relative_absolute ${2})
           ARGS_SET+=s
           shift ;;
-
+     'o') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
+            USAGE
+            exit 1
+          fi
+          if [[ ${2} == "CDS" || ${2} == "PROT" || ${2} == "BOTH" ]]
+	  then
+            TREE_DATA=${2}
+	    echo "Will build trees with $TREE_DATA (CDS,PROT, or BOTH)"
+            ARGS_SET+=o
+	  else
+	    USAGE
+            echo "WARNING: -o flag was used with a value other than CDS,PROT, or BOTH. You put '-o ${2}', should be e.g. '-o BOTH'"
+            exit 1
+	  fi
+	  shift ;;
      'p') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then 
             USAGE 
             exit 1 
@@ -293,7 +310,7 @@ while [[ $N -lt $L ]] ; do
 	  if [ ${2} == "genome" ]
 	  then
 	     ANI_genome=true
-          elif [ ${2} == "transcript" ]
+      elif [ ${2} == "transcript" ]
 	  then
 	     ANI_trans=true
           else
@@ -359,7 +376,7 @@ fi
 #############################################
 # test if "-p tree_method" is set correctly #
 #############################################
-if [[ " ${tree_method[*]} " =~ " raxml " ]] || [[ " ${tree_method[*]} " =~ " fasttree " ]] || [[ " ${tree_method[*]} " =~ " iqtree " ]]
+if [[ " ${tree_method[*]} " =~ " raxml " ]] || [[ " ${tree_method[*]} " =~ " fasttree " ]] || [[ " ${tree_method[*]} " =~ " iqtree " ]] || [[ " ${tree_method[*]} " =~ " astral " ]]
 then
 	echo Running $tree_method to generate Species trees
 else
@@ -445,7 +462,7 @@ MAIN_PIPE () {
 	if [[ ${annots_provided+x} ]]
 	then
 		echo "trying to move gene seqs"
-		#move provided prots and trans to thier respecive folders
+		#move provided prots and trans to their respecive folders
 		for I in $(ls $input_prots/)
 		do
 			echo "moving $I"
@@ -473,7 +490,8 @@ MAIN_PIPE () {
 		echo "PANIC: no dataset declared for ANI_species_shortlist to chew on"
 		exit
 	fi
-       	# find subset of genomes or transcripts that represents diversity of full set
+    
+	# find subset of genomes or transcripts that represents diversity of full set
 	#   if number of sequence files is greater than the max number to send through orthofinder
 	if [[ $(ls $ANI_dataset | wc -l)  -gt $ANI_shortlist ]]
 	then
@@ -489,34 +507,117 @@ MAIN_PIPE () {
 		ORTHO_RUN ${prots4ortho}
 		REALIGN_ORTHOGROUP_PROTS
 	fi
-	PAL2NAL
-	TRIM_TRANS
-	ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
+
+	# trim protein sequences
+	TRIM $wd/AlignmentsProts "PROT"
+
+	# identify single copy orthologs in protein alignments
+	#  create files with OG names 
 	if [[ "$relaxed" != false ]]
-        then
-		SCO_MIN_ALIGN $min_num_orthos
-		ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+		then
+			SCO_MIN_ALIGN $wd/AlignmentsProts.trm $min_num_orthos
+			#ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
 	fi
-	SCO_strict
-	ALIGNMENT_STATS $wd/OG_SCO_strict.align
-	for I in $wd/SpeciesTree/*.trm.sco.nm.phy
-        do
-		TREE_BUILD $wd/SpeciesTree/ $I $threads
-	done
-	if [ ! $ANI = true ]
-        then
-                # at the moment it doesnt make sense to make trees from OF if using ANI
-                # (only a shortlist genomes will be in the tree)
-                orthofinderGENE2SPECIES_TREE
-        fi
-	allTransGENE_TREEs
-	# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
-	if [[ "$relaxed" != false ]]
-        then
-		astral_TransGENE2SPECIES_TREE $wd/OG_SCO_$min_num_orthos
+	SCO_MIN_ALIGN $wd/AlignmentsProts.trm $(cat $store/all_input_list | wc -l)
+
+	# Run Prot workflow
+	if [[ "$TREE_DATA" = "PROT" || "$TREE_DATA" = "BOTH" ]]
+	then
+		echo "
+		##########################################
+		### Running Protein specific  workflow ###
+		##########################################
+		"
+		prot_rename
+		if [[ "$relaxed" != false ]]
+		then
+			cat_alignments $wd/OG_SCO_$min_num_orthos $wd/AlignmentsProts.trm.nm $wd/AlignmentsConcatenated PROT
+			#ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+		fi
+		cat_alignments $wd/OG_SCO_strict $wd/AlignmentsProts.trm.nm $wd/AlignmentsConcatenated PROT
+		
+		for I in $wd/AlignmentsConcatenated/*.PROT.*.phy
+			do
+			TREE_BUILD $wd/SpeciesTree/ $I $threads "PROT"
+		done
+		# for later...
+		#build_gene_trees
+		#build_ASTRAL_trees
 	fi
-	astral_TransGENE2SPECIES_TREE $wd/OG_SCO_strict
+
+	# Run CDS workflow
+	if [[ "$TREE_DATA" = "CDS" || "$TREE_DATA" = "BOTH" ]]
+	then
+		# make Codon alignments for all OGs (could just do SCO_relaxed and that would grab all SCO_strict)
+		#  Its pretty fast, who cares, and might want to make SCO_very_relaxed trees
+		TRIMAL_backtrans $wd/AlignmentsProts.trm $wd/all_trans.nm.fa $wd/AlignmentsTrans.trm
+		
+		# concatenate SCO alignments (only do SCO_$min_num_orthos if relaxed != false)
+		if [[ "$relaxed" != false ]]
+		then
+			cat_alignments $wd/OG_SCO_$min_num_orthos $wd/AlignmentsTrans.trm.nm $wd/AlignmentsConcatenated CDS
+			#ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+		fi
+		cat_alignments $wd/OG_SCO_strict $wd/AlignmentsTrans.trm.nm $wd/AlignmentsConcatenated CDS
+
+
+		# Build ML Species Treeeeees
+		for I in $wd/AlignmentsConcatenated/*.CDS.*.phy
+		do
+			#ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
+			TREE_BUILD $wd/SpeciesTree/ $I $threads "CDS"
+		done
+
+		# Not really useful, will probably remove (sort of redundant)
+		if [ ! $ANI = true ]
+		then
+					# at the moment it doesnt make sense to make trees from OF if using ANI
+					# (only a shortlist genomes will be in the tree)
+					orthofinderGENE2SPECIES_TREE
+		fi
+	fi	
+	if [[ " ${tree_method[*]} " =~ " astral " ]]
+	then
+		if [[ "$TREE_DATA" = "CDS" || "$TREE_DATA" = "BOTH" ]]
+		then
+			tree_data=CDS
+			# build gene trees for all CDS alignments
+			allGENE_TREEs $tree_data $wd/AlignmentsTrans.trm.nm $wd/${tree_data}_gene_trees
+
+			# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
+			
+			# build ASTRAL tree from SCO_relaxed gene trees
+			if [[ "$relaxed" != false ]]
+				then
+				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/OG_SCO_$min_num_orthos
+			fi
+
+			# Build ASTRAL tree from SCO_strict
+			astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/OG_SCO_strict
+		fi
+		if [[ "$TREE_DATA" = "PROT" || "$TREE_DATA" = "BOTH" ]]
+		then
+			tree_data=PROT
+			# build gene trees for all CDS alignments
+			allGENE_TREEs $tree_data $wd/AlignmentsProts.trm.nm $wd/${tree_data}_gene_trees 
+
+			# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
+			
+			# build ASTRAL tree from SCO_relaxed gene trees
+			if [[ "$relaxed" != false ]]
+			then
+				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/OG_SCO_$min_num_orthos
+			fi
+
+			# Build ASTRAL tree from SCO_strict
+			astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/OG_SCO_strict
+		fi
+	fi	
+	# clean up some files
+	# need to make specific for PROT or CDS run
 	WRAP_UP
+
+	# if running tester script, compare trees to reference to make sure stuff worked
 	if [[ $TESTER == "TESTER" ]]
 	then
 		TESTER_compare
@@ -533,7 +634,15 @@ MAIN_PIPE () {
 MAIN_PIPE
 
 echo "
-######################################
-Weelll it finished.  I doubt it worked
-######################################
+######################################################
+Weelll it finished.  Check $wd/SpeciesTrees for output
+######################################################
+Also check Alignment figures in the AlignmentsTrans.trm.nm.vis directory
+Good luck! 
+If you have an issues, please go to https://github.com/eamiddlebrook/OrthoPhyl
+
+If used in a publication, please cite:
+Earl A Middlebrook, Robab Katani, Jeanne M Fair 
+OrthoPhyl - Streamlining large scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales
+G3 Genes|Genomes|Genetics, 2024;, jkae119, https://doi.org/10.1093/g3journal/jkae119
 "

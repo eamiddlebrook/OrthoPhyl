@@ -1,4 +1,24 @@
 # Tasks to better OP
+## working on...
+protein trees
+    [X] check that CDS,PROT,BOTH options work in main function
+    [X] rename CDS specific parameters 
+    [X] pal2nal complains about internal prot trimming....need to fix
+        [X] TRIMAL works great!!!
+	[X] reorder the whole workflow!!!
+        [] test reordered workflow
+    [] fix CDS concat call to run on all OG_SCO_* like prot
+    [] write functions for prot specific workflow
+        [X] TRIM_PROTS
+	    concatenate_prots
+	    build_ML_trees
+	    build_gene_trees
+	    build_ASTRAL_trees
+    
+    # Low priority
+    [] fix OrthoFinder only SCO ident
+    [] add back in Alignments assesment
+
 ## big task
 [] synteny aware orthology (like genespace)
 [] add "best genomes" choice to ANI subsample 
