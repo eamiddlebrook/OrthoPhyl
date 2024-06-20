@@ -143,7 +143,7 @@ then
        fi
 else
 	echo "PANIC: TESTER was set, but didnt equal 'TESTER', 'TESTER_chloroplast' or TESTER_fasttest" 
-	exit
+	#BAIL
 fi
 }
 
@@ -330,14 +330,14 @@ while [[ $N -lt $L ]] ; do
           shift ;;
 
      'T') if [[ $N -ne $(($L-1)) || ! -n ${2} ]] ; then
-	    USAGE
-	    exit 1
-	  fi
-	export TESTER=${2}
-        ARGS_SET+=T
-	# set variables specific for running OrthoPhyl on a test data set.
-	tester
-	shift ;;
+			USAGE
+			exit 1
+		  fi
+		  export TESTER=${2}
+          ARGS_SET+=T
+		  # set variables specific for running OrthoPhyl on a test data set.
+		  tester
+		  shift ;;
 
      \?) # Invalid option
          echo "Error: Invalid option"
@@ -370,7 +370,9 @@ then
 	echo "Arguments that you set are -"${ARGS_SET}
 	USAGE
 	exit 1
-
+elif
+then
+	echo "Seems like you have all the args set you need. If you are using "-c contol_file.user" then there is a possibility you do not and I have not caught the problem...if you get an error, ensure you are pointing OrthoPhyl to your genomes/annotations and an output directory at a minimum"
 fi
 
 #############################################

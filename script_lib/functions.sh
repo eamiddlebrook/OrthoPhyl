@@ -4,6 +4,40 @@
 # i.e.
 # source $script_home/scipt_lib/functions.sh
 
+
+# just some error handeling stuff
+function backtrace () {
+    local deptn=${#FUNCNAME[@]}
+
+    for ((i=1; i<$deptn; i++)); do
+        local func="${FUNCNAME[$i]}"
+        local line="${BASH_LINENO[$((i-1))]}"
+        local src="${BASH_SOURCE[$((i-1))]}"
+        printf '%*s' $i '' # indent
+        echo "at: $func(), $src, line $line"
+    done
+}
+
+function trace_top_caller () {
+    local func="${FUNCNAME[1]}"
+    local line="${BASH_LINENO[0]}"
+    local src="${BASH_SOURCE[0]}"
+    echo "  called from: $func(), $src, line $line"
+}
+
+set -o errtrace
+trap 'trace_top_caller' ERR
+
+BAIL () {
+	echo "$FUNCNAME failed"
+	echo "apples"
+	exit 1
+}
+
+
+
+
+
 SET_UP_DIR_STRUCTURE () {
 	echo '
        	###################################################
@@ -1078,14 +1112,15 @@ allGENE_TREEs () {
         percent=$(( num_OGs / 10))
         J=0
 
-
 	#set some tree building parameters for CDS vs Prot
 	if [[ $alignment_type == "CDS" ]]
 	then
-		local fasttree_options="-gtr -quiet -gamma -nt"
+		local fasttree_options=$fasttree_CDS_genetree_options
+		local iqtree_options=$iqtree_CDS_genetree_options
 	elif [[ $alignment_type == "PROT" ]]
 	then
-		local fasttree_options="-quiet -nopr"
+		local fasttree_options=$fasttree_PROT_genetree_options
+		local iqtree_options=$iqtree_PROT_genetree_options
 	fi
 
 	# loops through all alignments
