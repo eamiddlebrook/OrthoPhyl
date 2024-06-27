@@ -166,25 +166,39 @@ and "###### It looks like the install was successful ######" should be sent to s
 
 ## Running OrthoPhyl on your data
 ```
-USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_output 
-# ALL arguments are optional if set in control_file.required
+USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_output
+# ALL arguments are optional if set with \"-c control_file.your_args\"
 #   Many default parameters are set in control_file.defaults
+#   I will work to expose the more useful ones in later versions of OP
 Required:
--g	full path to genomes directiory
+-g  path to genomes directiory
 or
--a	paths to protien and transcript directories. 
-       They should be delared as \"-a path_to_protien_dir,path_to_transcript_dir\"
--s	full path to the main directory for output
+-a  paths to protien and transcript directories.
+       They should be delared as \"-a path_to_transcript_dir,path_to_prot_dir\"
+-s  path to the main directory for output
 Optional:
--t	threads to use [4]
--c	path to a control file with required variables and any optional ones to override defaults. 
-        Will override values set on command line! [NULL]
--x	trimal paramerter string (in double "quotes") 
--r	flag to rerun orthofinder on the ANI_shorlist (true/[false])
--a	max number of genomes to run through OrthoFinder. 
-        If more than this many assemblies are profided, a subset of genomes will be chosen for OrthoFinder to chew on [2]
--T	run test dataset, incompatable with -g|s (TESTER,TESTER_chloroplast)
--h	display a description and a super useful usage message
+-t  threads to use [4]
+-p  phylogenetic tree software to use astral, fasttree, raxml, and/or iqtree [\"fasttree iqtree astral\"]
+	i.e. -p \"fasttree iqtree astral\"
+-o  "omics" data to use for tree building ([CDS], PROT, BOTH)
+	for divergent sequences, it is good to compare protein trees to 
+	nucleotide trees to identify artifacts of saturation (long branch attraction)
+-c	path to a control file with required variables and any optional ones to override defaults.
+	Will override values set on command line! [NULL]
+-x  trimal paramerter string (in double \"quotes\")
+-r  flag to rerun orthofinder on the ANI_shorlist (true/[false])
+-n  Max number of proteomes to run through OrthoFinder.
+	If more than this many assemblies are provided, a subset of proteomes (based on genomes/transcripts ANI) will be chosen for OrthoFinder to chew on [20]
+-m  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
+        Expects a float from 0-1
+        A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
+        [0.30]
+-d  Force ANI subsetting to run on transcript or genome Datasets. ([genome],transcript)
+	Using \"-a\" implies \"-d transcript\".
+	If \"-a\" is declared but you want to use the assemblies you have also provided, set \"-d genome\"
+	If \"-a\" not used but you want to use transcripts (annotated within OrthoPhyl by Prodigal) for ANI subsetting, set \"-d transcript\"
+-T  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast)
+-h  display a description and a super useful usage message
 ###############################################################\n
 To run test datasets:
 # Test of full bacterial genomes
@@ -194,30 +208,46 @@ bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
 # reduced chloroplast dataset
 bash OrthoPhyl.sh -T TESTER_fasttest -t #threads
 # When running through Singularity an output directory is required:
-singularity run ${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads 
-
+singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads
 ```
 ### Example1:
 #### Run OrthoPhyl on assemblies in ~/Projects/ASMS/ecoli/ using 12 cores within singularity and place all results and intermediate files in ~/Projects/phylogenetics/ecoli/
 ```
-
 singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
 
 ```
 ### Example2:
 #### Run the same OrthoPhyl command from the manual install
 ```
-bash OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
+./OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
 
 ```
 ### Example3:
-#### Run the same OrthoPhyl command from the manual install, also incorporate preannoated samples with protein seqs in ```~/Projects/annots/protiens/``` and transripts in ```~/Projects/annots/transcripts/"``` 
+#### Run the same OrthoPhyl command from the manual install, also incorporate preannoated samples with protein seqs in ```~/Projects/annots/protiens/``` and transripts in ```~/Projects/annots/transcripts/``` 
 ```
-bash OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -a ~/Projects/annots/protiens/,~/Projects/annots/transcripts/ -s ~/Projects/phylogenetics/ecoli/ -t 12 
+./OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -a ~/Projects/annots/protiens/,~/Projects/annots/transcripts/ -s ~/Projects/phylogenetics/ecoli/ -t 12 
 
 ```
-
-
+### Example4:
+#### Run OrthoPhyl to build a species tree with 
++ ASTRAL (-p astral) 
++ from CDS (-o CDS) 
++ codon alignment gene trees build by iqtree used by ASTRAL (control_file.user contains just the line "export gene_tree_methods=("iqtree")") 
++ using only single copy orthologs found in 1/1 assemblies (-m 1)
++ using only 15 asssemblies to generate HMMs with OrthoFinder (-n 15)  
+```
+./OrthoPhyl.sh -g TESTER/genomes_chloroplast/ -s TESTER/TESTER_custom.chloro.B -m 1 -n 15 -c control_file.user -p astral -o CDS
+```
+### Example5:
+#### Run OrthoPhyl to build a species tree with 
++ iqtree and ASTRAL (-p "iqtree astral") 
++ from protein alignments (-o PROT) 
++ protein alignment gene trees build by fasttree used by ASTRAL (default) 
++ using only single copy orthologs found in .3/1 assemblies (-m .3)
++ using 30 asssemblies to generate HMMs with OrthoFinder (-n 30)  
+```
+./OrthoPhyl.sh -g TESTER/genomes -s TESTER/TESTER_full_genomes -m .3 -n 30 -p "iqtree astral" -o PROT
+```
 ## More Notes on OrthoPhyl: 
 #### This software wraps many open source bioinformatic tools together with several custom programs. Genomes are annotated with Prodigal.  If a large number of genomes are to be analyzed, fastANI is used to estimate the pairwise genomic Average Nucleotide Identity (ANI) and then an OrthoPhyl function subsets the genomes to a minimal number which represent the diversity of the full set. Protein sequences from this subset (or full set for small numbers of genomes) are used as input for OrthoFinder to identify orthologous gene families. For the subset method, a HMM search, HMMER, is used to generalize the resulting orthogroup to the full data set. From there, orthogroup proteins are realigned with MAFFT, and these aignments are used to "codon" align the transcript sequences (generated by earlier annotation). These orthogroup transcript alignments are then trimmed (with TRIMAL) and filtered for strict single copy orthologs (SCO_strict) or SCOs found in at least X% of the input genomes (with X being tunable). Next, transcript alignmants are concatenated to generate super-maticies and used as input for species tree generation with either RAxML or fastTREE. Aditionally, gene trees are generated from the individual transcript alignments, which are used in gene tree to species tree estimation with ASTRAL.  
 

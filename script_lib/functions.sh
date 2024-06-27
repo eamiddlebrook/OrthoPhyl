@@ -4,33 +4,10 @@
 # i.e.
 # source $script_home/scipt_lib/functions.sh
 
-
-# just some error handeling stuff
-function backtrace () {
-    local deptn=${#FUNCNAME[@]}
-
-    for ((i=1; i<$deptn; i++)); do
-        local func="${FUNCNAME[$i]}"
-        local line="${BASH_LINENO[$((i-1))]}"
-        local src="${BASH_SOURCE[$((i-1))]}"
-        printf '%*s' $i '' # indent
-        echo "at: $func(), $src, line $line"
-    done
-}
-
-function trace_top_caller () {
-    local func="${FUNCNAME[1]}"
-    local line="${BASH_LINENO[0]}"
-    local src="${BASH_SOURCE[0]}"
-    echo "  called from: $func(), $src, line $line"
-}
-
-set -o errtrace
-trap 'trace_top_caller' ERR
-
 BAIL () {
-	echo "$FUNCNAME failed"
-	echo "apples"
+	# print function that had error in it ${1} and any associated message ${2}
+	echo -e "WARNING: Function \"${FUNCNAME[1]}\" failed"
+	echo ${1}
 	exit 1
 }
 
@@ -56,10 +33,18 @@ SET_UP_DIR_STRUCTURE () {
 		echo " If this is not correct please rm $store/setup.complete and restart OrthoPhyl"
 	else
 		# set up annotation output directories
-		mkdir $store
-		mkdir $trans
-		mkdir $prots
-		mkdir $annots
+		if [ ! -d $store ] ; then
+			mkdir $store
+		fi
+		if [ ! -d $trans ] ; then
+			mkdir $trans 
+		fi
+		if [ ! -d $prots ] ; then
+			mkdir $prots
+		fi 
+		if [ ! -d $annots ] ; then
+			mkdir $annots
+		fi
 
 		#######################################################################
 		#### Make a directory for links to genomes to place in a phylogeny
@@ -95,12 +80,14 @@ SET_UP_DIR_STRUCTURE () {
 		cd $genome_dir || exit
 		#remove parentheses from genomes names
 		#could add additional lines subbing out the "(" for the character to replace
+		# get rid of [(,),:,=] in genome file Names
 		for I in $(ls ./ | grep \)); do   mv $I ${I//\)/}; done
 		for I in $(ls ./ | grep \(); do   mv $I ${I//\(/}; done
+		for I in $(ls ./ | grep \:); do   mv $I ${I//\:/}; done
 		for I in $(ls ./ | grep "_\=_" ); do mv $I ${I//_\=_} ; done
-		# fix contig names with "|" what breaks everything post annotion
+		# fix contig names with a "|" or ":" that break everything post annotion
 		for I in $(grep -lm 1 -d recurse ./ -e "|");do sed -i 's/|/_/g' $I; done
-
+		for I in $(grep -Rlm 1 -e ":");do sed -i 's/:/_/g' $I; done
 
 		#make a file with the genome and protein file names (if input) for later use
 		if compgen -G "$genome_dir/*.*a" > /dev/null
@@ -119,7 +106,7 @@ SET_UP_DIR_STRUCTURE () {
 		# calculate and report how many input assemblies there are
 		echo "Building phylogeny for $(cat $store/all_input_list | wc -l) assemblies" | tee -a $run_notes
 		export min_num_orthos=$(printf %.0f $(echo "$(cat $store/all_input_list | wc -l)*$min_frac_orthos" | bc))
-		echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with ASTRAL and ML method chosen" | tee -a $run_notes
+		echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with $tree_method" | tee -a $run_notes
 		###########################################
 		# just setting up the directory structure #
 		###########################################
@@ -230,11 +217,11 @@ DEDUP_annot_trans () {
 	trans=$trans
 	prots=$prots
 	identity=99.9
-        cd $store || exit
+	cd $store || exit
 	if [ -f $store/dedupe.complete ]
        	then
-            	echo "Dedupe previously completed."
-                echo "if rerun is desired, delete $store/dedupe.complete"
+    		echo "Dedupe previously completed."
+        	echo "if rerun is desired, delete $store/dedupe.complete"
 	else
 		mkdir $trans.preDedup || exit 1
 		mv $trans/*.f*a $trans.preDedup/
@@ -244,13 +231,16 @@ DEDUP_annot_trans () {
 		:> dedupe.stats_long
 		for I in $(ls $trans.preDedup/*.f*a)
 		do
+			# cleaner multithreading. check if the number of running jobs is greater than $threads
+			# if so wait for one to finish
 			if test "$(jobs | wc -l)" -ge $threads; then
 			        wait -n
 			fi
 			{
 			base=$(basename ${I%.*})
 			echo $base >> dedupe.stats
-			bash dedupe.sh -Xmx1g -Xms1g in=$I out=$trans/$base.fna minidentity=99.9 2>&1 | grep 'Input\|Result'  \
+			bash dedupe.sh -Xmx1g -Xms1g in=$I out=$trans/$base.fna minidentity=99.9 2>&1 | \
+				grep 'Input\|Result'  \
 				>> dedupe.stats || { echo "dedupe failed for some reason :("; exit 1;}
 			cat $trans/$base.fna | grep ">" | sed 's/>//g' > $trans/$base.deduped.names
 			filterbyname.sh -Xmx1g -Xms1g --amino include=true in=$prots.preDedup/$base.faa out=$prots/$base.faa names=$trans/$base.deduped.names \
@@ -335,7 +325,10 @@ ANI_species_shortlist () {
 	local number_shortlist=$2
 	local ANI_complete=ANI_complete
 	local mygenome_list=($(ls $genome_dir))
-	cd $store || exit
+	
+	echo "ANI clustering is being done on sequences in ${genome_dir}"
+	echo "Repersentative genomes from ${number_shortlist} clusters will be used to generate HMM profiles for each orthogroup"
+	cd $store || exit 1
 	mkdir ANI_working_dir
 	cd ANI_working_dir
 
@@ -832,8 +825,8 @@ TRIMAL_backtrans () {
 	############### from AA alignemtns ################
 	###################################################
 	#loops of all Orthogroups to
-	#	extract transcripts sequences from a contatentated transcript file
-	#	do codon alignments with TRIMAL_backtrans
+	#	extract CDS sequences from a contatentated CDS file
+	#	then do codon alignments with TRIMAL_backtrans
 	'
 	date
 	func_timing_start
@@ -872,7 +865,7 @@ TRIMAL_backtrans () {
 			trimal -in $i \
 				-backtrans SequencesCDS/${base}.CDS.fa \
 				-out $CDS_codon_alignment/${base}.codon_aln.fa \
-				-ignorestopcodon > $wd/logs/trimal.TRIMAL_backtrans 2>&1
+				-ignorestopcodon >> $wd/logs/trimal.TRIMAL_backtrans 2>&1
 			# fix names to only have assembly name
 			cat $CDS_codon_alignment/${base}.codon_aln.fa \
 	           	| sed 's/@.*$//g' > $CDS_codon_alignment.nm/${base}.codon_aln.nm.fa 
