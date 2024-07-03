@@ -4,6 +4,17 @@
 # i.e.
 # source $script_home/scipt_lib/functions.sh
 
+BAIL () {
+	# print function that had error in it ${1} and any associated message ${2}
+	echo -e "WARNING: Function \"${FUNCNAME[1]}\" failed"
+	echo ${1}
+	exit 1
+}
+
+
+
+
+
 SET_UP_DIR_STRUCTURE () {
 	echo '
        	###################################################
@@ -22,10 +33,18 @@ SET_UP_DIR_STRUCTURE () {
 		echo " If this is not correct please rm $store/setup.complete and restart OrthoPhyl"
 	else
 		# set up annotation output directories
-		mkdir $store
-		mkdir $trans
-		mkdir $prots
-		mkdir $annots
+		if [ ! -d $store ] ; then
+			mkdir $store
+		fi
+		if [ ! -d $trans ] ; then
+			mkdir $trans 
+		fi
+		if [ ! -d $prots ] ; then
+			mkdir $prots
+		fi 
+		if [ ! -d $annots ] ; then
+			mkdir $annots
+		fi
 
 		#######################################################################
 		#### Make a directory for links to genomes to place in a phylogeny
@@ -61,12 +80,14 @@ SET_UP_DIR_STRUCTURE () {
 		cd $genome_dir || exit
 		#remove parentheses from genomes names
 		#could add additional lines subbing out the "(" for the character to replace
+		# get rid of [(,),:,=] in genome file Names
 		for I in $(ls ./ | grep \)); do   mv $I ${I//\)/}; done
 		for I in $(ls ./ | grep \(); do   mv $I ${I//\(/}; done
+		for I in $(ls ./ | grep \:); do   mv $I ${I//\:/}; done
 		for I in $(ls ./ | grep "_\=_" ); do mv $I ${I//_\=_} ; done
-		# fix contig names with "|" what breaks everything post annotion
+		# fix contig names with a "|" or ":" that break everything post annotion
 		for I in $(grep -lm 1 -d recurse ./ -e "|");do sed -i 's/|/_/g' $I; done
-
+		for I in $(grep -Rlm 1 -e ":");do sed -i 's/:/_/g' $I; done
 
 		#make a file with the genome and protein file names (if input) for later use
 		if compgen -G "$genome_dir/*.*a" > /dev/null
@@ -85,7 +106,7 @@ SET_UP_DIR_STRUCTURE () {
 		# calculate and report how many input assemblies there are
 		echo "Building phylogeny for $(cat $store/all_input_list | wc -l) assemblies" | tee -a $run_notes
 		export min_num_orthos=$(printf %.0f $(echo "$(cat $store/all_input_list | wc -l)*$min_frac_orthos" | bc))
-		echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with ASTRAL and ML method chosen" | tee -a $run_notes
+		echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with $tree_method" | tee -a $run_notes
 		###########################################
 		# just setting up the directory structure #
 		###########################################
@@ -196,11 +217,11 @@ DEDUP_annot_trans () {
 	trans=$trans
 	prots=$prots
 	identity=99.9
-        cd $store || exit
+	cd $store || exit
 	if [ -f $store/dedupe.complete ]
        	then
-            	echo "Dedupe previously completed."
-                echo "if rerun is desired, delete $store/dedupe.complete"
+    		echo "Dedupe previously completed."
+        	echo "if rerun is desired, delete $store/dedupe.complete"
 	else
 		mkdir $trans.preDedup || exit 1
 		mv $trans/*.f*a $trans.preDedup/
@@ -210,13 +231,16 @@ DEDUP_annot_trans () {
 		:> dedupe.stats_long
 		for I in $(ls $trans.preDedup/*.f*a)
 		do
+			# cleaner multithreading. check if the number of running jobs is greater than $threads
+			# if so wait for one to finish
 			if test "$(jobs | wc -l)" -ge $threads; then
 			        wait -n
 			fi
 			{
 			base=$(basename ${I%.*})
 			echo $base >> dedupe.stats
-			bash dedupe.sh -Xmx1g -Xms1g in=$I out=$trans/$base.fna minidentity=99.9 2>&1 | grep 'Input\|Result'  \
+			bash dedupe.sh -Xmx1g -Xms1g in=$I out=$trans/$base.fna minidentity=99.9 2>&1 | \
+				grep 'Input\|Result'  \
 				>> dedupe.stats || { echo "dedupe failed for some reason :("; exit 1;}
 			cat $trans/$base.fna | grep ">" | sed 's/>//g' > $trans/$base.deduped.names
 			filterbyname.sh -Xmx1g -Xms1g --amino include=true in=$prots.preDedup/$base.faa out=$prots/$base.faa names=$trans/$base.deduped.names \
@@ -301,7 +325,10 @@ ANI_species_shortlist () {
 	local number_shortlist=$2
 	local ANI_complete=ANI_complete
 	local mygenome_list=($(ls $genome_dir))
-	cd $store || exit
+	
+	echo "ANI clustering is being done on sequences in ${genome_dir}"
+	echo "Repersentative genomes from ${number_shortlist} clusters will be used to generate HMM profiles for each orthogroup"
+	cd $store || exit 1
 	mkdir ANI_working_dir
 	cd ANI_working_dir
 
@@ -738,17 +765,18 @@ ALIGNMENT_STATS () {
 }
 
 SCO_MIN_ALIGN () {
-	echo '
+	echo "
 	###################################################
 	########## Identify single copy orthologs #########
 	###### with at least ${2} taxon representation ####
 	###################################################
-	'
+	"
 	date
 	func_timing_start
 	# takes folder of fasta alignments and will pull alingment names with > $min_num_orthos constituents
 	local alignment_dir=${1}
 	local min_num_orthos=${2}
+	local OG_sco_filter=$OG_sco_filter
 
 	if [[ $min_num_orthos == $(cat $store/all_input_list | wc -l) ]]
 	then
@@ -787,7 +815,7 @@ SCO_MIN_ALIGN () {
 		# finds OGs with at least $min_orthologs SCOs
 		# and writes to $orthodir/OG_SCO_$min_num_orthos
 		python $OG_sco_filter $gene_counts $min_num_orthos
-		mv OG_SCO_$outstring $wd/OG_SCO_$outstring
+		mv OG_SCO_$min_num_orthos $wd/OG_SCO_$outstring
 	fi
 
 }
@@ -798,8 +826,8 @@ TRIMAL_backtrans () {
 	############### from AA alignemtns ################
 	###################################################
 	#loops of all Orthogroups to
-	#	extract transcripts sequences from a contatentated transcript file
-	#	do codon alignments with TRIMAL_backtrans
+	#	extract CDS sequences from a contatentated CDS file
+	#	then do codon alignments with TRIMAL_backtrans
 	'
 	date
 	func_timing_start
@@ -838,7 +866,7 @@ TRIMAL_backtrans () {
 			trimal -in $i \
 				-backtrans SequencesCDS/${base}.CDS.fa \
 				-out $CDS_codon_alignment/${base}.codon_aln.fa \
-				-ignorestopcodon > $wd/logs/trimal.TRIMAL_backtrans 2>&1
+				-ignorestopcodon >> $wd/logs/trimal.TRIMAL_backtrans 2>&1
 			# fix names to only have assembly name
 			cat $CDS_codon_alignment/${base}.codon_aln.fa \
 	           	| sed 's/@.*$//g' > $CDS_codon_alignment.nm/${base}.codon_aln.nm.fa 
@@ -1065,7 +1093,7 @@ allGENE_TREEs () {
 	local out_dir=$3
 
 
-	echo "Using "$alignment_type" alignments with "${gene_tree_methods[@]}
+	echo "Building gene trees with "$alignment_type" alignments using "${gene_tree_methods[@]}
 	if [ -d $out_dir/ ]
 	then
 	   rm -r $out_dir.bk
@@ -1078,14 +1106,15 @@ allGENE_TREEs () {
         percent=$(( num_OGs / 10))
         J=0
 
-
 	#set some tree building parameters for CDS vs Prot
 	if [[ $alignment_type == "CDS" ]]
 	then
-		local fasttree_options="-gtr -quiet -gamma -nt"
+		local fasttree_options=$fasttree_CDS_genetree_options
+		local iqtree_options=$iqtree_CDS_genetree_options
 	elif [[ $alignment_type == "PROT" ]]
 	then
-		local fasttree_options="-quiet -nopr"
+		local fasttree_options=$fasttree_PROT_genetree_options
+		local iqtree_options=$iqtree_PROT_genetree_options
 	fi
 
 	# loops through all alignments

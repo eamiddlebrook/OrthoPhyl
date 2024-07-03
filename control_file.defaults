@@ -31,14 +31,20 @@ export fasttree_CDS_speciestree_options="-gtr -gamma" # inherits number of threa
 export RAxML_CDS_speciestree_options="-T $threads -f a  -m GTRGAMMA -x 1234 -N 100"
 export IQtree_CDS_speciestree_options="-lmap 2000 --symtest -B 1000 -t PARS -ninit 2 " # --sampling GENESITE" add after current run
 export IQtree_CDS_partition_options="-m MFP+MERGE -rclusterf 10" # cluster partitions with FreeRate models using a faster (rcluster) option
-# program to generate gene trees for running ASTRAL
-export gene_tree_methods=("fasttree")
 
 ### Protein tree specific options
 # options to add to standard species tree software runs. Will exopse properly at some point...
 export fasttree_PROT_speciestree_options="" # inherits number of threads from env variable $threads durring execution
 export IQtree_PROT_speciestree_options="-lmap 2000 --symtest -B 1000 -t PARS -ninit 2 " # --sampling GENESITE" add after current run
 export IQtree_PROT_partition_options="-m MFP+MERGE -rclusterf 10" # cluster partitions with FreeRate models using a faster (rcluster) option
+
+# program to generate gene trees for running ASTRAL
+export gene_tree_methods=("fasttree")
+#options for running CDS genetree methods
+export fasttree_CDS_genetree_options="-gtr -quiet -gamma -nt"
+export fasttree_PROT_genetree_options="-quiet -nopr"
+export iqtree_CDS_genetree_options="-lmap 2000 --symtest -B 1000 -t PARS -ninit 2 "
+export iqtree_PROT_genetree_options="-lmap 2000 --symtest -B 1000 -t PARS -ninit 2 "
 
 
 ### other general stuff...
