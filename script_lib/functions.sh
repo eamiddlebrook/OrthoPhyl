@@ -765,17 +765,18 @@ ALIGNMENT_STATS () {
 }
 
 SCO_MIN_ALIGN () {
-	echo '
+	echo "
 	###################################################
 	########## Identify single copy orthologs #########
 	###### with at least ${2} taxon representation ####
 	###################################################
-	'
+	"
 	date
 	func_timing_start
 	# takes folder of fasta alignments and will pull alingment names with > $min_num_orthos constituents
 	local alignment_dir=${1}
 	local min_num_orthos=${2}
+	local OG_sco_filter=$OG_sco_filter
 
 	if [[ $min_num_orthos == $(cat $store/all_input_list | wc -l) ]]
 	then
@@ -814,7 +815,7 @@ SCO_MIN_ALIGN () {
 		# finds OGs with at least $min_orthologs SCOs
 		# and writes to $orthodir/OG_SCO_$min_num_orthos
 		python $OG_sco_filter $gene_counts $min_num_orthos
-		mv OG_SCO_$outstring $wd/OG_SCO_$outstring
+		mv OG_SCO_$min_num_orthos $wd/OG_SCO_$outstring
 	fi
 
 }
@@ -1092,7 +1093,7 @@ allGENE_TREEs () {
 	local out_dir=$3
 
 
-	echo "Using "$alignment_type" alignments with "${gene_tree_methods[@]}
+	echo "Building gene trees with "$alignment_type" alignments using "${gene_tree_methods[@]}
 	if [ -d $out_dir/ ]
 	then
 	   rm -r $out_dir.bk
