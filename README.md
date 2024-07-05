@@ -73,6 +73,13 @@ Set up auto initialize. If you don't, it is up to you to figure out how to make 
 ```
 mamba init bash
 ```
+On some Linux distros, using ```~/.bashrc``` for only interactive shells is enforced (Linux Mint). In this case, mamba will not be initialized correctly within OrthoPhyl. To fix, just copy the conda/mamba initialization block from the bottom of your ```~/.bashrc``` file (below, replace "..." with what is in your file), and place them at the bottom of ```~/.bash_profile```. 
+```
+# >>> conda initialize >>>
+...
+# <<< conda initialize <<<
+```
+
 
 ### Create conda environment and install dependencies
 #### It is highly recomended that you create an separate environment for this install. Might take some time....
