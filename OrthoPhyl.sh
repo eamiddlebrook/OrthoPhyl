@@ -526,7 +526,7 @@ MAIN_PIPE () {
  			cp $input_trans/${I}   $trans/${I%.*}.fna || exit
  		done
  	fi
-	DEDUP_annot_trans
+	DEDUP_annot_trans $store $trans $prots 
 	FIX_TRANS_NAMES $trans
 	FIX_PROTS_NAMES $prots
 
@@ -568,7 +568,7 @@ MAIN_PIPE () {
 	if [[ "$relaxed" != false ]]
 		then
 			SCO_MIN_ALIGN $wd/AlignmentsProts.trm $min_num_orthos
-			#ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+			#ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.align
 	fi
 	SCO_MIN_ALIGN $wd/AlignmentsProts.trm $(cat $store/all_input_list | wc -l)
 
@@ -580,13 +580,22 @@ MAIN_PIPE () {
 		### Running Protein specific  workflow ###
 		##########################################
 		"
-		prot_rename
+		prot_rename $wd/AlignmentsProts.trm
 		if [[ "$relaxed" != false ]]
 		then
-			cat_alignments $wd/OG_SCO_$min_num_orthos $wd/AlignmentsProts.trm.nm $wd/AlignmentsConcatenated PROT
-			#ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+			echo "$wd/SCO_$min_num_orthos"
+			cat_alignments \
+				$wd/SCO_$min_num_orthos \
+				$wd/AlignmentsProts.trm.nm \
+				$wd/AlignmentsConcatenated \
+				PROT
+			#ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.align
 		fi
-		cat_alignments $wd/OG_SCO_strict $wd/AlignmentsProts.trm.nm $wd/AlignmentsConcatenated PROT
+		cat_alignments \
+			$wd/SCO_strict \
+			$wd/AlignmentsProts.trm.nm \
+			$wd/AlignmentsConcatenated \
+			PROT
 		
 		for I in $wd/AlignmentsConcatenated/*.PROT.*.phy
 			do
@@ -602,15 +611,15 @@ MAIN_PIPE () {
 	then
 		# make Codon alignments for all OGs (could just do SCO_relaxed and that would grab all SCO_strict)
 		#  Its pretty fast, who cares, and might want to make SCO_very_relaxed trees
-		TRIMAL_backtrans $wd/AlignmentsProts.trm $wd/all_trans.nm.fa $wd/AlignmentsTrans.trm
+		TRIMAL_backtrans $wd $wd/AlignmentsProts.trm $wd/all_trans.nm.fa $wd/AlignmentsTrans.trm $wd/OG_names $wd/SequencesCDS
 		
 		# concatenate SCO alignments (only do SCO_$min_num_orthos if relaxed != false)
 		if [[ "$relaxed" != false ]]
 		then
-			cat_alignments $wd/OG_SCO_$min_num_orthos $wd/AlignmentsTrans.trm.nm $wd/AlignmentsConcatenated CDS
-			#ALIGNMENT_STATS $wd/OG_SCO_${min_num_orthos}.align
+			cat_alignments $wd/SCO_$min_num_orthos $wd/AlignmentsTrans.trm.nm $wd/AlignmentsConcatenated CDS
+			#ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.align
 		fi
-		cat_alignments $wd/OG_SCO_strict $wd/AlignmentsTrans.trm.nm $wd/AlignmentsConcatenated CDS
+		cat_alignments $wd/SCO_strict $wd/AlignmentsTrans.trm.nm $wd/AlignmentsConcatenated CDS
 
 
 		# Build ML Species Treeeeees
@@ -643,11 +652,11 @@ MAIN_PIPE () {
 			# build ASTRAL tree from SCO_relaxed gene trees
 			if [[ "$relaxed" != false ]]
 				then
-				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/OG_SCO_$min_num_orthos
+				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_num_orthos
 			fi
 
 			# Build ASTRAL tree from SCO_strict
-			astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/OG_SCO_strict
+			astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_strict
 		fi
 		if [[ "$TREE_DATA" = "PROT" || "$TREE_DATA" = "BOTH" ]]
 		then
@@ -660,11 +669,11 @@ MAIN_PIPE () {
 			# build ASTRAL tree from SCO_relaxed gene trees
 			if [[ "$relaxed" != false ]]
 			then
-				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/OG_SCO_$min_num_orthos
+				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_num_orthos
 			fi
 
 			# Build ASTRAL tree from SCO_strict
-			astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/OG_SCO_strict
+			astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_strict
 		fi
 	fi	
 	# clean up some files

@@ -73,11 +73,11 @@ echo "
 #########################################
 "
 	# this might be a little redundant if I can grab GCF/GCAs from assemblies DB
-	#   However, DLing with assembly's ftp path using wget 
+	#   However, DLing with assembly's ftp path using wget
 	#   led to a few corrupt gz files (~6/150)
 	#   while 0/880 DL'd with datasets were corrupt
 	#   Plus datasets is natively multithreaded
-	datasets download genome taxon $taxon --dehydrated --exclude-genomic-cds --exclude-gff3 --exclude-protein --exclude-rna
+	datasets download genome taxon $taxon --dehydrated
 	unzip ncbi_dataset.zip
 	datasets rehydrate --gzip --directory ./
 	# generate a file with all accessions grabbed by datasets

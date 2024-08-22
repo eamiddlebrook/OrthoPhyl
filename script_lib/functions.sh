@@ -46,48 +46,7 @@ SET_UP_DIR_STRUCTURE () {
 			mkdir $annots
 		fi
 
-		#######################################################################
-		#### Make a directory for links to genomes to place in a phylogeny
-		#### fix names that contain \( or \)
-		#### Can add other chars to fix as needed
-		if [ -d $genome_dir ]
-		then
-		    	rm -r $genome_dir
-		fi
-		mkdir $genome_dir
-		# If genomes are gzipped, uncompress into working dir
-		if compgen -G "$input_genomes/*.gz" > /dev/null
-		then
-			for I in $(ls "${input_genomes}"/*.gz)
-			do
-				base=$(basename ${I%.*})
-				gunzip -c $I > $genome_dir/$base
-			done
-		fi
-		# make symbolic links for input genomes in $genome_dir
-		if compgen -G "$input_genomes/*.fna" > /dev/null
-		then
-		    	ln -s $input_genomes/*.fna $genome_dir/ # make links to input genome dir (should switch to cp'n all the files of m$
-		fi
-		if compgen -G "$input_genomes/*.fa" > /dev/null
-		then
-		    	ln -s $input_genomes/*.fa $genome_dir/
-		fi
-		if compgen -G "$input_genomes/*.fasta" > /dev/null
-	        then
-	            	ln -s $input_genomes/*.fasta $genome_dir/
-	        fi
-		cd $genome_dir || exit
-		#remove parentheses from genomes names
-		#could add additional lines subbing out the "(" for the character to replace
-		# get rid of [(,),:,=] in genome file Names
-		for I in $(ls ./ | grep \)); do   mv $I ${I//\)/}; done
-		for I in $(ls ./ | grep \(); do   mv $I ${I//\(/}; done
-		for I in $(ls ./ | grep \:); do   mv $I ${I//\:/}; done
-		for I in $(ls ./ | grep "_\=_" ); do mv $I ${I//_\=_} ; done
-		# fix contig names with a "|" or ":" that break everything post annotion
-		for I in $(grep -lm 1 -d recurse ./ -e "|");do sed -i 's/|/_/g' $I; done
-		for I in $(grep -Rlm 1 -e ":");do sed -i 's/:/_/g' $I; done
+		CLEAN_N_COPY_GENOMES $genome_dir $input_genomes
 
 		#make a file with the genome and protein file names (if input) for later use
 		if compgen -G "$genome_dir/*.*a" > /dev/null
@@ -127,6 +86,53 @@ SET_UP_DIR_STRUCTURE () {
 	fi
 }
 
+# functionalized for use in addasm
+CLEAN_N_COPY_GENOMES () {
+	genome_dir=$1
+	input_genomes=$2
+	#######################################################################
+	#### Make a directory for links to genomes to place in a phylogeny
+	#### fix names that contain \( or \)
+	#### Can add other chars to fix as needed
+	if [ -d $genome_dir ]
+	then
+			rm -r $genome_dir
+	fi
+	mkdir $genome_dir
+	# If genomes are gzipped, uncompress into working dir
+	if compgen -G "$input_genomes/*.gz" > /dev/null
+	then
+		for I in $(ls "${input_genomes}"/*.gz)
+		do
+			base=$(basename ${I%.*})
+			gunzip -c $I > $genome_dir/$base
+		done
+	fi
+	# make symbolic links for input genomes in $genome_dir
+	if compgen -G "$input_genomes/*.fna" > /dev/null
+	then
+			ln -s $input_genomes/*.fna $genome_dir/ # make links to input genome dir (should switch to cp'n all the files of m$
+	fi
+	if compgen -G "$input_genomes/*.fa" > /dev/null
+	then
+			ln -s $input_genomes/*.fa $genome_dir/
+	fi
+	if compgen -G "$input_genomes/*.fasta" > /dev/null
+		then
+				ln -s $input_genomes/*.fasta $genome_dir/
+		fi
+	cd $genome_dir || exit
+	#remove parentheses from genomes names
+	#could add additional lines subbing out the "(" for the character to replace
+	# get rid of [(,),:,=] in genome file Names
+	for I in $(ls ./ | grep \)); do   mv $I ${I//\)/}; done
+	for I in $(ls ./ | grep \(); do   mv $I ${I//\(/}; done
+	for I in $(ls ./ | grep \:); do   mv $I ${I//\:/}; done
+	for I in $(ls ./ | grep "_\=_" ); do mv $I ${I//_\=_} ; done
+	# fix contig names with a "|" or ":" that break everything post annotion
+	for I in $(grep -lm 1 -d recurse ./ -e "|");do sed -i 's/|/_/g' $I; done
+	for I in $(grep -Rlm 1 -e ":");do sed -i 's/:/_/g' $I; done
+}
 
 PRODIGAL_PREDICT () {
 	echo '
@@ -214,9 +220,11 @@ DEDUP_annot_trans () {
 	###################################
 	"
 
-	trans=$trans
-	prots=$prots
+	local store=$1
+	local trans=$2
+	local prots=$3
 	identity=99.9
+	
 	cd $store || exit
 	if [ -f $store/dedupe.complete ]
        	then
@@ -288,10 +296,10 @@ FIX_PROTS_NAMES () {
 	if [ -d $prots.fixed ]
 	then
 	        if [ -d $prots.fixed.bk ]
-		then
-			rm $prots.fixed.bk
-		fi
-	        mv $prots.fixed $prots.fixed.bk
+			then
+				rm -r $prots.fixed.bk
+			fi
+	    mv $prots.fixed $prots.fixed.bk
 	fi
 
 	cd $local_prots/ || exit
@@ -558,20 +566,20 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 		mkdir alignments
 		touch OG_fullset_scores
 		# Pick OGs of interest from Orthofinder genecounts
-		#    Writes file OG_SCO_$ANI_shortlist_min_OGs which has one OG ID per line
+		#    Writes file SCO_$ANI_shortlist_min_OGs which has one OG ID per line
 		echo "#### Filtering OGs for those with seqs from at least $ANI_shortlist_min_OGs taxa with no paralogs ####"
 		python $OG_sco_filter $gene_counts $ANI_shortlist_min_OGs
 		### Identify orthologs in the full data set from hmms derived
-		###    from OG_SCO_$ANI_shortlist_min_OGs
+		###    from SCO_$ANI_shortlist_min_OGs
 		### making progress indicator
-		num_OGs=$(cat OG_SCO_$ANI_shortlist_min_OGs | wc -l)
+		num_OGs=$(cat SCO_$ANI_shortlist_min_OGs | wc -l)
 		percent=$(( num_OGs / 10))
 		### Run HMM search with updataed models form full dataset
 		###
 		cd $orthodir/OG_alignmentsToHMM
 		percent=$(( num_OGs / 10))
 		J=0
-		for I in $(cat OG_SCO_$ANI_shortlist_min_OGs)
+		for I in $(cat SCO_$ANI_shortlist_min_OGs)
 		do
 			cp $OF_alignments/${I}.fa $alignments_TMP/
 			echo -e "Rep_0\t${I}\t"$(cat $alignments_TMP/${I}.fa| grep -c -e ">") \
@@ -591,11 +599,11 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
                 	mkdir SequencesProts
                 	mkdir AlignmentsProts
 			echo "Running OG expantion rep ${rep}"
-			dirtbag_multithreading $orthodir/OG_alignmentsToHMM OG_SCO_$ANI_shortlist_min_OGs $alignments_TMP $orthodir/OG_alignmentsToHMM/hmm_round$rep $all_prots $threads
+			dirtbag_multithreading $orthodir/OG_alignmentsToHMM SCO_$ANI_shortlist_min_OGs $alignments_TMP $orthodir/OG_alignmentsToHMM/hmm_round$rep $all_prots $threads
 		done
 
 		#alignments copied to the final module output ($wd/AlignmentsProts/)
-		for I in $(cat $orthodir/OG_alignmentsToHMM/OG_SCO_$ANI_shortlist_min_OGs)
+		for I in $(cat $orthodir/OG_alignmentsToHMM/SCO_$ANI_shortlist_min_OGs)
 		do
 			if [ -f $alignments_TMP/${I}.fa ]
 			then
@@ -798,13 +806,13 @@ SCO_MIN_ALIGN () {
 		do
 			# test transcript alignment for number of homologs (should have no paralogs)
 			# if greater than min_num_orthos (samples*min_frac_ortho) 
-			# add to OG_SCO_$min_num_orthos list
+			# add to SCO_$min_num_orthos list
 			final_seqs=$(cat $I | grep -e ">" | wc -l)
 			if [ $final_seqs -ge $min_num_orthos ]
 			then
 				# this basename call  is too specific and easy to break...should clean up
 				base=$(basename ${I%.*.*})
-				echo $base >> $wd/OG_SCO_$outstring
+				echo $base >> $wd/SCO_$outstring
 			fi
 		done
 	else
@@ -813,9 +821,9 @@ SCO_MIN_ALIGN () {
 		gene_counts="$orthodir/Orthogroups/Orthogroups.GeneCount.tsv"
 		echo "Finding all OGs directly from OrthoFinder with $min_num_orthos representetives"
 		# finds OGs with at least $min_orthologs SCOs
-		# and writes to $orthodir/OG_SCO_$min_num_orthos
+		# and writes to $orthodir/SCO_$min_num_orthos
 		python $OG_sco_filter $gene_counts $min_num_orthos
-		mv OG_SCO_$min_num_orthos $wd/OG_SCO_$outstring
+		mv SCO_$min_num_orthos $wd/SCO_$outstring
 	fi
 
 }
@@ -831,10 +839,18 @@ TRIMAL_backtrans () {
 	'
 	date
 	func_timing_start
-	local prot_alignment=${1}
-	local CDS_file=${2}
-	local CDS_codon_alignment=${3}
+	local wd=${1}
+	local prot_alignment=${2}
+	local CDS_file=${3}
+	local CDS_codon_alignment=${4}
+	local OG_names=$5
+	local SequencesCDS=$6
 
+	if [ ! -d $CDS_codon_alignment.nm ]
+	then
+		mkdir $CDS_codon_alignment.nm
+	fi
+	
 	#aligning transcripts based on orthogroup protien alignments
 	cd $wd || exit
 	num_OGs=$(ls $prot_alignment/OG*.fa | wc -l) # this is 1+ the real num
@@ -854,17 +870,17 @@ TRIMAL_backtrans () {
 			local base=${file%%.*}
 
 			cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
-	        	> ./OG_names/${base}.names
+	        	> $OG_names/${base}.names
 			#pull out trans sequences for each OG
 			filterbyname.sh -Xmx60m -Xms60m include=t \
-	        	names=./OG_names/${base}.names \
-			in=$CDS_file out=./SequencesCDS/${base}.CDS.fa \
+	        	names=$OG_names/${base}.names \
+			in=$CDS_file out=$SequencesCDS/${base}.CDS.fa \
 			>> $wd/logs/filterbyname.TRIMAL_backtrans 2>&1 # changed a "/" to ">" not sure how the code ran before...
 			# protein to nuc alignments
 			#pal2nal.pl $i ./SequencesCDS/${base}.CDS.fa -codontable 11 -output fasta \
 			#> $CDS_codon_alignment/${base}.codon_aln.fa 2> TRIMAL_backtrans.stderr.tmp
 			trimal -in $i \
-				-backtrans SequencesCDS/${base}.CDS.fa \
+				-backtrans $SequencesCDS/${base}.CDS.fa \
 				-out $CDS_codon_alignment/${base}.codon_aln.fa \
 				-ignorestopcodon >> $wd/logs/trimal.TRIMAL_backtrans 2>&1
 			# fix names to only have assembly name
@@ -887,13 +903,14 @@ prot_rename () {
 	#### info from prot fasta ####
 	##############################
 	"
-	mkdir AlignmentsProts.trm.nm
-	for I in $wd/AlignmentsProts.trm/OG*
+	local_wd=$1
+	mkdir $local_wd.nm
+	for I in $local_wd/OG*
 	do
 		file=${I##*/}
 		base=${file%%.*}
 		cat $I \
-	    	| sed 's/@.*$//g' > AlignmentsProts.trm.nm/${base}.trm.nm.fa
+	    	| sed 's/@.*$//g' > $local_wd.nm/${base}.trm.nm.fa
 	done
 }
 cat_alignments () {
@@ -911,6 +928,11 @@ cat_alignments () {
 	local alignment_dir=${2}
 	local output_dir=${3}
 	local alignment_type=${4}
+
+	if [ -d $output_dir ]
+	then 
+		mkdir $output_dir
+	fi
 
 	# output valiable
 	local SCO_dir=$SCO_list.$alignment_type.align
@@ -933,8 +955,16 @@ cat_alignments () {
 	perl $catfasta2phyml_cmd -f -c $SCO_dir/*.fa \
         1> $cat_alignment_file.fa 2>> $store/verbose_log.txt
 	# fixing partion file to make compatable with iqtree
-	cat $cat_alignment_file.partitions.tmp | awk '{print "DNA,\t"$0}' \
-		> $cat_alignment_file.partitions && rm $cat_alignment_file.partitions.tmp
+	if [ $alignment_type == "CDS" ]
+	then
+		type=DNA
+	elif [ $alignment_type == "PROT" ]
+	then
+		type=PROTEIN
+	fi
+	cat $cat_alignment_file.partitions.tmp \
+		| awk -v type=$type '{print type",\t"$0}' \
+		> $cat_alignment_file.partitions #&& rm $cat_alignment_file.partitions.tmp
 }
 
 #####################################
@@ -1020,7 +1050,7 @@ TREE_BUILD () {
 		cd iqtree
 		iqtree2 -s $input_alignment \
 		--prefix iqtree.${output_name} $IQtree_partitions $IQtree_speciestree_options\
-		-T $threads --seed 1234 > iqtree.${output_name}.long_log
+		-T AUTO --threads-max $threads --seed 1234 > iqtree.${output_name}.long_log
 		treefile=$(ls iqtree.${output_name}.treefile)
 		cp $treefile ../${treefile%.*}.tree && touch ../${treefile%.*}.complete || echo -e "\n!!!!!!!!\nWARNING\n!!!!!!!!!!\n\tIQTree failed to run on "$input_alignment
 		cd $output_dir || exit

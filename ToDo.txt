@@ -31,13 +31,7 @@ protein trees
     Maybe get internode dist from ansestral state reconstruction vs GTR dist
     automate comparison between prot and nuc tree and look for LBA or comp bias pulling in
 [] option to partition by third position (or mask out)
-[] add new sequences to old analysis
-    find prots for each OG
-    add to alignment
-    add to tree
-        Scalable pplacer: https://github.com/gillichu/PLUSplacer-taxtastic
-        IQtree: Can do using a guide tree. 
-            If we can use all the precomputed model parameters, that would be awesome
+
 ## small task
 [] move all hmm seach stuff out of annot_prots.shortlist
 [] add checkpoints for smaller steps 
@@ -46,3 +40,12 @@ protein trees
     concatenate
     alignment assesments
 [X] clean up the paralog remover
+
+## add new sequences to old analysis
+    X find prots for each OG
+        NEED TO FIX NAMES FIRST FOR PARALOG SCORE
+    add to alignment
+    add to tree
+        Scalable pplacer: https://github.com/gillichu/PLUSplacer-taxtastic
+        IQtree: Can do using a guide tree. 
+            If we can use all the precomputed model parameters, that would be awesome

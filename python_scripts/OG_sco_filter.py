@@ -46,7 +46,7 @@ for line in f:
             if int(OGline[-1]) >= homologues:
                 #print (OGline)
                 OG_single.append(OGline[0])
-outfile = open("OG_SCO_%s" %(str(homologues)), "w")
+outfile = open("SCO_%s" %(str(homologues)), "w")
 for I in OG_single:
     outfile.write(I + "\n")
 
