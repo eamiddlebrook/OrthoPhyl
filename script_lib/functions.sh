@@ -1153,16 +1153,21 @@ allGENE_TREEs () {
 	for i in $gene_alignment_dir/OG*
 	do
 		# Progress sent to stdout
-                if [ $((J % percent)) -eq 0 ]
-                then
-                    	echo $((J/percent*10))" percent of the way through building gene trees"
-                fi
+		if [ $((J % percent)) -eq 0 ]
+		then
+				echo $((J/percent*10))" percent of the way through building gene trees"
+		fi
 		TRANS_TREE_subfunc () {
-		        local file=${i##*/}
-				local base=${file%%.*}
-		        
-        		if [[ " ${gene_tree_methods[*]} " =~ " fasttree " ]]
-        		then
+			local file=${i##*/}
+			local base=${file%%.*}
+			if [[ $(cat $gene_alignment_dir/${base}.*.fa | grep ">" | wc -l) -lt 4 ]]
+			then 
+				echo "$gene_alignment_dir/${base}.*.fa has less than 4 samples in it." 
+				echo "Skipping"
+				echo "\n"
+			else
+				if [[ " ${gene_tree_methods[*]} " =~ " fasttree " ]]
+				then
 					fasttree $fasttree_options \
 					$gene_alignment_dir/${base}.*.fa \
 					> ./${base}.fasttree.tree 
@@ -1179,15 +1184,16 @@ allGENE_TREEs () {
 				else
 					echo "Gene tree estemation from gene alignemtns not done; gene_tree_method not set to either fasttree, raxml or iqtree" 
 					exit 1
-        		fi
+				fi
+			fi
 		}
 
-                TRANS_TREE_subfunc &
-                J=$((J+1))
-                if [ $(($J % $threads)) -eq 0 ]
-                then
-                        wait
-                fi
+		TRANS_TREE_subfunc &
+		J=$((J+1))
+		if [ $(($J % $threads)) -eq 0 ]
+		then
+				wait
+		fi
 
 	done
 }
