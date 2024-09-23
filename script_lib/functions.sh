@@ -1170,7 +1170,8 @@ allGENE_TREEs () {
 					> $out_dir.nm/${base}.fasttree.tree
 				elif [[ " ${gene_tree_methods[*]} " =~ " iqtree " ]]
 				then
-					iqtree -s $gene_alignment_dir/${base}.*.fa \
+					iqtree $iqtree_options \
+					-s $gene_alignment_dir/${base}.*.fa \
 					--prefix ${base} -T 1 > ${base}.iqtree.log
 					mv ./${base}.treefile ./${base}.iqtree.tree
 					cat ./${base}.iqtree.tree | sed 's/@[^:]*:/:/g' \
