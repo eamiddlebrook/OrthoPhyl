@@ -7,13 +7,13 @@ protein trees
         [X] TRIMAL works great!!!
 	[X] reorder the whole workflow!!!
         [] test reordered workflow
-    [] fix CDS concat call to run on all OG_SCO_* like prot
-    [] write functions for prot specific workflow
+    [X] fix CDS concat call to run on all OG_SCO_* like prot
+    [X] write functions for prot specific workflow
         [X] TRIM_PROTS
-	    concatenate_prots
-	    build_ML_trees
-	    build_gene_trees
-	    build_ASTRAL_trees
+	    [X] concatenate_prots
+	    [X] build_ML_trees
+	    [X] build_gene_trees
+	    [X] build_ASTRAL_trees
     
     # Low priority
     [] fix OrthoFinder only SCO ident
@@ -42,10 +42,11 @@ protein trees
 [X] clean up the paralog remover
 
 ## add new sequences to old analysis
-    X find prots for each OG
-        NEED TO FIX NAMES FIRST FOR PARALOG SCORE
-    add to alignment
-    add to tree
-        Scalable pplacer: https://github.com/gillichu/PLUSplacer-taxtastic
-        IQtree: Can do using a guide tree. 
-            If we can use all the precomputed model parameters, that would be awesome
+    {X} find prots for each OG
+        {X} NEED TO FIX NAMES FIRST FOR PARALOG SCORE
+    {X} add to OG alignments
+    {X} add to tree
+        Nah - Scalable pplacer: https://github.com/gillichu/PLUSplacer-taxtastic
+        {X} IQtree: Can do using a guide tree. 
+            {X} If we can use all the precomputed model parameters, that would be awesome
+    {} fix addasm not working with previous Orthophyl only run

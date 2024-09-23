@@ -731,7 +731,7 @@ ALIGNMENT_STATS () {
 	date
 	func_timing_start
 	alignment_dir=$1
-        alignment_dir_vis=$(basename $1).vis
+    alignment_dir_vis=$(basename $1).vis
 	echo "making alignemnt assesment figures for $alignment_dir"
 	cd $alignment_dir/ || exit
 
@@ -929,7 +929,7 @@ cat_alignments () {
 	local output_dir=${3}
 	local alignment_type=${4}
 
-	if [ -d $output_dir ]
+	if [ ! -d $output_dir ]
 	then 
 		mkdir $output_dir
 	fi
@@ -939,14 +939,16 @@ cat_alignments () {
 	local cat_alignment_file=$output_dir/$(basename $SCO_list.$alignment_type.trm.sco.nm)
 	
 	cd $wd || exit
-	mkdir $SCO_dir
+	if [ ! -d $SCO_dir ]
+	then	
+		mkdir $SCO_dir
+	fi
 	echo "Creating directory with alignments of OGs from $SCO_list"
 	for I in $(cat $SCO_list):
 	do
 		cp $alignment_dir/${I}.* $SCO_dir/
 	done
  
-	mkdir $output_dir 
 	echo "Concatenating fasta alignments to phylip format"
 	cd $output_dir || exit
 	perl $catfasta2phyml_cmd -c $SCO_dir/*.fa \
@@ -1046,7 +1048,7 @@ TREE_BUILD () {
 		cd $output_dir || exit
 	}
 	IQTREE_run () {
-		if [ ! -d "$DIRECTORY" ]; then mkdir iqtree ; fi
+		if [ ! -d "iqtree" ]; then mkdir iqtree ; fi
 		cd iqtree
 		iqtree2 -s $input_alignment \
 		--prefix iqtree.${output_name} $IQtree_partitions $IQtree_speciestree_options\

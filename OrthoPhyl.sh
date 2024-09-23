@@ -428,7 +428,7 @@ fi
 #############################################
 if [[ " ${tree_method[*]} " =~ " raxml " ]] || [[ " ${tree_method[*]} " =~ " fasttree " ]] || [[ " ${tree_method[*]} " =~ " iqtree " ]] || [[ " ${tree_method[*]} " =~ " astral " ]]
 then
-	echo Running $tree_method to generate Species trees
+	echo Running ${tree_method[@]} to generate Species trees
 else
 	echo "Species tree estemation from $input_alignment (concatenated genes) not done; tree_method not set to either fasttree, raxml, and/or iqtree"
 	USAGE
@@ -589,14 +589,15 @@ MAIN_PIPE () {
 				$wd/AlignmentsProts.trm.nm \
 				$wd/AlignmentsConcatenated \
 				PROT
-			#ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.align
+			ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.PROT.align
 		fi
+		ALIGNMENT_STATS $wd/AlignmentsProts.trm.nm
 		cat_alignments \
 			$wd/SCO_strict \
 			$wd/AlignmentsProts.trm.nm \
 			$wd/AlignmentsConcatenated \
 			PROT
-		
+		ALIGNMENT_STATS $wd/SCO_strict.PROT.align
 		for I in $wd/AlignmentsConcatenated/*.PROT.*.phy
 			do
 			TREE_BUILD $wd/SpeciesTree/ $I $threads "PROT"
@@ -616,11 +617,19 @@ MAIN_PIPE () {
 		# concatenate SCO alignments (only do SCO_$min_num_orthos if relaxed != false)
 		if [[ "$relaxed" != false ]]
 		then
-			cat_alignments $wd/SCO_$min_num_orthos $wd/AlignmentsTrans.trm.nm $wd/AlignmentsConcatenated CDS
-			#ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.align
+			cat_alignments \
+				$wd/SCO_$min_num_orthos \
+				$wd/AlignmentsTrans.trm.nm \
+				$wd/AlignmentsConcatenated \
+				CDS
+			ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.CDS.align
 		fi
-		cat_alignments $wd/SCO_strict $wd/AlignmentsTrans.trm.nm $wd/AlignmentsConcatenated CDS
-
+		cat_alignments \
+			$wd/SCO_strict \
+			$wd/AlignmentsTrans.trm.nm \
+			$wd/AlignmentsConcatenated \
+			CDS
+		ALIGNMENT_STATS $wd/SCO_strict.CDS.align
 
 		# Build ML Species Treeeeees
 		for I in $wd/AlignmentsConcatenated/*.CDS.*.phy
@@ -698,11 +707,11 @@ MAIN_PIPE
 
 echo "
 ######################################################
-Weelll it finished.  Check $wd/SpeciesTrees for output
+Weelll it finished.  Check $wd/FINAL_SPECIES_TREES/ for output
 ######################################################
 Also check Alignment figures in the AlignmentsTrans.trm.nm.vis directory
 Good luck! 
-If you have an issues, please go to https://github.com/eamiddlebrook/OrthoPhyl
+If you have an issues, please go to https://github.com/eamiddlebrook/OrthoPhyl and open an issue.
 
 If used in a publication, please cite:
 Earl A Middlebrook, Robab Katani, Jeanne M Fair 
