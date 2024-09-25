@@ -1,16 +1,28 @@
-# OrthoPhyl
-## (previously OrthoPhylo...OrthoPhyl sounds better)
-## For the version used in *OrthoPhyl – Streamlining large scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales* see the OrthoPhyl_1.0 branch.
+# OrthoPhyl2.0: Bigger and Better Orthology-based Phylogenomics
+<br /> <br />
+## Table of Contents
+
+1. [About](#About)
+2. [Getting Started](#GettingStarted)
+    - [Installation](#Installation)
+    - [Test Install](#TestInstall)
+3. [Running OrthoPhyl](#RunningOrthoPhyl)
+    - [Run Examples](#RunExamples)
+4. [More Notes on OrthoPhyl](#NotesOnOrthoPhyl)
+
+## About  <a name="About"></a>
+### (previously OrthoPhylo...OrthoPhyl sounds better)
+### For the version used in *OrthoPhyl – Streamlining large scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales* see the OrthoPhyl_1.0 branch.
 ### Developed at Los Alamos National Labs (LANL - C22064)
 #### Written by Earl Middlbrook with input from Robab Katani at Penn State and Jeanne Fair at LANL.
 #### The software is available through a GLPv3 open source licence. 
-####
-#### This software is designed to generate phylogenetic trees from bacterial genome assemblies. While many methods use whole genome alignments to generate informative sites to base tress on, OrthoPhyl annotates bacterial genes, identifies orthologous sequences, aligns related proteins to inform transcript alignments, then builds species trees with two methods. The first is a conventional gene concatenation and ML tree estemation method. The second attempts to reconcile gene trees with a unified species tree using quartets (ASTRAL). Both methods allow filtering of gene lists on number of species represented, length, and gappiness in order to tune signal-to-noise ratio for tree estimation. 
-#### The main advantages of this software pipeline are three fold: 1) It extends the evolutionary distance input species can represent (over whole genome alignment and k-mer methods) while maintaining phylogenetic resolution, 2) this software is designed to be very user friendly, requiring just a single to estimate trees from a directory of assemblies. Additionally a Singularity image is now available to avoid dependancy hell and 3) this pipleline is amenable to estimating trees for 1000s of bacterial genome assemblies. To handle large numbers of genomes, the pipline calculates a diversity-representing subset of genomes to run orthofinder on, then expands the found OrthoGroups to all assemblies with iterative HMM searches.
+#### Purpose
+This software is designed to generate phylogenetic trees from bacterial genome assemblies. While many methods use whole genome alignments to generate informative sites to base tress on, OrthoPhyl annotates bacterial genes, identifies orthologous sequences, aligns related proteins to inform transcript alignments, then builds species trees with two methods. The first is a conventional gene concatenation and ML tree estemation method. The second attempts to reconcile gene trees with a unified species tree using quartets (ASTRAL). Both methods allow filtering of gene lists on number of species represented, length, and gappiness in order to tune signal-to-noise ratio for tree estimation. 
+The main advantages of this software pipeline are three fold: 1) It extends the evolutionary distance input species can represent (over whole genome alignment and k-mer methods) while maintaining phylogenetic resolution, 2) this software is designed to be very user friendly, requiring just a single to estimate trees from a directory of assemblies. Additionally a Singularity image is now available to avoid dependancy hell and 3) this pipleline is amenable to estimating trees for 1000s of bacterial genome assemblies. To handle large numbers of genomes, the pipline calculates a diversity-representing subset of genomes to run orthofinder on, then expands the found OrthoGroups to all assemblies with iterative HMM searches.
+![screenshot](/img/Method.pngOP2.0_workflow.png)
 
-
-# Getting Started
-## Install
+## Getting Started  <a name="GettingStarted"></a>
+## Installation <a name="Installation"></a>
 ### Compatability and Dependencies
 #### This workflow has been tested on a CentOS8 machine, but should be pretty portable. Testing is starting on diverse *nix systems. There will likely be some errors due to the wrapper having moderate bash complexity. Unfortunately fastANI seems to be incompatable with MacOS, so I will need to find an alternative before the pipeline can be run on that architecture.
 ### Dependencies
@@ -141,7 +153,7 @@ mv fastANI ~/apps/ # or anywhere else you would like to put it. Change control_f
 
 ### Edit ```${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
 
-## Test install
+## Test Install <a name="TestInstall"></a>
 ### Test Singularity container
 You must specify an output directory (-s) if running through singularity, because the script will try to write directly to the container (wont work)
 ```
@@ -171,7 +183,7 @@ If the test was successful, there should be a file at "OrthoPhyl/TESTER.pass"
 and "###### It looks like the install was successful ######" should be sent to stdout towards the end of the run
 
 
-## Running OrthoPhyl on your data
+## Running OrthoPhyl <a name="RunningOrthoPhyl"></a>
 ```
 USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_output
 # ALL arguments are optional if set with \"-c control_file.your_args\"
@@ -217,26 +229,23 @@ bash OrthoPhyl.sh -T TESTER_fasttest -t #threads
 # When running through Singularity an output directory is required:
 singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads
 ```
-### Example1:
-#### Run OrthoPhyl on assemblies in ~/Projects/ASMS/ecoli/ using 12 cores within singularity and place all results and intermediate files in ~/Projects/phylogenetics/ecoli/
+### Run Examples <a name="RunExamples"></a>
+#### Example1: Run OrthoPhyl on assemblies in ~/Projects/ASMS/ecoli/ using 12 cores within singularity and place all results and intermediate files in ~/Projects/phylogenetics/ecoli/
 ```
 singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
 
 ```
-### Example2:
-#### Run the same OrthoPhyl command from the manual install
+#### Example2: Run the same OrthoPhyl command from the manual install
 ```
 ./OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
 
 ```
-### Example3:
-#### Run the same OrthoPhyl command from the manual install, also incorporate preannoated samples with protein seqs in ```~/Projects/annots/protiens/``` and transripts in ```~/Projects/annots/transcripts/``` 
+#### Example3: Run the same OrthoPhyl command from the manual install, also incorporate preannoated samples with protein seqs in ```~/Projects/annots/protiens/``` and transripts in ```~/Projects/annots/transcripts/``` 
 ```
 ./OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -a ~/Projects/annots/protiens/,~/Projects/annots/transcripts/ -s ~/Projects/phylogenetics/ecoli/ -t 12 
 
 ```
-### Example4:
-#### Run OrthoPhyl to build a species tree with 
+#### Example4: Run OrthoPhyl to build a species tree with 
 + ASTRAL (-p astral) 
 + from CDS (-o CDS) 
 + codon alignment gene trees build by iqtree used by ASTRAL (control_file.user contains just the line "export gene_tree_methods=("iqtree")") 
@@ -245,8 +254,7 @@ singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/eco
 ```
 ./OrthoPhyl.sh -g TESTER/genomes_chloroplast/ -s TESTER/TESTER_custom.chloro.B -m 1 -n 15 -c control_file.user -p astral -o CDS
 ```
-### Example5:
-#### Run OrthoPhyl to build a species tree with 
+#### Example5: Run OrthoPhyl to build a species tree with 
 + iqtree and ASTRAL (-p "iqtree astral") 
 + from protein alignments (-o PROT) 
 + protein alignment gene trees build by fasttree used by ASTRAL (default) 
@@ -255,7 +263,7 @@ singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/eco
 ```
 ./OrthoPhyl.sh -g TESTER/genomes -s TESTER/TESTER_full_genomes -m .3 -n 30 -p "iqtree astral" -o PROT
 ```
-## More Notes on OrthoPhyl: 
+## More Notes on OrthoPhyl: <a name="NotesOnOrthoPhyl"></a>
 #### This software wraps many open source bioinformatic tools together with several custom programs. Genomes are annotated with Prodigal.  If a large number of genomes are to be analyzed, fastANI is used to estimate the pairwise genomic Average Nucleotide Identity (ANI) and then an OrthoPhyl function subsets the genomes to a minimal number which represent the diversity of the full set. Protein sequences from this subset (or full set for small numbers of genomes) are used as input for OrthoFinder to identify orthologous gene families. For the subset method, a HMM search, HMMER, is used to generalize the resulting orthogroup to the full data set. From there, orthogroup proteins are realigned with MAFFT, and these aignments are used to "codon" align the transcript sequences (generated by earlier annotation). These orthogroup transcript alignments are then trimmed (with TRIMAL) and filtered for strict single copy orthologs (SCO_strict) or SCOs found in at least X% of the input genomes (with X being tunable). Next, transcript alignmants are concatenated to generate super-maticies and used as input for species tree generation with either RAxML or fastTREE. Aditionally, gene trees are generated from the individual transcript alignments, which are used in gene tree to species tree estimation with ASTRAL.  
 
 ### Cleaning input genomes
