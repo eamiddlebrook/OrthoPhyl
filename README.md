@@ -10,7 +10,9 @@
     - [Run Examples](#RunExamples)
 4. [More Notes on OrthoPhyl](#NotesOnOrthoPhyl)
 
-## About  <a name="About"></a>
+<a name="About"></a>
+
+## About
 ### (previously OrthoPhylo...OrthoPhyl sounds better)
 ### For the version used in *OrthoPhyl – Streamlining large scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales* see the OrthoPhyl_1.0 branch.
 ### Developed at Los Alamos National Labs (LANL - C22064)
