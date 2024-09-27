@@ -24,7 +24,7 @@
 #### Purpose
 This software is designed to generate phylogenetic trees from bacterial genome assemblies. While many methods use whole genome alignments to generate informative sites to base tress on, OrthoPhyl annotates bacterial genes, identifies orthologous sequences, aligns related proteins to inform transcript alignments, then builds species trees with two methods. The first is a conventional gene concatenation and ML tree estemation method. The second attempts to reconcile gene trees with a unified species tree using quartets (ASTRAL). Both methods allow filtering of gene lists on number of species represented, length, and gappiness in order to tune signal-to-noise ratio for tree estimation. 
 The main advantages of this software pipeline are three fold: 1) It extends the evolutionary distance input species can represent (over whole genome alignment and k-mer methods) while maintaining phylogenetic resolution, 2) this software is designed to be very user friendly, requiring just a single to estimate trees from a directory of assemblies. Additionally a Singularity image is now available to avoid dependancy hell and 3) this pipleline is amenable to estimating trees for 1000s of bacterial genome assemblies. To handle large numbers of genomes, the pipline calculates a diversity-representing subset of genomes to run orthofinder on, then expands the found OrthoGroups to all assemblies with iterative HMM searches.
-![screenshot](/img/Method.pngOP2.0_workflow.png)
+![screenshot](/img/OP2.0_workflow.png)
 
 <a name="GettingStarted"></a>
 
