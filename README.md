@@ -5,12 +5,13 @@
 
 1. [About](#About)
 2. [Getting Started](#GettingStarted)
-    - [Installation](#Installation)
+    - [Singularity](#Singularity)
+    - [Manual Install](#ManualInstall)
     - [Test Install](#TestInstall)
 3. [Running OrthoPhyl](#RunningOrthoPhyl)
     - [Run Examples](#RunExamples)
 4. [More Notes on OrthoPhyl](#NotesOnOrthoPhyl)
-5. [known Errors](#KnownErrors)
+5. [Known Errors, Issues, and What-have-yous](#KnownErrors)
 6. [Future Capabilities](#FutureCapabilities)
 7. [OrthoPhyl Citation](#OrthoPhylCitation)
 
@@ -23,48 +24,29 @@
 #### The software is available through a GLPv3 open source licence. 
 #### Purpose
 This software is designed to generate phylogenetic trees from bacterial genome assemblies. While many methods use whole genome alignments to generate informative sites to base tress on, OrthoPhyl annotates bacterial genes, identifies orthologous sequences, aligns related proteins to inform transcript alignments, then builds species trees with two methods. The first is a conventional gene concatenation and ML tree estemation method. The second attempts to reconcile gene trees with a unified species tree using quartets (ASTRAL). Both methods allow filtering of gene lists on number of species represented, length, and gappiness in order to tune signal-to-noise ratio for tree estimation. 
-The main advantages of this software pipeline are three fold: 1) It extends the evolutionary distance input species can represent (over whole genome alignment and k-mer methods) while maintaining phylogenetic resolution, 2) this software is designed to be very user friendly, requiring just a single to estimate trees from a directory of assemblies. Additionally a Singularity image is now available to avoid dependancy hell and 3) this pipleline is amenable to estimating trees for 1000s of bacterial genome assemblies. To handle large numbers of genomes, the pipline calculates a diversity-representing subset of genomes to run orthofinder on, then expands the found OrthoGroups to all assemblies with iterative HMM searches.
+The main advantages of this software pipeline are three fold: 1) It extends the evolutionary distance input species can represent (over whole genome alignment and k-mer methods) while maintaining phylogenetic resolution, 2) this software is designed to be very user friendly, requiring just a single to estimate trees from a directory of assemblies. Additionally a Singularity image is now available to avoid dependancy hell and 3) this pipeline is amenable to estimating trees for 1000s of bacterial genome assemblies. To handle large numbers of genomes, the pipline calculates a diversity-representing subset of genomes to run OrthoFinder on, then expands the found OrthoGroups to all assemblies with an iterative HMM search strategy.
 ![screenshot](/img/OP2.0_workflow.png)
+Grey boxes indicate processes. Orange, tan, and purple boxes represent user input, intermediate files, and species tree outputs, respectively. Purple arrows show iterative approaches. The workflow is divided into four main tasks: a) annotate assemblies, clean-up files, and remove identical CDSs. If more than “N” assemblies are being analyzed, b1) identify a subset of diversity-spanning assemblies, b2) pass them through OrthoFinder to generate orthogroups, and b3) expand the OrthoFinder-identified orthogroups to the full dataset of assemblies through iterative HMM searches. c) Align full orthogroup protein sets, generate and trim matching codon alignments, then filter orthogroups by taxon representation. Finally, d) estimate species tree topologies with concatenated codon alignment supermatrices along with a gene tree to species tree consensus method.
 
 <a name="GettingStarted"></a>
-
 ## Getting Started
-<a name="Installation"></a>
-## Installation 
-### Compatability and Dependencies
-#### This workflow has been tested on a CentOS8 machine, but should be pretty portable. Testing is starting on diverse *nix systems. There will likely be some errors due to the wrapper having moderate bash complexity. Unfortunately fastANI seems to be incompatable with MacOS, so I will need to find an alternative before the pipeline can be run on that architecture.
-### Dependencies
-#### If you have Singularity you can run a prebuilt container. Grab the container with (requires ~1.5gb space at the moment):
+### Compatability
+#### This workflow has been tested on CentOS8 and debian(mint) machines, but should be pretty portable to other linux systems. 
+
+<a name="Singularity"></a>
+### Singularity
+#### If you have Singularity you can run a prebuilt container. Grab the container which requires ~1.7gb space (at the moment):
 ```
 singularity_images=~/singularity_images/
 mkdir ${singularity_images}
 cd ${singularity_images}
 singularity pull library://earlyevol/default/orthophyl
 ```
-Congradulations! You can skip down to testing the install!
+Congradulations! You can skip down to testing the "install"!
 
-#### OR install OrthoPhyl and these dependencies with the instructions bellow.
-+ prodigal 
-+ orthofinder 
-+ bbmap
-+ fastTree*
-+ hmmer
-+ pal2nal
-+ prodigal 
-+ ete3
-+ IQTree*
-+ raxml*
-+ trimal
-+ parallel
-+ catfasta2phyml
-+ ASTRAL
-+ fastANI
-+ R
-+ Alignment_Assessment
-
-*depending on tree method used
-
-### Clone the Orthophylo repo
+<a name="ManualInstall"></a>
+### Manual Install
+#### Clone the Orthophylo repo
 Cloning takes a minute because of the large test files
 ```
 Path_to_gits=~/gits
@@ -74,15 +56,14 @@ git clone https://github.com/eamiddlebrook/OrthoPhyl.git
 cd OrthoPhyl
 ```
 
-
-### Conda/mamba installable dependencies
-#### If you need to install conda or mamba we recomend mamba, however the commands are exactly the same (exept running the install)
+#### Conda/mamba installable dependencies
+If you need to install conda or mamba we recomend mamba, however the commands are exactly the same (exept running the install)
 ```
 cd ~/Downloads/ # or wherever you want to put the installer
 wget https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-Linux-x86_64.sh
 bash Mambaforge-Linux-x86_64.sh
 ```
-#### OR
+...or
 ```
 cd ~/Downloads/ # or wherever you want to put the installer
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
@@ -93,7 +74,7 @@ Set up auto initialize. If you don't, it is up to you to figure out how to make 
 ```
 mamba init bash
 ```
-On some Linux distros, using ```~/.bashrc``` for only interactive shells is enforced (Linux Mint). In this case, mamba will not be initialized correctly within OrthoPhyl. To fix, just copy the conda/mamba initialization block from the bottom of your ```~/.bashrc``` file (below, replace "..." with what is in your file), and place them at the bottom of ```~/.bash_profile```. 
+On some Linux distros, using ```~/.bashrc``` only for interactive shells is enforced (Linux Mint). In this case, mamba will not be initialized correctly within OrthoPhyl. To fix, just copy the conda/mamba initialization block from the bottom of your ```~/.bashrc``` file (below, replace "..." with what is in your file), and place them at the bottom of ```~/.bash_profile```. 
 ```
 # >>> conda initialize >>>
 ...
@@ -101,12 +82,12 @@ On some Linux distros, using ```~/.bashrc``` for only interactive shells is enfo
 ```
 
 
-### Create conda environment and install dependencies
-#### It is highly recomended that you create an separate environment for this install. Might take some time....
+#### Create conda environment and install dependencies
+It is highly recomended that you create an separate environment for this install. Might take some time....
 ```
 mamba create -n orthophyl --file $Path_to_gits/OrthoPhyl/orthophyl_env.XXX.txt -c bioconda -c conda-forge
 ```
-#### OR you can install different versions if neccessary
+...or you can install different versions if neccessary. Compatability should be pretty good, but no promises.
 ```
 mamba create -n orthophyl -c bioconda -c conda-forge \
 git prodigal=2.6.3 orthofinder=2.5.4 \
@@ -114,8 +95,9 @@ bbmap=39.01 fasttree=2.1.11 hmmer=3.3.2 pal2nal=14.1 \
 ete3 raxml=8.2.12 trimal=1.4.1 \
 parallel=20160622 r-essentials=4.1
 ```
-#### Sometimes R (r-essentials) can be a pain. If it is causing problems with the conda/mamba install, remove it and install manually:
-#### Go to https://cran.r-project.org/mirrors.html and pick an appropriate mirror. Then chose the linux distro you are using, download package files, and follow install instructions.
+#### Sometimes R (r-essentials) can be a pain. 
+If it is causing problems with the conda/mamba install, remove it and install manually:
+Go to https://cran.r-project.org/mirrors.html and pick an appropriate mirror. Then chose the linux distro you are using, download package files, and follow install instructions.
 
 #### To allow conda changes to take effect:
 ```
@@ -132,7 +114,7 @@ parallel --citation
 Rscript --help
 ```
 
-### Other dependencies
+#### Other dependencies
 This reflects how I like to organize my machine, pick what works for you. The control_file.paths reflects this setup. If you choose to install the below packages in different locations, just change control_file.paths to reflect this.
 ```
 cd ${Path_to_gits}/
@@ -159,7 +141,7 @@ mkdir ~/apps/
 mv fastANI ~/apps/ # or anywhere else you would like to put it. Change control_file.required to reflect path
 ```
 
-### Edit ```${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
+#### Edit ```${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
 
 <a name="TestInstall"></a>
 ## Test Install 
@@ -168,28 +150,32 @@ You must specify an output directory (-s) if running through singularity, becaus
 ```
 singularity run ${singularity_images}/OrthoPhyl.0.9.3.sif -T TESTER_chloroplast -s ./tester_chloroplast_output -t 4
 ```
-### Test Manual install
-#### To test 'conda activate' within OrthoPhyl, make sure the conda environment is not activated
+#### Test Manual install
+To test 'conda activate' within OrthoPhyl, make sure the conda environment is not activated
 ```
 mamba deactivate
-``` 
-### run Chloroplast test locally
-#### Tested on RHEL 8.5 machine with Intel Core i7-8700 CPU and 16gb ram (~8 minute runtime using 3 cores)
+```
+#### Run super "fast" test locally
+Tested on RHEL 8.5 machine with Intel Core i7-8700 CPU and 16gb ram (~8 minute runtime using 3 cores)
+```
+bash ${Path_to_gits}/OrthoPhyl/OrthoPhyl.sh -T TESTER_fasttest -t 3
+```
+There should be a directory created at OrthoPhyl/TESTER/Workflow_test.fasttest$(date +%m-%d-%Y)
+If the test was successful, there should be 4 species trees found in the FINAL_SPECIES_TREES
+
+#### run Chloroplast test locally
+Tested on RHEL 8.5 machine with Intel Core i7-8700 CPU and 16gb ram (~8 minute runtime using 3 cores)
 ```
 bash ${Path_to_gits}/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -t 3
 ```
 There should be a directory created in OrthoPhyl/TESTER/Workflow_test.chloroplast$(date +%m-%d-%Y)
-If the test was successful, there should be 4 species trees found in the FINAL_TREES
+If the test was successful, there should be 4 species trees found in the FINAL_SPECIES_TREES
 
-### run bigger test locally
-####   this script takes about 20 hr to complete with 20 cores
-####   Most of this is ML tree building
-####   will make an artificial set of truncated genomes later
+#### run bigger test locally
+This script takes about 20 hr to complete with 20 cores. Most of this is ML tree building. Will make an artificial set of truncated genomes later
 ```
 bash OrthoPhyl.sh -T TESTER -t 3
 ```
-If the test was successful, there should be a file at "OrthoPhyl/TESTER.pass"
-and "###### It looks like the install was successful ######" should be sent to stdout towards the end of the run
 
 <a name="RunningOrthoPhyl"></a>
 
@@ -277,26 +263,26 @@ singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/eco
 <a name="NotesOnOrthoPhyl"></a>
 
 ## More Notes on OrthoPhyl: 
-#### This software wraps many open source bioinformatic tools together with several custom programs. Genomes are annotated with Prodigal.  If a large number of genomes are to be analyzed, fastANI is used to estimate the pairwise genomic Average Nucleotide Identity (ANI) and then an OrthoPhyl function subsets the genomes to a minimal number which represent the diversity of the full set. Protein sequences from this subset (or full set for small numbers of genomes) are used as input for OrthoFinder to identify orthologous gene families. For the subset method, a HMM search, HMMER, is used to generalize the resulting orthogroup to the full data set. From there, orthogroup proteins are realigned with MAFFT, and these aignments are used to "codon" align the transcript sequences (generated by earlier annotation). These orthogroup transcript alignments are then trimmed (with TRIMAL) and filtered for strict single copy orthologs (SCO_strict) or SCOs found in at least X% of the input genomes (with X being tunable). Next, transcript alignmants are concatenated to generate super-maticies and used as input for species tree generation with either RAxML or fastTREE. Aditionally, gene trees are generated from the individual transcript alignments, which are used in gene tree to species tree estimation with ASTRAL.  
+This software wraps many open source bioinformatic tools together with several custom programs. Genomes are annotated with Prodigal.  If a large number of genomes are to be analyzed, fastANI is used to estimate the pairwise genomic Average Nucleotide Identity (ANI) and then an OrthoPhyl function subsets the genomes to a minimal number which represent the diversity of the full set. Protein sequences from this subset (or full set for small numbers of genomes) are used as input for OrthoFinder to identify orthologous gene families. For the subset method, a HMM search, HMMER, is used to generalize the resulting orthogroup to the full data set. From there, orthogroup proteins are realigned with MAFFT, and these aignments are used to "codon" align the transcript sequences (generated by earlier annotation). These orthogroup transcript alignments are then trimmed (with TRIMAL) and filtered for strict single copy orthologs (SCO_strict) or SCOs found in at least X% of the input genomes (with X being tunable). Next, transcript alignmants are concatenated to generate super-maticies and used as input for species tree generation with either RAxML or fastTREE. Aditionally, gene trees are generated from the individual transcript alignments, which are used in gene tree to species tree estimation with ASTRAL.  
 
 ### Cleaning input genomes
-#### The script OrthoPhyl/utils/gather_filter_asms.XX.sh was writen to streamiline aquiring all available assemblies for a specific taxon. It takes NCBI's taxID as and input (BrucellaTaxID=234). After the genomes are DL'd there are several simple genome filtering steps: length,N50,GC, etc. There are also a few more soficticated filtering methods: CheckM is used to assess completeness and contamination, while dedupe from BBmap is used to reduce duplicated contigs. 
-#### It is absolutely imparative to clean up assemblies to get the best results from OrthoPhyl. For instance, when looking at the output for all Brucella accessions, checkM output shows many assemblies have duplicated "marker genes", if these are from falsely duplicated contigs in the asm, they will lead to removal of the ortholog group from both the strict SCO and relaxed SCO gene sets within the OrthoPhylo workflow. Furthermore, dedupe.sh (from bbmap) identifies many Duplicated or Contained contigs, some of them >100kb long. Again, if any of the duplicated contigs contain what would otherwise be SCOs, the SCOs will be removed. In essence, having duplicates poisons the analysis by severely reducing the number of Orthologs for downstream analysis. This problem is exacerbated by including 1) less curated assemblies (GenBank) and 2) the total number of assemblies fed to the analysis pipeline.
+The script OrthoPhyl/utils/gather_filter_asms.XX.sh was writen to streamiline aquiring all available assemblies for a specific taxon. It takes NCBI's taxID as and input (BrucellaTaxID=234). After the genomes are DL'd there are several simple genome filtering steps: length,N50,GC, etc. There are also a few more soficticated filtering methods: CheckM is used to assess completeness and contamination, while dedupe from BBmap is used to reduce duplicated contigs. 
+It is absolutely imparative to clean up assemblies to get the best results from OrthoPhyl. For instance, when looking at the output for all Brucella accessions, checkM output shows many assemblies have duplicated "marker genes", if these are from falsely duplicated contigs in the asm, they will lead to removal of the ortholog group from both the strict SCO and relaxed SCO gene sets within the OrthoPhylo workflow. Furthermore, dedupe.sh (from bbmap) identifies many Duplicated or Contained contigs, some of them >100kb long. Again, if any of the duplicated contigs contain what would otherwise be SCOs, the SCOs will be removed. In essence, having duplicates poisons the analysis by severely reducing the number of Orthologs for downstream analysis. This problem is exacerbated by including 1) less curated assemblies (GenBank) and 2) the total number of assemblies fed to the analysis pipeline.
 
 ### What this software does not do: 
-#### Generate trees that are ready for publication without parameter tuning or manual inspection. Reconstructing trees from whole genomes requires many many steps, all of which have parameters that will differ based on the input sequences. Some importent outputs too look at: input genomes quality (checkM output), assembly subset used for Ortholog model generation (assembly shortlist), number of strict/relaxed single copy orthologs (drops quickly with additional assemblies), phylogenetic signal for transcript alignments, missing data in alignments (per gene and concatenated alignments)...to name a few. #### This pipeline also does not robunstly compute SCOs (like BUSCOs). It grabs all the SCOs it can from a dataset, but does not do any modeling to ensure species tree-like behavior of the individual genes and also does not deal with paralogs at all.
+Generate trees that are ready for publication without parameter tuning or manual inspection. Reconstructing trees from whole genomes (gene tree reconciliation) requires many many steps, all of which have parameters that will differ based on the input sequences. Some importent outputs too look at: input genomes quality (checkM output), assembly subset used for Ortholog model generation (assembly shortlist), number of strict/relaxed single copy orthologs (drops quickly with additional assemblies), phylogenetic signal for transcript alignments, missing data in alignments (per gene and concatenated alignments)...to name a few. #### This pipeline also does not robunstly compute SCOs (like BUSCOs). It grabs all the SCOs it can from a dataset, but does not do any modeling to ensure species tree-like behavior of the individual genes and also does not deal with paralogs at all.
 
 <a name="KnownErrors"></a>
 ## Known Errors:
-#### If you have special characters in you fasta file names
+#### If you have special characters in you fasta file names:
 Filenames with special characters will likely make this workflow fail. As I encountered these characters, i will add fixes accordingly in Orthophyl.XX.sh, function SET_UP_DIR_STRUCTURE.
-#### If the combination of fasta file name and contigs within are very long, 
-...mafft will truncate the sequence names generated by prodigal. This will make the PAL2NAL module fail on many orthogroups. It manifests as a lot of cat commands failing during trimming because they cant find the transcript file PAL2NAL is suposed to spit out. This can be seen in the log file (in slurm_out). It's normally caused by very redundant sequence identifiers in the contig names. Can be fixed with something like this:
+#### If the combination of fasta file name and contigs within are very long: 
+Mafft will truncate the sequence names generated by prodigal. This will make the PAL2NAL module fail on many orthogroups. It manifests as a lot of cat commands failing during trimming because they cant find the transcript file PAL2NAL is suposed to spit out. This can be seen in the log file (in slurm_out). It's normally caused by very redundant sequence identifiers in the contig names. Can be fixed with something like this:
 ```
 sed -i 's/REDUNDANT_STUFF/_/g' < SEQUENCE.fasta
 ```
 #### If genomes are less than ~75% identity... 
-FastANI doesnt calculate an ANI value for very divergent genomes. In this case my script ANI_picking.py assigns an ANI of 50 (hard coded) for these comparisons. This should not pose a problem if the number of clades with 75% divergence internally are ~= ANI_shortlist number. The goal of the ANI stuff is to find representetives of the evolutionaly breadth of the dataset, so missing representetives from some clades will likelly not affect the final result (there is a lot of filtering later on in the workflow).
+FastANI doesnt calculate an ANI value for very divergent genomes. In this case my script ANI_picking.py assigns an ANI of 50 (hard coded) for these comparisons. This should not pose a problem if the number of clades with ~75% divergence internally are ~= ANI_shortlist number. The goal of the ANI stuff is to find representetives of the evolutionaly breadth of the dataset, so missing representatives from some clades will likelly not affect the final result (there is a lot of filtering later on in the workflow).
 I will implement a more robust ANI estimator soooon... 
 #### If you get an error like: 
 ``` 
@@ -310,7 +296,7 @@ I will attempt to make errors easier to track...
 ```
 dyld: Symbol not found: _libiconv_open
 ```
-This appeared to be a problem with wget, which was resolved by updating through conda.
+This appeared to be a problem with wget, which was resolved by updating through conda/mamba.
 
 <a name="FutureCapabilities"></a>
 ## Future Capabilities:
@@ -326,11 +312,12 @@ This appeared to be a problem with wget, which was resolved by updating through 
 + DONE!!!: Related to above: allow adding assemblies to pre-run pipeline. i.e. use precomputed hmms to identify orthologs, and add them to alignemnts and regenerate trees
 + DONE: allow users to pick which dataset to use for tree building (currently strict and relaxed are used). This would greatly reduce pipeline run time.
 + change how the list of OGs for HMM  searching is inumerated. Currently tries with OG that have be filtered out because of paralogs, then gets mad because there is no multifasta to align (doesnt change outcome, just messy)
++ Depending on the step, keyboard interupt just hangs. Need to figure this out. Should be simple in the loops. Why it hangs in IQTREE, I don't know. 
 
 
 <a name="OrthoPhylCitation"></a>
 ## OrthoPhyl Citation:
-### Earl A Middlebrook, Robab Katani, Jeanne M Fair, OrthoPhyl—streamlining large-scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales, G3 Genes|Genomes|Genetics, Volume 14, Issue 8, August 2024, jkae119, https://doi.org/10.1093/g3journal/jkae119
+Earl A Middlebrook, Robab Katani, Jeanne M Fair, OrthoPhyl—streamlining large-scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales, G3 Genes|Genomes|Genetics, Volume 14, Issue 8, August 2024, jkae119, https://doi.org/10.1093/g3journal/jkae119
 ## Citations for dependencies
 ### If there are nested dependencies that I am missing citations for, please let me know
 ### [Coming soon]
@@ -339,7 +326,6 @@ This appeared to be a problem with wget, which was resolved by updating through 
 + bbmap
 + fastTree*
 + hmmer
-+ pal2nal
 + mafft
 + prodigal 
 + ete3
