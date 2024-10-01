@@ -7,4 +7,4 @@
 #export min_frac_orthos=0.60 #minimum fraction of species with SCOs to count OG
 #export ANI_shortlist=30 # max number of seqs to run through Orthofinder
 #export tree_method=("fasttree" "iqtree")
-export gene_tree_methods=("iqtree")
+export gene_tree_methods=("iqtree" "fasttree")
