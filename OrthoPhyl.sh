@@ -1,53 +1,5 @@
 #!/bin/bash
 
-USAGE () {
-echo "
-USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_output
-***Check out github.com/eamiddlebrook/OrthoPhyl for lots of details***
-# ALL arguments are optional if set with \"-c control_file.your_args\"
-#   Many default parameters are set in control_file.defaults
-#   I will work to expose the more useful ones in later versions of OP
-Required:
--g|--genome_dir  path to genomes directiory
-or
--a|--annotations  paths to protien and transcript directories.
-       They should be delared as \"-a path_to_transcript_dir,path_to_prot_dir\"
--s|--storage_dir  path to the main directory for output
-Optional:
--t|--threads  threads to use [4]
--p|--phylo_tool  phylogenetic tree software to use astral, fasttree, raxml, and/or iqtree [\"fasttree iqtree astral\"]
-	i.e. -p \"fasttree iqtree astral\"
--o|--omics  "omics" data to use for tree building ([CDS], PROT, BOTH)
-	for divergent sequences, it is good to compare protein trees to 
-	nucleotide trees to identify artifacts of saturation (long branch attraction)
--c|--control_file	path to a control file with required variables and any optional ones to override defaults.
-	Will override values set on command line! [NULL]
--x|-trimal_param  trimal paramerter string (in double \"quotes\")
--r|--rerun  flag to rerun orthofinder on the ANI_shorlist (true/[false])
--n|--num_OF_annots  Max number of proteomes to run through OrthoFinder.
-	If more than this many assemblies are provided, a subset of proteomes (based on genomes/transcripts ANI) will be chosen for OrthoFinder to chew on [20]
--m|--min_num_orthos  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
-        Expects a float from 0-1
-        A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
-        [0.30]
--d|--ani_Data  Force ANI subsetting to run on transcript or genome Datasets. ([genome],CDS)
-	Using \"-a\" implies \"-d CDS\".
-	If \"-a\" is declared but you want to use the assemblies you have also provided, set \"-d genome\"
-	If \"-a\" not used but you want to use CDS (annotated within OrthoPhyl by Prodigal) for ANI subsetting, set \"-d CDS\"
--T|--test  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast,TESTER_fasttest)
--h|--help  display a description and a super useful usage message
-###############################################################\n
-To run test datasets:
-# Test of full bacterial genomes
-bash OrthoPhyl.sh -T TESTER -t #threads
-# Big test with ~100 orchid chloroplasts
-bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
-# reduced chloroplast dataset
-bash OrthoPhyl.sh -T TESTER_fasttest -t #threads
-# When running through Singularity an output directory is required:
-singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads
-"
-}
 
 
 ######################
@@ -65,11 +17,29 @@ export script_home=$(dirname "$(readlink -f "$0")")
 # import main_script functions
 source $script_home/script_lib/functions.sh
 source $script_home/script_lib/run_setup.sh
+source $script_home/script_lib/arg_parse.sh
 #load custom aliases...might get rid of
 shopt -s expand_aliases
 source $script_home/script_lib/bash_utils_and_aliases.sh
+if [[ ${##[@]} -lt 2 ]]
+then 
+	USAGE
+	echo ""
+	echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+	echo "No arguments provided to OrthoPhyl"
+	echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+	echo "See GitHub page for useful tips"
+	echo "github.com/eamiddlebrook/OrthoPhyl"
+	exit 1
+fi
 
+#################################
+### capture keyboard interups ###
+#####    and run control_c   ####
+#################################
 
+#trap control_c SIGINT
+trap control_c INT
 ############################################
 ####  import control file variables  #######
 ############################################
@@ -119,7 +89,6 @@ rm -f "$tmpfile"
 #################################
 if [[ -z ${control_file+x} ]]
 then
-	#nothing
 	echo "All required args taken from command line"
 else
 	echo ""
@@ -131,12 +100,22 @@ else
 	source $control_file || exit 1
 fi
 
+###########################################
+###### Override variables for tree ######## 
+### data/methods if "-R,--rigor" is set ###
+###########################################
+if [[ ${rigor+x} ]]
+then
+	SET_RIGOR
+fi
+
 #######################
 ## set up some stuff ##
 #######################
 
 # outputs are held in:
-if [ ! -d $store ]; then
+if [ ! -d $store ] 
+then
 	mkdir -p $store || exit 1
 fi
 cd $store || exit 1
@@ -235,7 +214,7 @@ MAIN_PIPE () {
 	# identify single copy orthologs in protein alignments
 	#  create files with OG names 
 	if [[ "$relaxed" != false ]]
-		then
+	then
 			SCO_MIN_ALIGN $wd/AlignmentsProts.trm $min_num_orthos
 			#ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.align
 	fi
@@ -268,7 +247,7 @@ MAIN_PIPE () {
 			PROT
 		ALIGNMENT_STATS $wd/SCO_strict.PROT.align
 		for I in $wd/AlignmentsConcatenated/*.PROT.*.phy
-			do
+		do
 			TREE_BUILD $wd/SpeciesTree/ $I $threads "PROT"
 		done
 		# for later...
@@ -301,18 +280,22 @@ MAIN_PIPE () {
 		ALIGNMENT_STATS $wd/SCO_strict.CDS.align
 
 		# Build ML Species Treeeeees
-		for I in $wd/AlignmentsConcatenated/*.CDS.*.phy
-		do
-			#ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
-			TREE_BUILD $wd/SpeciesTree/ $I $threads "CDS"
-		done
-
-		# Not really useful, will probably remove (sort of redundant)
-		if [ ! $ANI = true ]
+		if [[ " ${tree_method[*]} " =~ " fasttree " ]] || [[ " ${tree_method[*]} " =~ " iqtree " ]] || [[ " ${tree_method[*]} " =~ " raxml " ]]
 		then
-					# at the moment it doesnt make sense to make trees from OF if using ANI
-					# (only a shortlist genomes will be in the tree)
-					orthofinderGENE2SPECIES_TREE
+			for I in $wd/AlignmentsConcatenated/*.CDS.*.phy
+			do
+				#ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
+				TREE_BUILD $wd/SpeciesTree/ $I $threads "CDS"
+			done
+
+			# Not really useful, will probably remove (sort of redundant)
+			if [ ! $ANI = true ]
+			then
+				NONE
+				# at the moment it doesnt make sense to make trees from OF if using ANI
+				# (only a shortlist genomes will be in the tree)
+				#orthofinderGENE2SPECIES_TREE
+			fi
 		fi
 	fi	
 	
@@ -329,7 +312,7 @@ MAIN_PIPE () {
 			
 			# build ASTRAL tree from SCO_relaxed gene trees
 			if [[ "$relaxed" != false ]]
-				then
+			then
 				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_num_orthos
 			fi
 

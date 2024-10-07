@@ -65,7 +65,7 @@ SET_UP_DIR_STRUCTURE () {
 		# calculate and report how many input assemblies there are
 		echo "Building phylogeny for $(cat $store/all_input_list | wc -l) assemblies" | tee -a $run_notes
 		export min_num_orthos=$(printf %.0f $(echo "$(cat $store/all_input_list | wc -l)*$min_frac_orthos" | bc))
-		echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with $tree_method" | tee -a $run_notes
+		echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with ${tree_method[@]}" | tee -a $run_notes
 		###########################################
 		# just setting up the directory structure #
 		###########################################
@@ -152,8 +152,10 @@ PRODIGAL_PREDICT () {
 	# enumerate list of genomes to annotate, wait if $threads are already running
 	for genome in $(ls $local_genome_dir)
 	do
-		if test "$(jobs | wc -l)" -ge $threads; then
+		if test "$(jobs | wc -l)" -ge $threads
+		then
 		        wait -n
+				trap control_c INT
 		fi
 		if [ -f $annots/"${genome%.*}".complete ]
 		then
@@ -241,7 +243,8 @@ DEDUP_annot_trans () {
 		do
 			# cleaner multithreading. check if the number of running jobs is greater than $threads
 			# if so wait for one to finish
-			if test "$(jobs | wc -l)" -ge $threads; then
+			if test "$(jobs | wc -l)" -ge $threads
+			then
 			        wait -n
 			fi
 			{
@@ -498,8 +501,10 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 	K=0
 		for I in $(cat $input_list)
 		do
-			if test "$(jobs | wc -l)" -ge $threads; then
+			if test "$(jobs | wc -l)" -ge $threads
+			then
 			        wait -n
+					trap control_c INT
 			fi
 			
 			# Progress sent to stdout
@@ -629,16 +634,21 @@ REALIGN_ORTHOGROUP_PROTS () {
 	#..also trimming durring Orthofinder run might help with OG accuracy?
 	cd $wd || exit
 	# making progress indicator
-       	num_OGs=$(ls "$orthodir"/MultipleSequenceAlignments/OG*.fa | wc -l)
-       	percent=$(( num_OGs / 10))
-       	J=0
+	num_OGs=$(ls "$orthodir"/MultipleSequenceAlignments/OG*.fa | wc -l)
+	percent=$(( num_OGs / 10))
+	J=0
 	for i in "$orthodir"/MultipleSequenceAlignments/OG*.fa
 	do
+		if test "$(jobs | wc -l)" -ge $threads
+		then
+			wait -n
+			trap control_c INT
+		fi
 		# Progress sent to stdout
-               	if [ $((J % percent)) -eq 0 ]
-                then
+		if [ $((J % percent)) -eq 0 ]
+		then
 			echo $((J/percent*10))" percent of the way through the extraction and realignment of OG prots"
-               	fi
+		fi
 		filter_and_Align_subfunc () {
 			local base=$(basename "${i%.*}")
 		    cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
@@ -655,10 +665,7 @@ REALIGN_ORTHOGROUP_PROTS () {
 		# run the above subfunction multithreaded (sort-of)
 		filter_and_Align_subfunc &
 		J=$((J+1))
-                if [ $(($J % $threads)) -eq 0 ]
-                then
-                    	wait
-                fi
+		
 	done
 	wait
 
@@ -693,6 +700,11 @@ TRIM () {
 	#   Need to change it to start next job if there are < $threads trimming operations running
 	for I in $alignment_dir/OG*
 	do
+		if test "$(jobs | wc -l)" -ge $threads
+		then
+			wait -n
+			trap control_c INT
+		fi
 		# Progress sent to stdout
 		if [ $((J % percent)) -eq 0 ]
 		then
@@ -713,10 +725,6 @@ TRIM () {
 		}
 		TRIM_subfunc &
 		J=$((J+1))
-		if [ $(($J % $threads)) -eq 0 ]
-		then
-				wait
-		fi
 	done
 	wait
 }
@@ -858,11 +866,16 @@ TRIMAL_backtrans () {
         J=0
 	for i in $prot_alignment/OG*.fa
 	do
+		if test "$(jobs | wc -l)" -ge $threads
+		then
+			wait -n
+			trap control_c INT
+		fi
 		# Progress sent to stdout
-                if [ $((J % percent)) -eq 0 ]
-                then
-					echo $((J/percent*10))" percent of the way through the TRIMAL_backtrans"
-                fi
+		if [ $((J % percent)) -eq 0 ]
+		then
+			echo $((J/percent*10))" percent of the way through the TRIMAL_backtrans"
+		fi
 		# why the hell did I declare this function with in the loop...probably because of the "local bass=...". this should be passed in with a variable. 
 		TRIMAL_backtrans_subfunc () {
 			#get basename (OG000????)
@@ -888,11 +901,7 @@ TRIMAL_backtrans () {
 	           	| sed 's/@.*$//g' > $CDS_codon_alignment.nm/${base}.codon_aln.nm.fa 
 		}
 		TRIMAL_backtrans_subfunc &
-                J=$((J+1))
-                if [ $(($J % $threads)) -eq 0 ]
-                then
-                    	wait
-		fi
+        J=$((J+1))
 	done
 	wait
 }
@@ -1050,8 +1059,13 @@ TREE_BUILD () {
 	IQTREE_run () {
 		if [ ! -d "iqtree" ]; then mkdir iqtree ; fi
 		cd iqtree
+		# deal with numerical overflow on large datasets. 
+		if [[ $(cat $store/genome_list | wc -l) -gt 400 ]]
+		then
+			safe="--safe"
+		fi
 		iqtree2 -s $input_alignment \
-		--prefix iqtree.${output_name} $IQtree_partitions $IQtree_speciestree_options\
+		--prefix iqtree.${output_name} $IQtree_partitions $IQtree_speciestree_options $safe\
 		-T AUTO --threads-max $threads --seed 1234 > iqtree.${output_name}.long_log
 		treefile=$(ls iqtree.${output_name}.treefile)
 		cp $treefile ../${treefile%.*}.tree && touch ../${treefile%.*}.complete || echo -e "\n!!!!!!!!\nWARNING\n!!!!!!!!!!\n\tIQTree failed to run on "$input_alignment
@@ -1091,7 +1105,7 @@ orthofinderGENE2SPECIES_TREE () {
 	#############################################################
 	Species tree reconstruction from all Orthogroup protien trees
 	#############################################################
-	Running Astral on all ortholog from orthofinder
+	Running Astral on all orthologs from orthofinder
 	'
 
 	# This currently doesnt work because Astal P, which is required for dealing with paralogs
@@ -1152,6 +1166,11 @@ allGENE_TREEs () {
 	# loops through all alignments
 	for i in $gene_alignment_dir/OG*
 	do
+		if test "$(jobs | wc -l)" -ge $threads
+		then
+			wait -n
+			trap control_c INT
+		fi
 		# Progress sent to stdout
 		if [ $((J % percent)) -eq 0 ]
 		then
@@ -1162,9 +1181,7 @@ allGENE_TREEs () {
 			local base=${file%%.*}
 			if [[ $(cat $gene_alignment_dir/${base}.*.fa | grep ">" | wc -l) -lt 4 ]]
 			then 
-				echo "$gene_alignment_dir/${base}.*.fa has less than 4 samples in it." 
-				echo "Skipping"
-				echo "\n"
+				echo -e "$gene_alignment_dir/${base}.*.fa has less than 4 samples in it...Skipping"
 			else
 				if [[ " ${gene_tree_methods[*]} " =~ " fasttree " ]]
 				then
@@ -1173,7 +1190,8 @@ allGENE_TREEs () {
 					> ./${base}.fasttree.tree 
 					cat ./${base}.fasttree.tree | sed 's/@[^:]*:/:/g' \
 					> $out_dir.nm/${base}.fasttree.tree
-				elif [[ " ${gene_tree_methods[*]} " =~ " iqtree " ]]
+				fi
+				if [[ " ${gene_tree_methods[*]} " =~ " iqtree " ]]
 				then
 					iqtree $iqtree_options \
 					-s $gene_alignment_dir/${base}.*.fa \
@@ -1181,21 +1199,14 @@ allGENE_TREEs () {
 					mv ./${base}.treefile ./${base}.iqtree.tree
 					cat ./${base}.iqtree.tree | sed 's/@[^:]*:/:/g' \
 					> $out_dir.nm/${base}.iqtree.tree
-				else
-					echo "Gene tree estemation from gene alignemtns not done; gene_tree_method not set to either fasttree, raxml or iqtree" 
-					exit 1
 				fi
 			fi
 		}
 
 		TRANS_TREE_subfunc &
 		J=$((J+1))
-		if [ $(($J % $threads)) -eq 0 ]
-		then
-				wait
-		fi
-
 	done
+	wait
 }
 
 
@@ -1244,7 +1255,7 @@ astral_GENE2SPECIES_TREE () {
 	cd $wd || exit
 	mkdir $out_dir
 	# use iqtree or fasttree (or both)
-	for method in $gene_tree_methods
+	for method in ${gene_tree_methods[@]}
 	do
 		concat_tree_method=$concat_trees.${method}.trees
 		astral_tree=astral.${base_list}.${alignment_type}.${method}.tree
