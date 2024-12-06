@@ -69,7 +69,7 @@ source $script_home/control_file.defaults || { echo "cannot open control_file.re
 #######  Handle command line Arguments ############
 ###################################################
 #Setting Variables manually to override ones in control file
-ARG_PARSE $@
+ARG_PARSE "$@"
 test_args
 
 #
@@ -93,7 +93,7 @@ then
 else
 	echo ""
 	echo "##########################################"
-	echo "  setting variable found in $control_file"
+	echo "Setting variable found in $control_file"
 	echo "   This will overwrite any args set on the command line"
 	echo "##########################################"
 	echo ""
@@ -166,12 +166,12 @@ MAIN_PIPE () {
 		for I in $(ls $input_prots/)
 		do
 			echo "moving $I"
- 			cp $input_prots/${I}   $prots/${I%.*}.faa || exit
+ 			cp -L $input_prots/${I}   $prots/${I%.*}.faa || exit
  		done
  		for I in $(ls $input_trans/)
 		do
 			echo "moving $I"
- 			cp $input_trans/${I}   $trans/${I%.*}.fna || exit
+ 			cp -L $input_trans/${I}   $trans/${I%.*}.fna || exit
  		done
  	fi
 	DEDUP_annot_trans $store $trans $prots 
@@ -260,7 +260,7 @@ MAIN_PIPE () {
 	then
 		# make Codon alignments for all OGs (could just do SCO_relaxed and that would grab all SCO_strict)
 		#  Its pretty fast, who cares, and might want to make SCO_very_relaxed trees
-		TRIMAL_backtrans $wd $wd/AlignmentsProts.trm $wd/all_trans.nm.fa $wd/AlignmentsTrans.trm $wd/OG_names $wd/SequencesCDS
+		TRIMAL_backtrans $wd $wd/AlignmentsProts $wd/all_trans.nm.fa $wd/AlignmentsTrans.trm $wd/OG_names $wd/SequencesCDS
 		
 		# concatenate SCO alignments (only do SCO_$min_num_orthos if relaxed != false)
 		if [[ "$relaxed" != false ]]

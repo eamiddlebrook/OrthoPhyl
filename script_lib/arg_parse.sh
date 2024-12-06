@@ -1,6 +1,10 @@
 #!/bin/bash
 
-
+# args to add:
+#   sample list to force OrthoFinder to chew on 
+#	OR samples to add to ANI_shortlist
+#	sample or MRCA(sample_list) to be root
+#	 		
 
 USAGE () {
 echo "
@@ -55,10 +59,16 @@ singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir
 ##### arg parser ######
 #######################
 ARG_PARSE () {
+	echo "##########################################"
+	echo "######### Setting run parameters #########"
+	echo "#### declared on the command line... #####"
+	echo "##########################################"
+	echo ""
+	echo "Command used: OrthoPhyl.sh" $@
+	echo ""
 	ARGS_SET=""
-
 	N=1 
-	L=${#1} 
+	L=${#1}
 	while [[ $# -gt 0 ]]; do
 		case ${1} in 
 			-h|--help) if [[ ! -n ${2} ]] ; then 
@@ -117,13 +127,22 @@ ARG_PARSE () {
 				shift ;;
 			
 			-p|--phylo_tool) if [[ ! -n ${2} ]] ; then 
+					echo "Phylogenetics tool argument (-p) was mallformed."
 					USAGE 
 					exit 1 
 				fi
 				tree_method=(${2})
-				echo "#####"
-				echo ${2}
-				echo "#####"
+    			# test if "-p tree_method" was set correctly
+    			if [[ " ${tree_method[*]} " =~ " raxml " ]] || [[ " ${tree_method[*]} " =~ " fasttree " ]] || [[ " ${tree_method[*]} " =~ " iqtree " ]] || [[ " ${tree_method[*]} " =~ " astral " ]]
+    			then
+        			echo "Phylogenetics tool argument (-p) set on the command line is ${tree_method[@]}"
+    			else
+        			echo "PANIC: Tree_method not set to either fasttree, raxml, and/or iqtree"
+					echo "Please use -p "iqtree", -p "iqtree fasttree" or -p "fasttree iqtree astral" etc."
+					echo ""
+					USAGE
+        			exit 1
+    			fi
 				ARGS_SET+=p
 				shift
 				shift ;;
@@ -141,7 +160,7 @@ ARG_PARSE () {
 				eval trans_tmp=$trans_tmp
 				input_prots=$(relative_absolute ${prots_tmp})
 				input_trans=$(relative_absolute ${trans_tmp})
-				echo "Building codon based tree for protein in "$input_prots" and CDSs in "$input_trans
+				echo "Building trees for proteins in "$input_prots" and CDSs in "$input_trans
 				# running some simple checks...
 				# test if the CDS file is nucleotide and Prot is Prot
 				CDS_chars=$(cat $input_trans/* | \
@@ -192,6 +211,7 @@ ARG_PARSE () {
 				shift
 				shift ;;
 			-m|--min_num_orthos) if [[ ! -n ${2} ]] ; then
+					echo "Minimum seq per Orthogroup argument (-m) was malformed."
 					USAGE
 					exit 1
 				fi
@@ -216,6 +236,7 @@ ARG_PARSE () {
 					exit 1
 				fi
 				threads="${2}"
+				echo "Using ${threads} threads for OrthoPhyl Run" 
 				ARGS_SET+=t
 				shift
 				shift ;;
@@ -310,7 +331,7 @@ ARG_PARSE () {
 		esac
 	done
 	if [[ -n ${1} ]] ; then
-		echo "!!!!: you have a hanging argument without a flag!"
+		echo "PANIC: you have a hanging argument without a flag!"
 		USAGE
 		exit 1
 	fi

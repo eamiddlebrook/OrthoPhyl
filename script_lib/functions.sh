@@ -174,6 +174,87 @@ PRODIGAL_PREDICT () {
 	done 
 	wait
 }
+: << 'COMMENT'
+CHECK_ANNOTS () {
+	echo "###################################"
+	echo "#### Check provided annotaions ####"
+	echo "##### For compatability with ######"
+	echo "####### downstream methods ########"
+	echo "###################################"
+	
+	bad_chars=$script_home/gen_files/bad_chars
+	annot_char_check=$store/annot_char_check.complete
+	annot_name_check=$store/annot_name_check.complete
+	wd=$store/annot_check.tmp
+	char_check_failed=$wd/char_check_failed
+	name_check_failed=$wd/name_check_failed
+	uniq_check_failed=$wd/uniq_check_failed
+	mkdir $wd
+	cd $wd || exit 1
+	for I in $(cat $store/pre_annotated_list | sed 's/.faa//g')
+	do
+		# declare CDS and PROT files 
+		seq1_CDS=$annots_nucls/${I}.fna
+		seq1_PROT=$annots_prots/${I}.faa
+		
+		# check for special characters in annots
+		bad_CDS=$(cat $seq1_CDS | grep -v ">" | grep -f $bad_chars  | head -n 1)
+		bad_PROT=$(cat $seq1_PROT | grep -v ">" | grep -f $bad_chars  | head -n 1)
+		if [ $(echo $bad_CDS) | wc -l) -gt 0 ]
+		then
+			echo "${I%.*} CDS file has a messed characters (either . or *)." >> $char_check_failed
+		fi
+		if [ $(echo $bad_PROT) | wc -l) -gt 0 ]
+		then
+			echo "${I%.*} PROT file has a messed characters (either . or *)." >> $char_check_failed
+		fi
+
+		# check for identical sequence names
+		cat $seq1_CDS | grep ">" | awk '{print $1}' | sort > CDS_names
+		cat CDS_names >> all_CDS_names
+		cat $seq1_PROT | grep ">" | awk '{print $1}' | sort > PROT_names
+		cat PROT_names >> all_PROT_names
+		# compare files 
+		if [ ! $(comm -12 $seq1_CDS_names $seq1_PROT_names | wc -l) -eq $(cat $seq1_CDS_names | wc -l) ]
+		then
+			echo $seq1_CDS " CDS and PROT names dont match" >> $name_check_failed
+			exit 1
+		fi
+		
+	if [ ! -f name_check.failed ]
+	then
+		touch $annot_name_check
+	else
+		echo "PANIC: CDS and PROT names do not match"
+		echo "  For details check $name_check_failed"
+	fi
+	if [ ! -f char_check.failed ]
+	then
+		touch $annot_char_check
+	else
+		echo "PANIC: Provided CDS or PROT files have illegal character (* or .)"
+	fi
+	 
+	 # check that all CDS/PROT names are uniq...
+	if [ $(cat all_names | wc -l ) -eq $(cat all_names | sort | uniq | wc -l) ]
+	then
+		echo "All CDS names look uniq, awesome"
+	else
+		echo "PANIC: CDS seq names are not uniq."
+		echo "	This will wreck stuff. Aborting "
+	fi
+
+	if [ -f $name_check_failed ] || [ -f $char_check_failed ] || [ -f $uniq_check_failed ]
+	then
+		echo "EXITING: Annotations check failed"
+		exit 1
+	done
+	fi
+	# delete this
+	echo "got to end of annot check"
+	exit
+}
+COMMENT
 
 CHECK_GENOME_QUALITY () {
 	echo "########################"
@@ -254,11 +335,14 @@ DEDUP_annot_trans () {
 				grep 'Input\|Result'  \
 				>> dedupe.stats || { echo "dedupe failed for some reason :("; exit 1;}
 			cat $trans/$base.fna | grep ">" | sed 's/>//g' > $trans/$base.deduped.names
-			filterbyname.sh -Xmx1g -Xms1g --amino include=true in=$prots.preDedup/$base.faa out=$prots/$base.faa names=$trans/$base.deduped.names \
-				>> dedupe.stats_long 2>&1
-			} &
+			filterbyname.sh -Xmx1g -Xms1g --amino include=true \
+				in=$prots.preDedup/$base.faa \
+				out=$prots/$base.faa \
+				names=$trans/$base.deduped.names \
+				>> dedupe.stats_long 2>&1 || { echo "dedupes filterbyname failed for some reason :("; exit 1;}
+			} 
 		done && touch dedupe.complete
-		wait
+		#wait
 	fi
 	# remove the files telling filterbyname which prots to keep
 	rm $trans/*.deduped.names
@@ -338,7 +422,7 @@ ANI_species_shortlist () {
 	local mygenome_list=($(ls $genome_dir))
 	
 	echo "ANI clustering is being done on sequences in ${genome_dir}"
-	echo "Repersentative genomes from ${number_shortlist} clusters will be used to generate HMM profiles for each orthogroup"
+	echo "Representative genomes from ${number_shortlist} clusters will be used to generate HMM profiles for each orthogroup"
 	cd $store || exit 1
 	mkdir ANI_working_dir
 	cd ANI_working_dir
@@ -833,8 +917,9 @@ SCO_MIN_ALIGN () {
 		python $OG_sco_filter $gene_counts $min_num_orthos
 		mv SCO_$min_num_orthos $wd/SCO_$outstring
 	fi
-
 }
+
+
 TRIMAL_backtrans () {
 	echo '
 	###################################################
@@ -861,10 +946,10 @@ TRIMAL_backtrans () {
 	
 	#aligning transcripts based on orthogroup protien alignments
 	cd $wd || exit
-	num_OGs=$(ls $prot_alignment/OG*.fa | wc -l) # this is 1+ the real num
+	num_OGs=$(ls $prot_alignment/OG*.faa | wc -l) # this is 1+ the real num
 	percent=$(( num_OGs / 10))
         J=0
-	for i in $prot_alignment/OG*.fa
+	for i in $prot_alignment/OG*.faa
 	do
 		if test "$(jobs | wc -l)" -ge $threads
 		then
@@ -887,15 +972,17 @@ TRIMAL_backtrans () {
 			#pull out trans sequences for each OG
 			filterbyname.sh -Xmx60m -Xms60m include=t \
 	        	names=$OG_names/${base}.names \
-			in=$CDS_file out=$SequencesCDS/${base}.CDS.fa \
-			>> $wd/logs/filterbyname.TRIMAL_backtrans 2>&1 # changed a "/" to ">" not sure how the code ran before...
+				in=$CDS_file out=$SequencesCDS/${base}.CDS.fa \
+				>> $wd/logs/filterbyname.TRIMAL_backtrans 2>&1 # changed a "/" to ">" not sure how the code ran before...
 			# protein to nuc alignments
 			#pal2nal.pl $i ./SequencesCDS/${base}.CDS.fa -codontable 11 -output fasta \
 			#> $CDS_codon_alignment/${base}.codon_aln.fa 2> TRIMAL_backtrans.stderr.tmp
 			trimal -in $i \
+				$trimal_parameter \
+				-ignorestopcodon \
 				-backtrans $SequencesCDS/${base}.CDS.fa \
 				-out $CDS_codon_alignment/${base}.codon_aln.fa \
-				-ignorestopcodon >> $wd/logs/trimal.TRIMAL_backtrans 2>&1
+				>> $wd/logs/trimal.TRIMAL_backtrans 2>&1
 			# fix names to only have assembly name
 			cat $CDS_codon_alignment/${base}.codon_aln.fa \
 	           	| sed 's/@.*$//g' > $CDS_codon_alignment.nm/${base}.codon_aln.nm.fa 
@@ -905,6 +992,8 @@ TRIMAL_backtrans () {
 	done
 	wait
 }
+
+
 prot_rename () {
 	echo "
 	#################################
@@ -1137,7 +1226,7 @@ allGENE_TREEs () {
 	local alignment_type=$1
 	local gene_alignment_dir=$2
 	local out_dir=$3
-
+	local logs=$wd/logs/gene_tree_logs
 
 	echo "Building gene trees with "$alignment_type" alignments using "${gene_tree_methods[@]}
 	if [ -d $out_dir/ ]
@@ -1164,7 +1253,8 @@ allGENE_TREEs () {
 	fi
 
 	# loops through all alignments
-	for i in $gene_alignment_dir/OG*
+	num_OG_lt_4_OGs=0
+	for i in $gene_alignment_dir/OG*.fa
 	do
 		if test "$(jobs | wc -l)" -ge $threads
 		then
@@ -1181,7 +1271,8 @@ allGENE_TREEs () {
 			local base=${file%%.*}
 			if [[ $(cat $gene_alignment_dir/${base}.*.fa | grep ">" | wc -l) -lt 4 ]]
 			then 
-				echo -e "$gene_alignment_dir/${base}.*.fa has less than 4 samples in it...Skipping"
+				echo -e "$gene_alignment_dir/${base}.*.fa has less than 4 samples in it...Skipping" >> $logs
+				export num_OG_lt_4_OGs=$((num_OG_lt_4_OGs+1))
 			else
 				if [[ " ${gene_tree_methods[*]} " =~ " fasttree " ]]
 				then
@@ -1207,6 +1298,7 @@ allGENE_TREEs () {
 		J=$((J+1))
 	done
 	wait
+	echo -e "\n$num_OG_lt_4_OGs Ortholog alignments were not used to build gene trees because they had less than 4 sequences\n"
 }
 
 

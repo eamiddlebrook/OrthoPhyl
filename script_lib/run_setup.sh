@@ -79,20 +79,10 @@ test_args () {
         exit 1
     elif [[ "$ARGS_SET" == *c* ]]
     then
-        echo "Args comming in through file set with -c, other args seems good"
+        echo "Args comming in through file set with -c, other args seem good"
     fi
 
-    #############################################
-    # test if "-p tree_method" is set correctly #
-    #############################################
-    if [[ " ${tree_method[*]} " =~ " raxml " ]] || [[ " ${tree_method[*]} " =~ " fasttree " ]] || [[ " ${tree_method[*]} " =~ " iqtree " ]] || [[ " ${tree_method[*]} " =~ " astral " ]]
-    then
-        echo Running ${tree_method[@]} to generate Species trees
-    else
-        echo "Species tree estemation from $input_alignment (concatenated genes) not done; tree_method not set to either fasttree, raxml, and/or iqtree"
-        USAGE
-        exit 1
-    fi
+    
 
 }
 
