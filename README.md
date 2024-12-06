@@ -1,4 +1,4 @@
-# OrthoPhyl2.0: Bigger and Better Orthology-based Phylogenomics
+# OrthoPhyl2 (v2.1.0): Bigger and Better Orthology-based Phylogenomics
 #### Previously OrthoPhylo...OrthoPhyl sounds better)
 <br /> <br />
 ## Table of Contents
@@ -297,6 +297,16 @@ I will attempt to make errors easier to track...
 dyld: Symbol not found: _libiconv_open
 ```
 This appeared to be a problem with wget, which was resolved by updating through conda/mamba.
+#### SyntaxWarning during OrthoFinder run
+Due to a python version update ETE3 throws and error about escape characters during the OrthoFinder run:
+```
+/panfs/biopan03/home/earlm/mambaforge/envs/orthophyl5/bin/scripts_of/tree.py:1422: SyntaxWarning: invalid escape sequence '\-'
+  """
+/panfs/biopan03/home/earlm/mambaforge/envs/orthophyl5/bin/scripts_of/newick.py:54: SyntaxWarning: invalid escape sequence '\['
+  _ILEGAL_NEWICK_CHARS = ":;(),\[\]\t\n\r="
+```
+etc...
+This DOES NOT affect the results. In future python versions this warning will upgrade to an error and kill ete3.  I will see if there is an update that 
 
 <a name="FutureCapabilities"></a>
 ## Future Capabilities:
