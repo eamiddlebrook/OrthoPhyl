@@ -98,11 +98,12 @@ SET_RIGOR () {
     echo "*********************************************"
     if [[ $rigor = "full" ]]
     then    
-        echo "Building the biggest/baddest trees with IQTree and ASTRAL"
+        echo "Building the biggest/baddest trees with IQTree and ASTRAL*"
         echo "  Good for: Supporting taxonomy changes, arguing with reviewer 2, and confusing yourself"
-        echo "  Use both CDS and PROT alignments (*helps* with saturation issues)"
-        echo "  Strict and relaxed single copy orthologs"
-        echo "  Full partition model merging for IQTree to reducing overfitting (takes for ever)"
+        echo "  Use both CDS and PROT alignments* (*helps* with saturation issues)"
+        echo "  Strict and relaxed single copy orthologs*"
+        echo "  Full partition model merging for IQTree to reducing overfitting (takes for-ever)"
+        echo "  *(unless overridden on command line)"
         export tree_method=("iqtree" "astral")
         export IQtree_CDS_partition_options="-m MFP+MERGE --rclusterf 10" # cluster partitions with FreeRate models using a fast$
         export IQtree_PROT_partition_options="-m MFP+MERGE --rclusterf 10" # cluster partitions with FreeRate models using a fas$
@@ -114,22 +115,33 @@ SET_RIGOR () {
     then    
         echo "Building trees with fast methods (fasttree and ASTRAL)"
         echo "  Good for: exploritory work, quick turnarounds, arguing with committee members" 
-        echo "  Will use only PROT or CDS alignments (default PROT)"
-        echo "  Only \"strict\" single copy orthologs will be used"
+        echo "  Will use only PROT or CDS alignments (default PROT)*"
+        echo "  Only \"strict\" single copy orthologs will be used*"
+        echo "  *(unless overridden on command line)"
         export tree_method=("fasttree" "astral")
         export fasttree_PROT_speciestree_options=""
         export gene_tree_methods=("fasttree")
-        if [[ "$ARGS_SET" == *c* ]]
+        if [[ "$ARGS_SET" == *o* ]]
         then 
             echo "  Using "$TREE_DATA" alignments for tree generation!" 
         else
             TREE_DATA=PROT
             echo "  Using "$TREE_DATA" alignments for tree generation!" 
         fi
+        if [[ "$ARGS_SET" == *m* ]]
+        then 
+            echo "  Using OGs found in at least"$min_num_orthos" fracton on samples" 
+        else
+            min_num_orthos=1
+            echo "  Only using OGs found in "$min_num_orthos" all samples" 
+        fi
+
     elif [[ $rigor = "medium" ]]
     then
-        echo "Building trees with iqtree nd ASTRAL"
+        echo "Building trees with iqtree and ASTRAL"
         echo "  Good for: "
+        echo "  iqtree will test GTR and FreeRate models for CDS and standard models for Prots"
+        echo "     but will not merge patitions (genes)"
         export tree_method=("iqtree" "astral")
         export IQtree_CDS_partition_options="-m MFP" # test GTR and FreeRate models
         export IQtree_PROT_partition_options="" # tests standard PROT models
@@ -137,7 +149,7 @@ SET_RIGOR () {
         export iqtree_CDS_genetree_options="--lmap 2000 --symtest -B 1000 -t PARS --ninit 2 "
         export iqtree_PROT_genetree_options="--lmap 2000 --symtest -B 1000 -t PARS --ninit 2 "
     else
-        echo "You used a -R/--rigor option that is not recognized!"
+        echo "You used a -R/--rigor option that is not recognized! \n options are full, medium, or fast"
         exit 1
     fi
     

@@ -165,13 +165,11 @@ MAIN_PIPE () {
 		#move provided prots and trans to their respecive folders
 		for I in $(ls $input_prots/)
 		do
-			echo "moving $I"
- 			cp -L $input_prots/${I}   $prots/${I%.*}.faa || exit
+ 			cp -L $input_prots/${I}   $prots/${I%.*}.faa || (echo "Failed to move $I to the working directory for some reason" && exit)
  		done
  		for I in $(ls $input_trans/)
 		do
-			echo "moving $I"
- 			cp -L $input_trans/${I}   $trans/${I%.*}.fna || exit
+ 			cp -L $input_trans/${I}   $trans/${I%.*}.fna || (echo "Failed to move $I to the working directory for some reason" && exit)
  		done
  	fi
 	DEDUP_annot_trans $store $trans $prots 
@@ -209,7 +207,7 @@ MAIN_PIPE () {
 	fi
 
 	# trim protein sequences
-	TRIM $wd/AlignmentsProts "PROT"
+	TRIM $wd/AlignmentsProts "PROT" && touch $wd/AlignmentsProts.trm.complete
 
 	# identify single copy orthologs in protein alignments
 	#  create files with OG names 

@@ -1,4 +1,4 @@
-# OrthoPhyl2 (v2.1.0): Bigger and Better Orthology-based Phylogenomics
+# OrthoPhyl2 (v2.1.1): Bigger and Better Orthology-based Phylogenomics
 #### Previously OrthoPhylo...OrthoPhyl sounds better)
 <br /> <br />
 ## Table of Contents
@@ -297,8 +297,14 @@ I will attempt to make errors easier to track...
 dyld: Symbol not found: _libiconv_open
 ```
 This appeared to be a problem with wget, which was resolved by updating through conda/mamba.
+#### Segmentation fault during Trimming/backtranslating
+If trimming during backtranslating removes all sites you will get a segmentation fault:
+```
+gits/OrthoPhyl/script_lib/functions.sh: line 973: 3034614 Segmentation fault      (core dumped) trimal -in $i $trimal_parameter -ignorestopcodon -backtrans $SequencesCDS/${base}.CDS.fa -out $CDS_codon_alignment/${base}.codon_aln.fa >> $wd/logs/trimal.TRIMAL_backtrans 2>&1
+```
+This just results in there being a missing alignment. Since later steps are enumerated on what alignments are present, this doesnt cause a further error. Since the missing alignment is garbage, it will not be missed.
 #### SyntaxWarning during OrthoFinder run
-Due to a python version update ETE3 throws and error about escape characters during the OrthoFinder run:
+Due to a python version update, ETE3 throws and error about escape characters during the OrthoFinder run:
 ```
 /panfs/biopan03/home/earlm/mambaforge/envs/orthophyl5/bin/scripts_of/tree.py:1422: SyntaxWarning: invalid escape sequence '\-'
   """

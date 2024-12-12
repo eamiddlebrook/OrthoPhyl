@@ -769,48 +769,56 @@ TRIM () {
 	local alignment_dir=${1}
 	local alignment_type=${2}
 
-	echo -e "\nTrimming $alignment_type alignments in $alignment_dir with: 'trimal $trimal_parameter'\n"
 
-	# make output dir
-	mkdir $alignment_dir.trm
+	if [ -f $wd/AlignmentsProts.trm.complete ]
+    then
+            	echo "Protein alignment trimming already completed."
+                echo "if rerun is desired, delete $wd/AlignmentsProts.trm.complete"
 
-	# set up percent complete updater 
-	cd $wd/ || exit
-	num_OGs=$(ls $alignment_dir/OG* | wc -l) # this is 1+ the real num
-        percent=$(( num_OGs / 10))
-        J=0
-	
-	# iterate over alignment dir OG files works in chunks of %thread 
-	#   Need to change it to start next job if there are < $threads trimming operations running
-	for I in $alignment_dir/OG*
-	do
-		if test "$(jobs | wc -l)" -ge $threads
-		then
-			wait -n
-			trap control_c INT
-		fi
-		# Progress sent to stdout
-		if [ $((J % percent)) -eq 0 ]
-		then
-				echo $((J/percent*10))" percent of the way through trimming"
-		fi
-        TRIM_subfunc () {
-			base=$(basename ${I%.*})
-			trimal \
-			-in $I -fasta \
-			-out $alignment_dir.trm/${base}.trm.fa \
-			$trimal_parameter > $wd/logs/trimmal_logs 2>&1
-			#remove all gene info from header for concat
-			#this is really janky: relies on adding the @ during renaming...
-			# Removes everything after the @ to leave just the sample name
-			#cat $alignment_dir.trm/${base}.trm.fa \
-			#| sed 's/@.*$//g' > $alignment_dir.trm.nm/${base}.trm.nm.fa
-			# moved to TRIMAL_backtrans
-		}
-		TRIM_subfunc &
-		J=$((J+1))
-	done
-	wait
+    else
+		echo -e "\nTrimming $alignment_type alignments in $alignment_dir with: 'trimal $trimal_parameter'\n"
+
+		# make output dir
+		mkdir $alignment_dir.trm
+
+		# set up percent complete updater 
+		cd $wd/ || exit
+		num_OGs=$(ls $alignment_dir/OG* | wc -l) # this is 1+ the real num
+			percent=$(( num_OGs / 10))
+			J=0
+		
+		# iterate over alignment dir OG files works in chunks of %thread 
+		#   Need to change it to start next job if there are < $threads trimming operations running
+		for I in $alignment_dir/OG*
+		do
+			if test "$(jobs | wc -l)" -ge $threads
+			then
+				wait -n
+				trap control_c INT
+			fi
+			# Progress sent to stdout
+			if [ $((J % percent)) -eq 0 ]
+			then
+					echo $((J/percent*10))" percent of the way through trimming"
+			fi
+			TRIM_subfunc () {
+				base=$(basename ${I%.*})
+				trimal \
+				-in $I -fasta \
+				-out $alignment_dir.trm/${base}.trm.fa \
+				$trimal_parameter > $wd/logs/trimmal_logs 2>&1
+				#remove all gene info from header for concat
+				#this is really janky: relies on adding the @ during renaming...
+				# Removes everything after the @ to leave just the sample name
+				#cat $alignment_dir.trm/${base}.trm.fa \
+				#| sed 's/@.*$//g' > $alignment_dir.trm.nm/${base}.trm.nm.fa
+				# moved to TRIMAL_backtrans
+			}
+			TRIM_subfunc &
+			J=$((J+1))
+		done
+		wait
+	fi
 }
 
 ALIGNMENT_STATS () {
@@ -1042,7 +1050,7 @@ cat_alignments () {
 		mkdir $SCO_dir
 	fi
 	echo "Creating directory with alignments of OGs from $SCO_list"
-	for I in $(cat $SCO_list):
+	for I in $(cat $SCO_list)
 	do
 		cp $alignment_dir/${I}.* $SCO_dir/
 	done
