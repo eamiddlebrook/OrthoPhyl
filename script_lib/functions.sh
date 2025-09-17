@@ -5,15 +5,11 @@
 # source $script_home/scipt_lib/functions.sh
 
 BAIL () {
-	# print function that had error in it ${1} and any associated message ${2}
-	echo -e "WARNING: Function \"${FUNCNAME[1]}\" failed"
+	# print function that had error in it and any associated message ${1}
+	echo -e "WARNING: Function \"${FUNCNAME[2]}\" failed"
 	echo ${1}
 	exit 1
 }
-
-
-
-
 
 SET_UP_DIR_STRUCTURE () {
 	echo '
@@ -72,15 +68,17 @@ SET_UP_DIR_STRUCTURE () {
 		mkdir $wd
 		cd $wd || exit
 		mkdir AlignmentsProts/
-		mkdir AlignmentsTrans/
-		mkdir AlignmentsTrans.trm/
-		mkdir AlignmentsTrans.trm.nm/
-		mkdir SequencesTrans/
+		mkdir AlignmentsCDS/
+		mkdir AlignmentsCDS.trm/
+		mkdir AlignmentsCDS.trm.nm/
+		mkdir SequencesCDS/
 		mkdir SequencesProts/
 		mkdir OG_names/
 		mkdir RAxMLtrees/
 		mkdir SpeciesTree
 		mkdir logs
+		mkdir trimmed_columns
+		mkdir OG_names
 
 		touch $store/setup.complete
 	fi
@@ -498,6 +496,9 @@ ORTHO_RUN () {
 		-f "$local_prots_fixed" > $wd/logs/orthofinder.stdout \
 		&& touch orthofinder.complete \
 		|| { echo "Orthofinder failed, check $wd/logs/orthofinder.stdout for details"; exit; }
+		# make a symlink to OF dirƒ
+		cd $wd
+		ln -rs $orthodir ./
 	fi
 }
 
@@ -510,12 +511,12 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 	'
 	date
 	func_timing_start
-	gene_counts="$orthodir/Orthogroups/Orthogroups.GeneCount.tsv"
-	OF_alignments=$orthodir/MultipleSequenceAlignments
-	all_prots=$wd/all_prots.nm.fa
+	local gene_counts=$1
+	local OF_alignments=$2
+	local all_prots=$3
+	local OG_alignmentsToHMM=$4
 
-
-	alignments_TMP="$orthodir/OG_alignmentsToHMM/alignments/"
+	local alignments_TMP="$OG_alignmentsToHMM/alignments/"
 
 	# run this block ass a function to use multiple cores and local variables
 	OG_hmm_search () {
@@ -563,7 +564,7 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 		in=$wd/all_prots.nm.fa \
 		out=SequencesProts/${I}.faa >> filterbyname.so_verbose.out 2>&1
 		mafft --quiet SequencesProts/${I}.faa > \
-                AlignmentsProts/${I}.fa
+            AlignmentsProts/${I}.fa
 	}
 
 
@@ -596,28 +597,25 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 			then
 				echo $(((J+K)/percent*10))" percent of the way through the hmm search"
 			fi
-				# run the OG_hmm_search module for each alignments found in $alignments_TMP
-				#  if number of taxa in alignment is gt $ANI_shortlist_min_OGs
-				# outer if statement avoids errors from reps>1
-				#  where some cat $input_list are not in alignments because of filtering
-				if [ -f $alignments_TMP/${I}.fa ]
+			# run the OG_hmm_search module for each alignments found in $alignments_TMP
+			#  if number of taxa in alignment is gt $ANI_shortlist_min_OGs
+			# outer if statement avoids errors from reps>1
+			#  where some cat $input_list are not in alignments because of filtering
+			if [ -f $alignments_TMP/${I}.fa ]
+			then
+				if [ $(cat $alignments_TMP/${I}.fa | grep -e ">" | sort | uniq | wc -l) -ge $ANI_shortlist_min_OGs ]
 				then
-					if [ $(cat $alignments_TMP/${I}.fa | grep -e ">" | sort | uniq | wc -l) -ge $ANI_shortlist_min_OGs ]
-					then
-						OG_hmm_search $outdir $alignments_TMP $all_prots &
-						# count actual jobs runnin gin background
-						J=$((J+1))
-					else
-						# count inputs that are skipped (for % complete counter)
-						K=$((K+1))
-					fi
+					OG_hmm_search $outdir $alignments_TMP $all_prots &
+					# count actual jobs runnin gin background
+					J=$((J+1))
 				else
-	                                # count inputs that are skipped (for % complete counter)
-	                                K=$((K+1))
+					# count inputs that are skipped (for % complete counter)
+					K=$((K+1))
 				fi
-				
-
-			
+			else
+				# count inputs that are skipped (for % complete counter)
+				K=$((K+1))
+			fi
 		done
 		wait
 
@@ -626,17 +624,17 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 		do
 			# move file
 			if [ -f $outdir/AlignmentsProts/${I}.fa ]
-                        then
-                        	rm $alignments_TMP/${I}.fa
-			    	cp $outdir/AlignmentsProts/${I}.fa $alignments_TMP/
-                        fi
+            then
+            	rm $alignments_TMP/${I}.fa
+			    cp $outdir/AlignmentsProts/${I}.fa $alignments_TMP/
+            fi
 			if [ -f $alignments_TMP/${I}.fa ]
 			then
 				echo -e "Rep_${rep}\t${I}\t"$(cat $alignments_TMP/${I}.fa| grep -c -e ">") \
 					>> ${local_wd}/hmm_reps.tsv
 			else
 				echo -e "Rep_${rep}\t${I}\t0" \
-                                        >> ${local_wd}/hmm_reps.tsv
+                    >> ${local_wd}/hmm_reps.tsv
 			fi
 		done
 	}
@@ -650,8 +648,8 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
                 echo "if rerun is desired, delete $store/ANI_ORTHOFINDER_TO_ALL_SEQS.complete"
 
         else
-		mkdir OG_alignmentsToHMM
-		cd OG_alignmentsToHMM || exit
+		mkdir $OG_alignmentsToHMM
+		cd $OG_alignmentsToHMM || exit
 		mkdir alignments
 		touch OG_fullset_scores
 		# Pick OGs of interest from Orthofinder genecounts
@@ -665,20 +663,20 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 		percent=$(( num_OGs / 10))
 		### Run HMM search with updataed models form full dataset
 		###
-		cd $orthodir/OG_alignmentsToHMM
+		cd $OG_alignmentsToHMM
 		percent=$(( num_OGs / 10))
 		J=0
 		for I in $(cat SCO_$ANI_shortlist_min_OGs)
 		do
 			cp $OF_alignments/${I}.fa $alignments_TMP/
 			echo -e "Rep_0\t${I}\t"$(cat $alignments_TMP/${I}.fa| grep -c -e ">") \
-				>> $orthodir/OG_alignmentsToHMM/hmm_reps.tsv
+				>> $OG_alignmentsToHMM/hmm_reps.tsv
 		done
 
 		for rep in $(seq $reps)
 		do
 			echo "##############  LIST OF ALIGNMENTS TO START Rep $rep  ############"
-			cd $orthodir/OG_alignmentsToHMM
+			cd $OG_alignmentsToHMM
 			mkdir hmm_round$rep
 			cd hmm_round$rep
 			mkdir alignments
@@ -688,11 +686,16 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
                 	mkdir SequencesProts
                 	mkdir AlignmentsProts
 			echo "Running OG expantion rep ${rep}"
-			dirtbag_multithreading $orthodir/OG_alignmentsToHMM SCO_$ANI_shortlist_min_OGs $alignments_TMP $orthodir/OG_alignmentsToHMM/hmm_round$rep $all_prots $threads
+			dirtbag_multithreading $OG_alignmentsToHMM \
+				SCO_$ANI_shortlist_min_OGs \
+				$alignments_TMP \
+				$OG_alignmentsToHMM/hmm_round$rep \
+				$all_prots \
+				$threads
 		done
 
 		#alignments copied to the final module output ($wd/AlignmentsProts/)
-		for I in $(cat $orthodir/OG_alignmentsToHMM/SCO_$ANI_shortlist_min_OGs)
+		for I in $(cat $OG_alignmentsToHMM/SCO_$ANI_shortlist_min_OGs)
 		do
 			if [ -f $alignments_TMP/${I}.fa ]
 			then
@@ -752,10 +755,137 @@ REALIGN_ORTHOGROUP_PROTS () {
 		
 	done
 	wait
+}
 
+GET_OG_NAMES () {
+	echo '
+	##############################################
+	############# Parsing Names From  ############
+	############## Orthogroup Prots ##############
+	##############################################
+	'
+	OG_names_dir=$1
+	OG_dir=$2
+	
+	local num_OGs=$(ls "$OG_dir"/OG*.f*a | wc -l)
+	local percent=$(( num_OGs / 10))
+	J=0
+	for i in "$OG_dir"/OG*.f*a
+	do
+		if test "$(jobs | wc -l)" -ge $threads
+		then
+			wait -n
+			trap control_c INT
+		fi
+		Get_OG_Names () {
+			local base=$(basename "${i%.*}")
+			#echo $base
+		    cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
+		        > $OG_names_dir/${base}.names
+		}
+		Get_OG_Names &
+		# Progress sent to stdout
+		if [ $((J % percent)) -eq 0 ]
+		then
+			echo $((J/percent*10))" percent of the way through the extracting OG_names from HMM OG hits"
+		fi
+		J=$((J+1))
+	done 
+	wait
+	echo "Get_OG_Names 100% done!!!" 
+}
+
+filterbyname_subfunc () {
+	echo '
+	#########################
+	### Pull seqs for OGs ###
+	#########################
+	'
+	names_dir=$1
+	all_seqs=$2
+	out_dir=$3
+	J=0
+	num_OGs=$(ls ${names_dir}/OG* | wc -l)
+	percent=$(( num_OGs / 10))
+	for i in $(ls $names_dir)
+	do
+	file=${i##*/}
+	base=${file%%.*}
+	# pulling out CDS sequences based on names in orthofinder OGs
+	filterbyname.sh -Xmx60m -Xms60m include=t \
+		names=$i ignorejunk=t \
+		in=$all_seqs out=$out_dir/${base}.fa \
+		>> $logs/filterbyname_CDS 2>&1
+	J=$((J+1))
+	done
 
 }
 
+ALIGN_PROT_n_CDS () {
+	echo '
+	###################################################
+	############# Realign Orthogroup Prots ############
+	############### And Nucs With MACSE ###############
+	###################################################
+	'
+	# 
+	date
+	func_timing_start
+	local wd=$1
+	local OG_names=$2
+	local all_CDS=$3
+	local SequencesCDS=$4
+	local code=$5
+	local AlignmentsCDS=$6
+	local AlignmentsProts=$7
+	local threads=$8
+	local logs=$9
+	#macse_parameters="-optim 1 -max_refine_iter 3 -local_realign_init 0.3 -local_realign_dec 0.2 "
+	macse_parameters="-optim 0"
+	cd $wd || exit
+	# making progress indicator
+	num_OGs=$(ls "$OG_names"/OG*.names | wc -l)
+	percent=$(( num_OGs / 10))
+	J=0
+	for i in "$OG_names"/OG*.names
+	do
+		if test "$(jobs | wc -l)" -ge $threads
+		then
+			wait -n
+			trap control_c INT
+		fi
+		
+		base=$(basename ${i%.*})
+
+		# !!! redundant with new filterbyname_subfunc
+		filter_and_Align_subfunc () {
+			# pulling out CDS sequences based on names in orthofinder OGs
+			filterbyname.sh -Xmx60m -Xms60m include=t \
+		        names=$i ignorejunk=t \
+		        in=$all_CDS out=$SequencesCDS/${base}.fa \
+				>> $logs/filterbyname.realign_CDS 2>&1
+			# realign prots with MACSE
+			macse -prog alignSequences -seq $SequencesCDS/${base}.fa ${macse_parameters} >> $logs/macse.out 2>&1 
+			mv $SequencesCDS/${base}_NT.fa $AlignmentsCDS/${base}.fa  || (echo "NT Alignment file not created for $base" && exit 1)
+			mv $SequencesCDS/${base}_AA.fa $AlignmentsProts/${base}.faa || (echo "AA Alignment files not created for $base" && exit 1)
+			
+			#### TEST FIX FOR ReLeaf partition file not match prot length (* get converted to - by mafft...ugh)
+			# might move to prot specific part (not needed for only CDS)
+			sed -i 's/*/-/g' $AlignmentsProts/${base}.faa
+
+		}
+		# run the above subfunction multithreaded (sort-of)
+		filter_and_Align_subfunc &
+		J=$((J+1))
+		# Progress sent to stdout
+		if [ $((J % percent)) -eq 0 ]
+		then
+			echo $((J/percent*10-10))" percent of the way through the extraction and realignment of OG prots"
+		fi
+	done
+	echo "Waiting for the last " $(jobs | wc -l) " alignments to finish..."
+	wait
+}
 
 TRIM () {
 	echo "
@@ -768,12 +898,12 @@ TRIM () {
 	func_timing_start
 	local alignment_dir=${1}
 	local alignment_type=${2}
+	local checkpoint_file=${3}
 
-
-	if [ -f $wd/AlignmentsProts.trm.complete ]
+	if [ -f $checkpoint_file ]
     then
             	echo "Protein alignment trimming already completed."
-                echo "if rerun is desired, delete $wd/AlignmentsProts.trm.complete"
+                echo "if rerun is desired, delete " $checkpoint_file
 
     else
 		echo -e "\nTrimming $alignment_type alignments in $alignment_dir with: 'trimal $trimal_parameter'\n"
@@ -804,15 +934,119 @@ TRIM () {
 			TRIM_subfunc () {
 				base=$(basename ${I%.*})
 				trimal \
-				-in $I -fasta \
-				-out $alignment_dir.trm/${base}.trm.fa \
-				$trimal_parameter > $wd/logs/trimmal_logs 2>&1
+					-in $I -fasta \
+					-out $alignment_dir.trm/${base}.trm.fa \
+					$trimal_parameter \
+					-colnumbering 1> trimmed_columns/${base}.cols 2> $wd/logs/trimal_log
 				#remove all gene info from header for concat
 				#this is really janky: relies on adding the @ during renaming...
 				# Removes everything after the @ to leave just the sample name
 				#cat $alignment_dir.trm/${base}.trm.fa \
 				#| sed 's/@.*$//g' > $alignment_dir.trm.nm/${base}.trm.nm.fa
 				# moved to TRIMAL_backtrans
+			}
+			TRIM_subfunc &
+			J=$((J+1))
+		done
+		if test "$(jobs | wc -l)" -gt 0
+			then
+				wait -n
+				trap control_c INT
+			fi
+	fi
+}
+
+GET_TRIMMED_COLS () {
+    echo "
+    ############################################
+    Getting trimmed columns from original OP Run
+    ############################################
+    "
+			# requires a directory full of trimal output for the -colnumbering argument (ending in .cols) 
+			cols_dir=$1
+            cd $cols_dir
+            for I in $(ls OG*.cols); do
+                base=${I%%.*}
+				#get protein colums to keep through trimming
+                trimal_prot_cols=$base.trimal_prot_cols
+                cols_line=$(cat $I | sed 's/#ColumnsMap/{ /g;s/\t//g;s/$/ }/g;s/, /,/g')
+                echo -n "-selectcols" $cols_line " -complementary "> $trimal_prot_cols
+				# get CDS columns to keep based on prot columns  
+				trimal_CDS_cols=$base.trimal_CDS_cols
+				cols_line=$(cat $I | sed 's/#ColumnsMap\t//g;s/ //g' |\
+					tr ',' '\n' |\
+					awk '{print $0*3","$0*3+1","$0*3+2}' |\
+					tr '\n' ',' |\
+					sed 's/,$//g')
+				echo -n "-selectcols { " $cols_line " } -complementary "> $trimal_CDS_cols
+			done    
+}
+
+TRIM_selectcols () {
+	echo "
+	##############################################
+	#### trim all ${2} alignments with Trimal ####
+	####### and remove gene specific names #######
+	##############################################
+	"
+	date
+	func_timing_start
+	local alignment_dir=${1}
+	local alignment_type=${2}
+	local cols_dir=${3}
+	local checkpoint_file=${4}
+
+	if [ -f $checkpoint_file ]
+    then
+            	echo "CDS codon alignment trimming already completed."
+                echo "if rerun is desired, delete " $checkpoint_file
+
+    else
+		echo -e "\nTrimming $alignment_type alignments in $alignment_dir with columns in $cols_dir\n"
+
+		# make output dir
+		mkdir $alignment_dir.trm
+
+		# set up percent complete updater 
+		cd $wd/ || exit
+		num_OGs=$(ls $alignment_dir/OG* | wc -l) # this is 1+ the real num
+			percent=$(( num_OGs / 10))
+			J=0
+		
+		# iterate over alignment dir OG files - works in chunks of #threads 
+		#  starts next job if there are < $threads trimming operations running
+		for I in $alignment_dir/OG*
+		do
+			base_tmp=${I##*/}
+			base=${base_tmp%%.*}
+			if test "$(jobs | wc -l)" -ge $threads
+			then
+				wait -n
+				trap control_c INT
+			fi
+			# Progress sent to stdout
+			if [ $((J % percent)) -eq 0 ]
+			then
+					echo $((J/percent*10))" percent of the way through trimming"
+			fi
+			trimal_parameter=$(cat $cols_dir/${base}.trimal_${alignment_type}_cols)
+			TRIM_subfunc () {
+				trimal \
+					-in $I -fasta \
+					-out $alignment_dir.trm/${base}.trm.fa \
+					$trimal_parameter \
+					> $wd/logs/trimal_log
+				
+				
+			#remove all gene info from header for concat
+			if	[[ $alignment_type == "CDS" ]] 
+			then
+				#this is really janky: relies on adding the @ during renaming...
+				# Removes everything after the @ to leave just the sample name
+				#	Moved to its own func
+				cat $alignment_dir.trm/${base}.trm.fa \
+				| sed 's/@.*$//g' > $alignment_dir.trm.nm/${base}.trm.nm.fa
+			fi
 			}
 			TRIM_subfunc &
 			J=$((J+1))
@@ -881,7 +1115,7 @@ SCO_MIN_ALIGN () {
 	"
 	date
 	func_timing_start
-	# takes folder of fasta alignments and will pull alingment names with > $min_num_orthos constituents
+	# takes folder of fasta alignments and will pull alingment names with >= $min_num_orthos constituents
 	local alignment_dir=${1}
 	local min_num_orthos=${2}
 	local OG_sco_filter=$OG_sco_filter
@@ -946,6 +1180,7 @@ TRIMAL_backtrans () {
 	local CDS_codon_alignment=${4}
 	local OG_names=$5
 	local SequencesCDS=$6
+	local addem=$7
 
 	if [ ! -d $CDS_codon_alignment.nm ]
 	then
@@ -959,7 +1194,7 @@ TRIMAL_backtrans () {
         J=0
 	for i in $prot_alignment/OG*.faa
 	do
-		if test "$(jobs | wc -l)" -ge $threads
+		if test "$(jobs | wc -l)" -ge 1
 		then
 			wait -n
 			trap control_c INT
@@ -969,12 +1204,18 @@ TRIMAL_backtrans () {
 		then
 			echo $((J/percent*10))" percent of the way through the TRIMAL_backtrans"
 		fi
-		# why the hell did I declare this function with in the loop...probably because of the "local bass=...". this should be passed in with a variable. 
+		# why the hell did I declare this function with in the loop...probably because of the "local base=...". this should be passed in with a variable. 
 		TRIMAL_backtrans_subfunc () {
 			#get basename (OG000????)
 			local file=${i##*/}
 			local base=${file%%.*}
-
+			
+			#only run if in the addem workflow
+			if [ "$addem" = "true" ]
+			then
+				trimal_parameter="$(cat $OLD_trim_cols/$base.cols_to_keep)"
+			fi
+			
 			cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
 	        	> $OG_names/${base}.names
 			#pull out trans sequences for each OG
@@ -985,15 +1226,24 @@ TRIMAL_backtrans () {
 			# protein to nuc alignments
 			#pal2nal.pl $i ./SequencesCDS/${base}.CDS.fa -codontable 11 -output fasta \
 			#> $CDS_codon_alignment/${base}.codon_aln.fa 2> TRIMAL_backtrans.stderr.tmp
+			
+			# backtraslation
 			trimal -in $i \
-				$trimal_parameter \
 				-ignorestopcodon \
 				-backtrans $SequencesCDS/${base}.CDS.fa \
 				-out $CDS_codon_alignment/${base}.codon_aln.fa \
-				>> $wd/logs/trimal.TRIMAL_backtrans 2>&1
+				>> $wd/logs/trimal_log 2>&1
+
+			# trimming
+			trimal -in $CDS_codon_alignment/${base}.codon_aln.fa \
+				$trimal_parameter \
+				-out $CDS_codon_alignment.trm/${base}.codon_aln.fa \
+				-colnumbering \
+				> $wd/trimmed_columns/${base}.cols \
+				2>> $wd/logs/trimal_log
 			# fix names to only have assembly name
-			cat $CDS_codon_alignment/${base}.codon_aln.fa \
-	           	| sed 's/@.*$//g' > $CDS_codon_alignment.nm/${base}.codon_aln.nm.fa 
+			cat $CDS_codon_alignment.trm/${base}.codon_aln.fa \
+	           	| sed 's/@.*$//g' > $CDS_codon_alignment.trm.nm/${base}.codon_aln.nm.fa 
 		}
 		TRIMAL_backtrans_subfunc &
         J=$((J+1))
@@ -1245,7 +1495,7 @@ allGENE_TREEs () {
 	mkdir $out_dir/
 	mkdir $out_dir.nm/
 	cd $out_dir || exit
-	num_OGs=$(ls $gene_alignment_dir/OG* | wc -l) # this is 1+ the real num
+	num_OGs=$(ls $gene_alignment_dir/OG*.fa | wc -l) # this is 1+ the real num
         percent=$(( num_OGs / 10))
         J=0
 
@@ -1311,7 +1561,7 @@ allGENE_TREEs () {
 
 
 
-astral_allTransGENE2SPECIES_TREE () {
+astral_allCDSGENE2SPECIES_TREE () {
 	echo '
 	#######################################################
 	Species tree reconstruction from CDS or PROT alignments
@@ -1325,7 +1575,7 @@ astral_allTransGENE2SPECIES_TREE () {
 	Need to set it up to run astral_p to handle paralogs
 	I think this will only be useful in limited cases:
 	back burner
-	ALSO, functionality could be put into astral_TransGENE2SPECIES_TREE
+	ALSO, functionality could be put into astral_CDSGENE2SPECIES_TREE
 	just need to change astral_CMD
 	"
 }
@@ -1422,7 +1672,7 @@ WRAP_UP () {
 		done
 		rm -r $store/tmp_trash
 	fi
-	# but keep AlignmentTrans.trm.nm ans AlignemntProt
+	# but keep AlignmentCDS.trm.nm ans AlignemntProt
 	# gather all SpeciesTrees in one place?
 	echo '
 	#######################################################
