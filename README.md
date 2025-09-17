@@ -1,5 +1,5 @@
-# OrthoPhyl2 (v2.1.1): Bigger and Better Orthology-based Phylogenomics
-#### Previously OrthoPhylo...OrthoPhyl sounds better)
+# **OrthoPhyl2 (v2.2.1)**: Bigger and Better Orthology-based Phylogenomics
+# Now Freaturing **ReLeaf!**: Rapidly Add Samples to Previous OrthoPhyl Runs
 <br /> <br />
 ## Table of Contents
 

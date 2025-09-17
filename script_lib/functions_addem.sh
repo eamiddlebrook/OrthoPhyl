@@ -11,12 +11,17 @@ SET_UP_ADDASM_DIRS () {
     mkdir $new_OG_prots
     mkdir $new_OG_CDS
     mkdir $new_prot_alignments
+    mkdir $new_prot_alignments.trm
+    mkdir $new_prot_alignments.trm.nm
     mkdir $new_CDS_alignments
+    mkdir $new_CDS_alignments.trm
+    mkdir $new_CDS_alignments.trm.nm
     mkdir $OG_names
     mkdir $OLD_TREE_INFO
     mkdir $SpeciesTree
     mkdir $new_trees
     mkdir $logs
+    mkdir trimmed_columns # need to make a variable somewhere...
 }
 
 GET_OLD_TREE_INFO () {
@@ -209,6 +214,7 @@ HMM_search () {
         # Add one to J for tracking multithreading
         J=$((J+1))
     done
+    wait
 }
 
 ADD_2_ALIGNMENTS () {
@@ -220,16 +226,16 @@ ADD_2_ALIGNMENTS () {
         ### Running ADD_2_alignment ###
         ###############################
         "
-    local OLD_prot_alignments=$1
-    local new_OG_prots=$2
-    local new_prot_alignments=$3
+    local OLD_alignments=$1
+    local new_OG_seqs=$2
+    local new_alignments=$3
     local threads=$4
     
-    num_alignments=$(ls $OLD_prot_alignments/OG* | wc -l) # this is 1+ the real num
+    num_alignments=$(ls $OLD_alignments/OG* | wc -l) # this is 1+ the real num
     percent=$(( num_alignments / 10))
 
     J=0
-    for OG_alignment in $OLD_prot_alignments/OG*
+    for OG_alignment in $OLD_alignments/OG*
     do
         # If number of multithreaded jobs is greater than $threads, wait.
         #  Test again if a job finishes
@@ -242,21 +248,24 @@ ADD_2_ALIGNMENTS () {
         then
 			echo $((J/percent*10))" percent of the way through the $FUNCNAME"
         fi
-
-        OG=$(basename ${OG_alignment%.*.*})
-        if [ -s $new_OG_prots/${OG}.fa* ]
+        base=$(basename $OG_alignment)
+        OG=${base%%.*}
+        if [ -s $new_OG_seqs/${OG}.fa* ]
         then
             #echo "adding new sequences to $OG"
-            mafft --add $new_OG_prots/${OG}.fa* --keeplength $OG_alignment \
-                > ${new_prot_alignments}/${OG}.new_aligned.fa \
-                2>> $addasm_dir/logs/mafft_out &
+            sed 's/!/N/g' -i $OG_alignment
+            mafft --add $new_OG_seqs/${OG}.fa* --keeplength $OG_alignment \
+                > ${new_alignments}/${OG}.new_aligned.fa \
+                2>> $addasm_dir/logs/${OG}.mafft_out &
         else
             #echo "NOT adding to $OG"
-            ln -sr $OG_alignment ${new_prot_alignments}/${OG}.new_aligned.fa
+            ln -sr $OG_alignment ${new_alignments}/${OG}.new_aligned.fa
         fi
     J=$((J+1))
     done
+    wait
 }
+
 
 ADD_2_IQTREE () {
 
@@ -285,15 +294,17 @@ ADD_2_fasttree () {
     new_prefix=$4 # new tree location/name
     threads=$5
 
+    # lots to do before this works
+    #need to get bioperl to work in my mamba environment
+     #works in a clean env...
+    #need to collaps bad splits...dont think I can do it during constraint conversion
     constraint_tree=$addasm_dir/$(basename $old_tree).contraints
-
     perl ~/gits/OrthoPhyl/script_lib/TreeToConstraints.pl < \
         $old_tree \
         > $constraint_tree
-    
-
-
-
+    fasttree \
+        -i $blah \
+        -c $blag
 }
 
 
@@ -305,25 +316,24 @@ RUN_ML_SUPERMATRIX_WORKFLOW () {
     
     for SCO_set in ${SCO_sets[@]}
     do
-        # !!!! fix the OG_$SCO_set from OP to be just SCO_set
-        ln -s $store/phylo_current/$SCO_set $addasm_dir/$SCO_set \
-            || { echo "WARNING: SCO_sets indicate a file at $store/phylo_current/$SCO_set that doesnt exist" ; exit 1; }
+        ln -s $store/phylo_current/$SCO_set $addasm_dir/$SCO_set
+        if [ ! -f $store/phylo_current/$SCO_set ]
+        then
+            echo "WARNING: SCO_sets indicate a file at $store/phylo_current/$SCO_set that doesnt exist"
+            exit 1
+        fi
     done
 
     for data in ${TREE_DATA_list[@]}
     do
-        echo "
-        ##########################################
-        ### Running Protein specific  workflow ###
-        ##########################################
-        "
+        
     
         if [ $data == "PROT" ]
         then
-            new_alignments=$new_prot_alignments
+            new_alignments=$new_prot_alignments.trm.nm
         elif [ $data == "CDS" ]
-        then    
-            new_alignments=$new_CDS_alignments
+        then   
+            new_alignments=$new_CDS_alignments.trm.nm
         fi
 
 
@@ -331,10 +341,10 @@ RUN_ML_SUPERMATRIX_WORKFLOW () {
         do
         cat_alignments \
             $addasm_dir/$SCO_set \
-            $new_alignments.nm \
+            $new_alignments \
             $AlignmentsConcatenated \
             $data
-            #ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.align
+        #ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.align
         done
     done
 
@@ -385,9 +395,9 @@ ASTRAL_WORKFLOW () {
     then        
         tree_data=CDS
         # build gene trees for all CDS alignments
-        allGENE_TREEs $tree_data $wd/AlignmentsTrans.trm.nm $wd/${tree_data}_gene_trees
+        allGENE_TREEs $tree_data $wd/AlignmentsCDS.trm.nm $wd/${tree_data}_gene_trees
 
-        # astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
+        # astral_allCDSGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
         
         # build ASTRAL tree from SCO_relaxed gene trees
         if [[ "$relaxed" != false ]]
@@ -404,7 +414,7 @@ ASTRAL_WORKFLOW () {
         # build gene trees for all CDS alignments
         allGENE_TREEs $tree_data $wd/AlignmentsProts.trm.nm $wd/${tree_data}_gene_trees 
 
-        # astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
+        # astral_allCDSGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
         
         # build ASTRAL tree from SCO_relaxed gene trees
         if [[ "$relaxed" != false ]]
