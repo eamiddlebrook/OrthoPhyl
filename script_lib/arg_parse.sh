@@ -120,7 +120,7 @@ ARG_PARSE () {
 					ARGS_SET+=o
 				else
 					USAGE
-					echo "WARNING: -o flag was used with a value other than CDS,PROT, or BOTH. You put '-o ${2}', should be e.g. '-o BOTH'"
+					printf '%b%s\n' "WARNING: -o flag was used with a value other than CDS,PROT, or BOTH. \nYou put '-o ${2}', should be e.g. '-o BOTH'" | fold -s
 					exit 1
 				fi
 				shift

@@ -23,7 +23,7 @@ protein trees
 [] synteny aware orthology (like genespace)
 [] add "best genomes" choice to ANI subsample 
 [] allow users to input precomputted HMMs
-[] fix all dirtbag multithreading to use number of jobs 
+[X I think] fix all dirtbag multithreading to use number of jobs 
 [] something about saturation
     entropy? Nah
     nuc fraction distance? Maybe

@@ -29,7 +29,7 @@ MIN_N50="default"
 MIN_GC="default"
 MAX_GC="default"
 MAX_dup="default"
-MIN_completeness="98"
+MIN_completeness="95"
 MAX_contam="1.0"
 
 MAX_dup_default="0.02"
@@ -118,17 +118,18 @@ echo "
 	#while read -r I ; do cp ncbi_dataset/data/${I}/unplace* ./assemblies_datasets_uniq/$I.fna.gz ; done
 }
 
+# need to fix the problem with "Sub_value" having multiple values screwing up the column numbers
 get_asm_metadata () {
         echo "################################################"
         echo "##### mapping biosample to GB accesstions ######"
         echo "################################################"
 	esearch -db assembly -query "txid${taxon}[organism]" | esummary \
-		> All-Brucella-info.assembly.xml
-	cat All-Brucella-info.assembly.xml \
+		> All-$taxon-info.assembly.xml
+	cat All-$taxon-info.assembly.xml \
 		| xtract -pattern DocumentSummary \
 			-def "NA" -element BioSampleAccn RefSeq Genbank SpeciesName Sub_value FtpPath_GenBank FtpPath_RefSeq Taxid taxonomy-check-status ExclFromRefSeq | \
 			sed 's/ /_/g' \
-			> All-Brucella.assembly.BS_to_meta
+			> All-$taxon.assembly.BS_to_meta
 }
 
 get_non_datasets_assemblies () {
@@ -138,8 +139,8 @@ get_non_datasets_assemblies () {
         echo "############################################"
 
 	#get info for assemblies not in datasets
-	#  Uses All-Brucella.assembly.BS_to_meta to identify asm accessions
-        cat All-Brucella.assembly.BS_to_meta | \
+	#  Uses All-$taxon.assembly.BS_to_meta to identify asm accessions
+        cat All-$taxon.assembly.BS_to_meta | \
         grep -vf assemblies_datasets_uniq.names \
         > assemblies_not_in_datasets.BS_to_meta
 
@@ -153,7 +154,7 @@ get_non_datasets_assemblies () {
 		then
 			RS_file="${RS_path##*/}_genomic.fna.gz"
                         RS_path_full="${RS_path}/${RS_file}"
-                        wget "$RS_path_full"
+            wget "$RS_path_full"
 			mv $RS_file $GCF.fna.gz
 			# if gz file corrupt, try again
 			if gunzip -t $GCF.fna.gz
@@ -170,13 +171,13 @@ get_non_datasets_assemblies () {
 			wget "$GB_path_full"
 			mv $GB_file $GCA.fna.gz
 			# if gz file corrupt, try again
-                        if gunzip -t $GCA.fna.gz
-                        then
-                                echo "$GCA.fna.gz DL'd without error"
-                        else
-                                wget "$GB_path_full"
-                                mv $GB_file $GCA.fna.gz
-                        fi
+			if gunzip -t $GCA.fna.gz
+			then
+					echo "$GCA.fna.gz DL'd without error"
+			else
+					wget "$GB_path_full"
+					mv $GB_file $GCA.fna.gz
+			fi
 
 		else
 			echo "No Path for $GCF or $GCA assembly of $BS"
@@ -209,12 +210,12 @@ get_biosample_GEOdata () {
         echo "################################################"
 	# grab XML file with all brucalla info from BioSample DB
 	esearch -db biosample -query "txid${taxon}[organism]" | esummary \
-                > All-Brucella-info.biosample.xml
+                > All-$taxon-info.biosample.xml
 	#Tried to capture most cases of unknown value with sed. Super messy and dumb
 	#   Rewrote to use the ATTR@subATTR syntax
 	#   The "if" statement stuff is really dumb, cant figure out how to use "def" value
 	#   still need sed cmds to change stuff to "Unknown"
-        cat All-Brucella-info.biosample.xml |\
+        cat All-$taxon-info.biosample.xml |\
 		xtract -pattern DocumentSummary -def "NA" \
 			-element Accession  \
 			-def "NA" \
@@ -233,7 +234,7 @@ get_biosample_GEOdata () {
 			sed 's/ /\t/g' | \
                        	sed 's/:/\t/g' | \
 			awk '{print $1"\t"$2}'  \
-			> All-Brucella.biosample.BS_to_Geoloc
+			> All-$taxon.biosample.BS_to_Geoloc
 }
 
 merge_metadata_geoloc () {
@@ -243,11 +244,11 @@ merge_metadata_geoloc () {
 	# this is super duper dumb
 	#   there is probably a builtin way to merge files by column falue
 	#   oh well, files arnt huge
-	:> All-Brucella.BS_to_all_meta
-	cat All-Brucella.assembly.BS_to_meta |
+	:> All-$taxon.BS_to_all_meta
+	cat All-$taxon.assembly.BS_to_meta |
 	while read BS BLAH
 	do
-		cat All-Brucella.biosample.BS_to_Geoloc |
+		cat All-$taxon.biosample.BS_to_Geoloc |
 		while read BS1 BLAH1
 		do
 			if [ $BS = $BS1 ]
@@ -255,7 +256,7 @@ merge_metadata_geoloc () {
 				echo -e $BS'\t'$BLAH'\t'$BLAH1
 			fi
 		done
-	done >> All-Brucella.BS_to_all_meta
+	done >> All-$taxon.BS_to_all_meta
 }
 
 all_sample_metadata () {
@@ -266,12 +267,12 @@ all_sample_metadata () {
         cat all_asm_acc | grep GCA > all_asm_acc.GCA
 
 	:> all_asm_acc_metadata
-	cat All-Brucella.BS_to_all_meta |\
+	cat All-$taxon.BS_to_all_meta |\
 	grep -f all_asm_acc.GCF |\
 	awk '{print $2,$4,$4"."$5,$1,$8,$9,$10,$11}' \
 	>> all_asm_acc_metadata
 
-        cat All-Brucella.BS_to_all_meta |\
+        cat All-$taxon.BS_to_all_meta |\
         grep -f all_asm_acc.GCA |\
         awk '{print $3,$4,$4"."$5,$1,$8,$9,$10,$11}' \
 	>> all_asm_acc_metadata
@@ -477,10 +478,6 @@ filter_asm_by_stats () {
 
 
 	# Filter assemblies
-	#   This is also too complicated for bash...really slow
-	#   SHOULD BE something like:
-	#     more assemblies_all.stats.txt.old | grep Brucella | awk '{if ($11 <= 0.05) print $0}' | awk '{if ($12 >= 98) print $0}' | awk '{if ($13 <= 2.5) print $0}' | wc -l
-	#     Must pass varable into awk explicitly (unfortunately)
 	echo "Filtering assemblies based on:"
         echo "MIN_LEN=$MIN_LEN"
         echo "MAX_LEN=$MAX_LEN"

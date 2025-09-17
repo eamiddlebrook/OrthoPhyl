@@ -8,7 +8,7 @@ export threads=4
 # this is pretty much depricated
 export rerun=false # if rerunning post-Orthofinder with a different $ortho_trial, this will ensure $orthodir is declared correctly
 # gene alignment trimming options
-export trimal_parameter="-resoverlap .5 -seqoverlap 50 -gt .80 -cons 60 -w 3"
+export trimal_parameter="-resoverlap .5 -seqoverlap 50 -gt .50 -cons 60 -w 3"
 # the minimum fraction of taxa per gene alignment to be considered for the "relaxed" SCO category: "SCO_###"
 export min_frac_orthos=0.30
 # data set to use for tree building (CDS,prot,both)
@@ -22,7 +22,8 @@ export ortho_trial=ortho
 export orthofinder_rerun=false
 #ANI specific variables
 export ANI_shortlist=20 # max number of seqs to run through Orthofinder
-
+# genetic code of dataset to use with MACSE
+gen_code=11
 ### Options for CDS tree methods
 # methods to run for generating final species trees 
 export tree_method=("fasttree" "iqtree" "astral")
@@ -51,7 +52,7 @@ export iqtree_PROT_genetree_options="--lmap 2000 --symtest -B 1000 -t PARS --nin
 # do you want to cleanup some intermediate files?
 export cleanup=TRUE
 # dirs and files to remove at the end of the run (if cleanup==TRUE)
-export clean_me=(prodigal_prots.preDedup prodigal_nucls.preDedup phylo_current/AlignmentsTrans phylo_current/AlignmentsTrans.trm phylo_current/SequencesProts phylo_current/SequencesTrans phylo_current/trans_gene_trees)
+export clean_me=(prodigal_prots.preDedup prodigal_nucls.preDedup phylo_current/AlignmentsCDS phylo_current/AlignmentsCDS.trm phylo_current/SequencesProts phylo_current/SequencesCDS phylo_current/trans_gene_trees)
 ###################################
 
 

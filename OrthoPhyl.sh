@@ -1,6 +1,15 @@
 #!/bin/bash
-
-
+# Main pipleine script for OrthoPhyl.
+# See https://github.com/eamiddlebrook/OrthoPhyl/tree/main for details
+echo "
+Running...
+   ____       __  __          ____  __          __
+  / __ \_____/ /_/ /_  ____  / __ \/ /_  __  __/ /
+ / / / / ___/ __/ __ \/ __ \/ /_/ / __ \/ / / / / 
+/ /_/ / /  / /_/ / / / /_/ / ____/ / / / /_/ / /  
+\____/_/   \__/_/ /_/\____/_/   /_/ /_/\__, /_/   
+                                      /____/      
+"
 
 ######################
 # set up environment #
@@ -50,7 +59,7 @@ if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]]
 then
     source $HOME/.bash_profile
     source $HOME/.bashrc
-    source $script_home/control_file.paths || { echo "cannot open control_file.paths. This file is required for telling OrthoPhyl where to look for manually installed programs"; exit 1 ;}
+    source $script_home/control_file.paths || { printf '%s\n' "cannot open control_file.paths. This file is required for telling OrthoPhyl where to look for manually installed programs" | fold -s ; exit 1 ;}
 fi
 
 
@@ -60,7 +69,7 @@ declare -p > "$tmpfile"
 
 
 # import pipeline defaults (will be overridden by command line args or -c control_file)
-source $script_home/control_file.defaults || { echo "cannot open control_file.refaults. This file is required for telling OrthoPhyl what parameters to use if not provided on the CMD line"; exit 1 ;}
+source $script_home/control_file.defaults || { printf '%s\n' "cannot open control_file.refaults. This file is required for telling OrthoPhyl what parameters to use if not provided on the CMD line" | fold -s ; exit 1 ;}
 
 
 
@@ -199,16 +208,49 @@ MAIN_PIPE () {
 		prots4ortho=${prots}.shortlist
 		ORTHO_RUN $prots4ortho
 		# find genes from full set for each OG (make HMM profile and search against all prots)
-		ANI_ORTHOFINDER_TO_ALL_SEQS
+		ANI_ORTHOFINDER_TO_ALL_SEQS \
+			$orthodir/Orthogroups/Orthogroups.GeneCount.tsv \
+			$orthodir/MultipleSequenceAlignments \
+			$wd/all_prots.nm.fa \
+			$store/OG_alignmentsToHMM
+		GET_OG_NAMES $wd/OG_names $store/OG_alignmentsToHMM/hmm_round2/AlignmentsProts/
+		test_macse () {
+			ALIGN_PROT_n_CDS \
+				$wd \
+				$wd/OG_names \
+				$wd/all_trans.nm.fa \
+				$wd/SequencesCDS \
+				$gen_code \
+				$wd/AlignmentsCDS \
+				$wd/AlignmentsProts \
+				$threads \
+				$wd/logs
+		}
+		test_macse
 	else
+		# this is broken now....need to update for MACSE
 		prots4ortho=${prots}.fixed
 		ORTHO_RUN ${prots4ortho}
 		REALIGN_ORTHOGROUP_PROTS
+		GET_OG_NAMES $wd/OG_names $orthodir/MultipleSequenceAlignments
+		test_macse () {
+			ALIGN_PROT_n_CDS \
+				$wd \
+				$wd/OG_names \
+				$wd/all_trans.nm.fa \
+				$wd/SequencesCDS \
+				$gen_code \
+				$wd/AlignmentsCDS \
+				$wd/AlignmentsProts \
+				$wd/threads \
+				$wd/logs
+		}
 	fi
 
 	# trim protein sequences
-	TRIM $wd/AlignmentsProts "PROT" && touch $wd/AlignmentsProts.trm.complete
-
+	TRIM $wd/AlignmentsProts "PROT" $wd/AlignmentsProts.trm.complete && touch $wd/AlignmentsProts.trm.complete
+	GET_TRIMMED_COLS $wd/trimmed_columns 
+	TRIM_selectcols $wd/AlignmentsCDS "CDS" $wd/trimmed_columns $wd/AlignmentsCDS.trm.complete && touch $wd/AlignmentsCDS.trm.complete
 	# identify single copy orthologs in protein alignments
 	#  create files with OG names 
 	if [[ "$relaxed" != false ]]
@@ -258,21 +300,27 @@ MAIN_PIPE () {
 	then
 		# make Codon alignments for all OGs (could just do SCO_relaxed and that would grab all SCO_strict)
 		#  Its pretty fast, who cares, and might want to make SCO_very_relaxed trees
-		TRIMAL_backtrans $wd $wd/AlignmentsProts $wd/all_trans.nm.fa $wd/AlignmentsTrans.trm $wd/OG_names $wd/SequencesCDS
+		#TRIMAL_backtrans \
+		#	$wd \
+		#	$wd/AlignmentsProts \
+		#	$wd/all_trans.nm.fa \
+		#	$wd/AlignmentsCDS \
+		#	$wd/OG_names \
+		#	$wd/SequencesCDS
 		
 		# concatenate SCO alignments (only do SCO_$min_num_orthos if relaxed != false)
 		if [[ "$relaxed" != false ]]
 		then
 			cat_alignments \
 				$wd/SCO_$min_num_orthos \
-				$wd/AlignmentsTrans.trm.nm \
+				$wd/AlignmentsCDS.trm.nm \
 				$wd/AlignmentsConcatenated \
 				CDS
 			ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.CDS.align
 		fi
 		cat_alignments \
 			$wd/SCO_strict \
-			$wd/AlignmentsTrans.trm.nm \
+			$wd/AlignmentsCDS.trm.nm \
 			$wd/AlignmentsConcatenated \
 			CDS
 		ALIGNMENT_STATS $wd/SCO_strict.CDS.align
@@ -282,7 +330,7 @@ MAIN_PIPE () {
 		then
 			for I in $wd/AlignmentsConcatenated/*.CDS.*.phy
 			do
-				#ALIGNMENT_STATS $wd/AlignmentsTrans.trm.nm/
+				#ALIGNMENT_STATS $wd/AlignmentsCDS.trm.nm/
 				TREE_BUILD $wd/SpeciesTree/ $I $threads "CDS"
 			done
 
@@ -304,9 +352,9 @@ MAIN_PIPE () {
 		then
 			tree_data=CDS
 			# build gene trees for all CDS alignments
-			allGENE_TREEs $tree_data $wd/AlignmentsTrans.trm.nm $wd/${tree_data}_gene_trees
+			allGENE_TREEs $tree_data $wd/AlignmentsCDS.trm.nm $wd/${tree_data}_gene_trees
 
-			# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
+			# astral_allCDSGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
 			
 			# build ASTRAL tree from SCO_relaxed gene trees
 			if [[ "$relaxed" != false ]]
@@ -323,7 +371,7 @@ MAIN_PIPE () {
 			# build gene trees for all CDS alignments
 			allGENE_TREEs $tree_data $wd/AlignmentsProts.trm.nm $wd/${tree_data}_gene_trees 
 
-			# astral_allTransGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
+			# astral_allCDSGENE2SPECIES_TREE #Still not written (needs a different ASTRAL )
 			
 			# build ASTRAL tree from SCO_relaxed gene trees
 			if [[ "$relaxed" != false ]]
@@ -359,7 +407,7 @@ echo "
 ######################################################
 Weelll it finished.  Check $wd/FINAL_SPECIES_TREES/ for output
 ######################################################
-Also check Alignment figures in the AlignmentsTrans.trm.nm.vis directory
+Also check Alignment figures in the AlignmentsCDS.trm.nm.vis directory
 Good luck! 
 If you have an issues, please go to https://github.com/eamiddlebrook/OrthoPhyl and open an issue.
 
