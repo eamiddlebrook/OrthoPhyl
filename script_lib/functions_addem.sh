@@ -284,7 +284,7 @@ ADD_2_IQTREE () {
         -g $old_tree \
         -p $old_scheme \
         --prefix $new_prefix \
-        -T $threads
+        -T AUTO --threads-max $threads
 }
 ADD_2_fasttree () {
     echo "(mock) RUNNING ADD_2_FASTTREE!!!"
@@ -344,7 +344,7 @@ RUN_ML_SUPERMATRIX_WORKFLOW () {
             $new_alignments \
             $AlignmentsConcatenated \
             $data
-        #ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.align
+        #ALIGNMENT_STATS $wd/SCO_${min_frac_orthos}.align
         done
     done
 
@@ -402,7 +402,7 @@ ASTRAL_WORKFLOW () {
         # build ASTRAL tree from SCO_relaxed gene trees
         if [[ "$relaxed" != false ]]
             then
-            astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_num_orthos
+            astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_frac_orthos
         fi
 
         # Build ASTRAL tree from SCO_strict
@@ -419,7 +419,7 @@ ASTRAL_WORKFLOW () {
         # build ASTRAL tree from SCO_relaxed gene trees
         if [[ "$relaxed" != false ]]
         then
-            astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_num_orthos
+            astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_frac_orthos
         fi
 
         # Build ASTRAL tree from SCO_strict

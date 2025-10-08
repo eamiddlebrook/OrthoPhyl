@@ -21,7 +21,13 @@ or
 -s|--storage_dir  path to the main directory for output
 Optional:
 -t|--threads  threads to use [4]
--p|--phylo_tool  phylogenetic tree software to use astral, fasttree, raxml, and/or iqtree [\"fasttree iqtree astral\"]
+-R|--rigor	Set the overall analysis rigor. This overrides most conflicting parameters set with other arguments except "-o\|--omics" and "-m\|--min_frac_orthos" for a fast run. (fast, medium, full) 
+	full: Run Iqtree2 on CDS and PROT concatenated alignments with partion merging and GTR + freerate family model testing for CDS and standard PROT models. 
+		Additionally, run ASTRAL gene to species tree consensus on CDS and PROT sequences
+		Analyses will be performed on strict and relaxed single copy orthologs (found in >=30% taxa)
+	medium: Run Iqtree2 with GTR and FreeRate models for CDS and standard models for Prots
+	fast: Run FastTree on concatenated PROT alignments using only strict single copy orthologs 
+-p|--phylo_tool  phylogenetic tree software to use astral, fasttree, and/or iqtree [\"fasttree iqtree astral\"]
 	i.e. -p \"fasttree iqtree astral\"
 -o|--omics  "omics" data to use for tree building ([CDS], PROT, BOTH)
 	for divergent sequences, it is good to compare protein trees to 
@@ -32,7 +38,7 @@ Optional:
 -r|--rerun  flag to rerun orthofinder on the ANI_shorlist (true/[false])
 -n|--num_OF_annots  Max number of proteomes to run through OrthoFinder.
 	If more than this many assemblies are provided, a subset of proteomes (based on genomes/transcripts ANI) will be chosen for OrthoFinder to chew on [20]
--m|--min_num_orthos  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
+-m|--min_frac_orthos  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
         Expects a float from 0-1
         A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
         [0.30]
@@ -210,7 +216,7 @@ ARG_PARSE () {
 				ARGS_SET+=a
 				shift
 				shift ;;
-			-m|--min_num_orthos) if [[ ! -n ${2} ]] ; then
+			-m|--min_frac_orthos) if [[ ! -n ${2} ]] ; then
 					echo "Minimum seq per Orthogroup argument (-m) was malformed."
 					USAGE
 					exit 1
@@ -225,7 +231,7 @@ ARG_PARSE () {
 				then
 					relaxed=false
 				else
-					min_num_orthos=${2}
+					min_frac_orthos=${2}
 					ARGS_SET+=m
 				fi
 				shift
@@ -270,8 +276,13 @@ ARG_PARSE () {
 					USAGE
 					exit 1
 				fi
-				orthofinder_rerun=${2}
-				ARGS_SET+=r
+				if [[ ${2} == "true" || ${2} == "false" ]] ; then
+					orthofinder_rerun=${2}
+					ARGS_SET+=r
+				else
+					echo "-r\|--rerun was set to "${2}" only true|false are allowed"
+					exit 1 
+				fi
 				shift
 				shift ;;
             -R|--rigor)	if [[ ! -n ${2} ]] ; then

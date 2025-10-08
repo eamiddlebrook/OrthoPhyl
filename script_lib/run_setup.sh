@@ -130,10 +130,10 @@ SET_RIGOR () {
         fi
         if [[ "$ARGS_SET" == *m* ]]
         then 
-            echo "  Using OGs found in at least"$min_num_orthos" fracton on samples" 
+            echo "  Using OGs found in at least"$min_frac_orthos" fracton of samples" 
         else
-            min_num_orthos=1
-            echo "  Only using OGs found in "$min_num_orthos" all samples" 
+            min_frac_orthos=1
+            echo "  Only using OGs found in all samples (strict single copy orthologs)" 
         fi
 
     elif [[ $rigor = "medium" ]]
@@ -141,7 +141,7 @@ SET_RIGOR () {
         echo "Building trees with iqtree and ASTRAL"
         echo "  Good for: "
         echo "  iqtree will test GTR and FreeRate models for CDS and standard models for Prots"
-        echo "     but will not merge patitions (genes)"
+        echo "     but will not merge paritions (genes)"
         export tree_method=("iqtree" "astral")
         export IQtree_CDS_partition_options="-m MFP" # test GTR and FreeRate models
         export IQtree_PROT_partition_options="" # tests standard PROT models

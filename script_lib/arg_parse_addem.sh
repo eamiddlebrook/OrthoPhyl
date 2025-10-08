@@ -21,7 +21,7 @@ Optional:
 	for divergent sequences, it is good to compare protein trees to 
 	nucleotide trees to identify artifacts of saturation (long branch attraction)
 -x|-trimal_param  trimal paramerter string (in double \"quotes\")
--m|--min_num_orthos  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
+-m|--min_frac_orthos  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
         Expects a float from 0-1
         A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
         [0.30]
@@ -168,7 +168,7 @@ ARG_PARSE_addem () {
 				ARGS_SET+=a
 				shift
 				shift ;;
-			-m|--min_num_orthos) if [[ ! -n ${2} ]] ; then
+			-m|--min_frac_orthos) if [[ ! -n ${2} ]] ; then
 					USAGE
 					exit 1
 				fi
@@ -182,7 +182,7 @@ ARG_PARSE_addem () {
 				then
 					relaxed=false
 				else
-					min_num_orthos=${2}
+					min_frac_orthos=${2}
 					ARGS_SET+=m
 				fi
 				shift

@@ -24,8 +24,8 @@ SET_UP_DIR_STRUCTURE () {
 	if [ -f $store/setup.complete ]
 	then
 		echo "Output folder setup seems to be already completed"
-		echo "   Resetting min_num_orthos in case OrthoPhyl crashed between Setup and SCO_min_num_orthos"
-		export min_num_orthos=$(printf %.0f $(echo "$(cat $store/all_input_list | wc -l)*$min_frac_orthos" | bc))
+		echo "   Resetting min_frac_orthos in case OrthoPhyl crashed between Setup and SCO_min_frac_orthos"
+		export min_frac_orthos=$(printf %.0f $(echo "$(cat $store/all_input_list | wc -l)*$min_frac_orthos" | bc))
 		echo " If this is not correct please rm $store/setup.complete and restart OrthoPhyl"
 	else
 		# set up annotation output directories
@@ -60,8 +60,8 @@ SET_UP_DIR_STRUCTURE () {
 
 		# calculate and report how many input assemblies there are
 		echo "Building phylogeny for $(cat $store/all_input_list | wc -l) assemblies" | tee -a $run_notes
-		export min_num_orthos=$(printf %.0f $(echo "$(cat $store/all_input_list | wc -l)*$min_frac_orthos" | bc))
-		echo "All Single copy orthologs and SCOs represented in $min_num_orthos will be used to create species trees with ${tree_method[@]}" | tee -a $run_notes
+		export min_frac_orthos=$(printf %.0f $(echo "$(cat $store/all_input_list | wc -l)*$min_frac_orthos" | bc))
+		echo "All Single copy orthologs and SCOs represented in $min_frac_orthos will be used to create species trees with ${tree_method[@]}" | tee -a $run_notes
 		###########################################
 		# just setting up the directory structure #
 		###########################################
@@ -86,6 +86,12 @@ SET_UP_DIR_STRUCTURE () {
 
 # functionalized for use in addasm
 CLEAN_N_COPY_GENOMES () {
+	echo '
+	#######################################################
+	############# Clean up and Copy Assemblies ############
+	################ To Working Directory  ################
+	#######################################################
+	'
 	genome_dir=$1
 	input_genomes=$2
 	#######################################################################
@@ -795,6 +801,9 @@ GET_OG_NAMES () {
 	echo "Get_OG_Names 100% done!!!" 
 }
 
+
+
+
 filterbyname_subfunc () {
 	echo '
 	#########################
@@ -1033,20 +1042,20 @@ TRIM_selectcols () {
 			TRIM_subfunc () {
 				trimal \
 					-in $I -fasta \
-					-out $alignment_dir.trm/${base}.trm.fa \
+					-out $alignment_dir.trm/${base}.codon_aln.trm.fa \
 					$trimal_parameter \
 					> $wd/logs/trimal_log
 				
 				
 			#remove all gene info from header for concat
-			if	[[ $alignment_type == "CDS" ]] 
-			then
+			#if	[[ $alignment_type == "CDS" ]] 
+			#then
 				#this is really janky: relies on adding the @ during renaming...
 				# Removes everything after the @ to leave just the sample name
 				#	Moved to its own func
-				cat $alignment_dir.trm/${base}.trm.fa \
-				| sed 's/@.*$//g' > $alignment_dir.trm.nm/${base}.trm.nm.fa
-			fi
+			#	cat $alignment_dir.trm/${base}.trm.fa \
+			#	| sed 's/@.*$//g' > $alignment_dir.trm.nm/${base}.trm.nm.fa
+			#fi
 			}
 			TRIM_subfunc &
 			J=$((J+1))
@@ -1115,22 +1124,22 @@ SCO_MIN_ALIGN () {
 	"
 	date
 	func_timing_start
-	# takes folder of fasta alignments and will pull alingment names with >= $min_num_orthos constituents
+	# takes folder of fasta alignments and will pull alingment names with >= $min_frac_orthos constituents
 	local alignment_dir=${1}
-	local min_num_orthos=${2}
+	local min_frac_orthos=${2}
 	local OG_sco_filter=$OG_sco_filter
 
-	if [[ $min_num_orthos == $(cat $store/all_input_list | wc -l) ]]
+	if [[ $min_frac_orthos == $(cat $store/all_input_list | wc -l) ]]
 	then
 		outstring="strict"
 	else
-		outstring=$min_num_orthos
+		outstring=$min_frac_orthos
 	fi
 
 	if [ "$ANI" = true ]
 	then
-		echo "Finding all ANI OGs with $min_num_orthos representetives in $alignment_dir"
-		# make list of SCO $min_num_orthos directly from fasta
+		echo "Finding all ANI OGs with $min_frac_orthos representetives in $alignment_dir"
+		# make list of SCO $min_frac_orthos directly from fasta
 		cd $wd || exit
 		# Iterate over alignments and pull out the number of samples per multifasta
 		# this has the assumption that there is only one sequence per genome
@@ -1139,10 +1148,10 @@ SCO_MIN_ALIGN () {
 		for I in $alignment_dir/OG0*
 		do
 			# test transcript alignment for number of homologs (should have no paralogs)
-			# if greater than min_num_orthos (samples*min_frac_ortho) 
-			# add to SCO_$min_num_orthos list
+			# if greater than min_frac_orthos (samples*min_frac_ortho) 
+			# add to SCO_$min_frac_orthos list
 			final_seqs=$(cat $I | grep -e ">" | wc -l)
-			if [ $final_seqs -ge $min_num_orthos ]
+			if [ $final_seqs -ge $min_frac_orthos ]
 			then
 				# this basename call  is too specific and easy to break...should clean up
 				base=$(basename ${I%.*.*})
@@ -1153,11 +1162,11 @@ SCO_MIN_ALIGN () {
 		# going to ignore this for now...
 		cd $orthodir/ || exit
 		gene_counts="$orthodir/Orthogroups/Orthogroups.GeneCount.tsv"
-		echo "Finding all OGs directly from OrthoFinder with $min_num_orthos representetives"
+		echo "Finding all OGs directly from OrthoFinder with $min_frac_orthos representetives"
 		# finds OGs with at least $min_orthologs SCOs
-		# and writes to $orthodir/SCO_$min_num_orthos
-		python $OG_sco_filter $gene_counts $min_num_orthos
-		mv SCO_$min_num_orthos $wd/SCO_$outstring
+		# and writes to $orthodir/SCO_$min_frac_orthos
+		python $OG_sco_filter $gene_counts $min_frac_orthos
+		mv SCO_$min_frac_orthos $wd/SCO_$outstring
 	fi
 }
 
@@ -1232,18 +1241,8 @@ TRIMAL_backtrans () {
 				-ignorestopcodon \
 				-backtrans $SequencesCDS/${base}.CDS.fa \
 				-out $CDS_codon_alignment/${base}.codon_aln.fa \
-				>> $wd/logs/trimal_log 2>&1
+				>> $wd/logs/TRIMAL_backtrans 2>&1
 
-			# trimming
-			trimal -in $CDS_codon_alignment/${base}.codon_aln.fa \
-				$trimal_parameter \
-				-out $CDS_codon_alignment.trm/${base}.codon_aln.fa \
-				-colnumbering \
-				> $wd/trimmed_columns/${base}.cols \
-				2>> $wd/logs/trimal_log
-			# fix names to only have assembly name
-			cat $CDS_codon_alignment.trm/${base}.codon_aln.fa \
-	           	| sed 's/@.*$//g' > $CDS_codon_alignment.trm.nm/${base}.codon_aln.nm.fa 
 		}
 		TRIMAL_backtrans_subfunc &
         J=$((J+1))
@@ -1269,6 +1268,25 @@ prot_rename () {
 	    	| sed 's/@.*$//g' > $local_wd.nm/${base}.trm.nm.fa
 	done
 }
+
+CDS_rename () {
+	echo "
+	#########################################
+	######## Removing gene specific #########
+	#### info from CodonAlignment fastas ####
+	#########################################
+	"
+	local_wd=$1
+	mkdir $local_wd.nm
+	for I in $local_wd/OG*
+	do
+		local file=$(basename $I)
+		local base=${file%.*}
+		cat $I \
+	       	| sed 's/@.*$//g' > $local_wd.nm/${base}.nm.fa 
+	done
+}
+
 cat_alignments () {
 	echo '
 		##############################################
@@ -1334,7 +1352,7 @@ TREE_BUILD () {
 	echo '
 	##########################################
 	###### Build trees and bootstrap #########
-	####### from SCO_$min_num_orthos #########
+	####### from SCO_$min_frac_orthos #########
 	########### or SCO_stricts ###############
 	##########################################
 	'
@@ -1435,6 +1453,7 @@ TREE_BUILD () {
 		echo "###################################"
 		echo "Building species tree with FastTree"
 		echo "###################################"
+		func_timing_start
 		FASTTREE_run
 	fi
 	if [[ " ${tree_method[*]} " =~ " iqtree " ]]
@@ -1442,6 +1461,7 @@ TREE_BUILD () {
 		echo "#################################"
 		echo "Building species tree with IQtree"
 		echo "#################################"
+		func_timing_start
 		IQTREE_run
 	fi
 	
@@ -1527,6 +1547,8 @@ allGENE_TREEs () {
 		TRANS_TREE_subfunc () {
 			local file=${i##*/}
 			local base=${file%%.*}
+			# filter out sequences if they have lt 4 sequences. Not informative. 
+			#  Still throws an error if there are 3 seqs that are identical
 			if [[ $(cat $gene_alignment_dir/${base}.*.fa | grep ">" | wc -l) -lt 4 ]]
 			then 
 				echo -e "$gene_alignment_dir/${base}.*.fa has less than 4 samples in it...Skipping" >> $logs

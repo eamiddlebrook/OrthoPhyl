@@ -81,7 +81,6 @@ source $script_home/control_file.defaults || { printf '%s\n' "cannot open contro
 ARG_PARSE "$@"
 test_args
 
-#
 
 ############################################################
 # print all variables set up to this point                #
@@ -226,7 +225,7 @@ MAIN_PIPE () {
 				$threads \
 				$wd/logs
 		}
-		test_macse
+		#test_macse
 	else
 		# this is broken now....need to update for MACSE
 		prots4ortho=${prots}.fixed
@@ -247,76 +246,41 @@ MAIN_PIPE () {
 		}
 	fi
 
-	# trim protein sequences
+	# trim protein sequences and also make a file for 
 	TRIM $wd/AlignmentsProts "PROT" $wd/AlignmentsProts.trm.complete && touch $wd/AlignmentsProts.trm.complete
+	# translate trimmed cols to ones to keep for PROT and CDS 
+	#   could rewrite to only do the prot part here incase not doing CDS stuff
 	GET_TRIMMED_COLS $wd/trimmed_columns 
-	TRIM_selectcols $wd/AlignmentsCDS "CDS" $wd/trimmed_columns $wd/AlignmentsCDS.trm.complete && touch $wd/AlignmentsCDS.trm.complete
+
 	# identify single copy orthologs in protein alignments
 	#  create files with OG names 
 	if [[ "$relaxed" != false ]]
 	then
-			SCO_MIN_ALIGN $wd/AlignmentsProts.trm $min_num_orthos
-			#ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.align
+			SCO_MIN_ALIGN $wd/AlignmentsProts.trm $min_frac_orthos
+			#ALIGNMENT_STATS $wd/SCO_${min_frac_orthos}.align
 	fi
 	SCO_MIN_ALIGN $wd/AlignmentsProts.trm $(cat $store/all_input_list | wc -l)
 
-	# Run Prot workflow
-	if [[ "$TREE_DATA" = "PROT" || "$TREE_DATA" = "BOTH" ]]
-	then
-		echo "
-		##########################################
-		### Running Protein specific  workflow ###
-		##########################################
-		"
-		prot_rename $wd/AlignmentsProts.trm
-		if [[ "$relaxed" != false ]]
-		then
-			echo "$wd/SCO_$min_num_orthos"
-			cat_alignments \
-				$wd/SCO_$min_num_orthos \
-				$wd/AlignmentsProts.trm.nm \
-				$wd/AlignmentsConcatenated \
-				PROT
-			ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.PROT.align
-		fi
-		ALIGNMENT_STATS $wd/AlignmentsProts.trm.nm
-		cat_alignments \
-			$wd/SCO_strict \
-			$wd/AlignmentsProts.trm.nm \
-			$wd/AlignmentsConcatenated \
-			PROT
-		ALIGNMENT_STATS $wd/SCO_strict.PROT.align
-		for I in $wd/AlignmentsConcatenated/*.PROT.*.phy
-		do
-			TREE_BUILD $wd/SpeciesTree/ $I $threads "PROT"
-		done
-		# for later...
-		#build_gene_trees
-		#build_ASTRAL_trees
-	fi
-
-	# Run CDS workflow
+	################################################
+	# Run CDS workflow ####################
+	##############################
 	if [[ "$TREE_DATA" = "CDS" || "$TREE_DATA" = "BOTH" ]]
 	then
-		# make Codon alignments for all OGs (could just do SCO_relaxed and that would grab all SCO_strict)
-		#  Its pretty fast, who cares, and might want to make SCO_very_relaxed trees
-		#TRIMAL_backtrans \
-		#	$wd \
-		#	$wd/AlignmentsProts \
-		#	$wd/all_trans.nm.fa \
-		#	$wd/AlignmentsCDS \
-		#	$wd/OG_names \
-		#	$wd/SequencesCDS
 		
-		# concatenate SCO alignments (only do SCO_$min_num_orthos if relaxed != false)
+		# backtranslate to CDS alignments then trim based on trimmed columns
+		TRIMAL_backtrans $wd $wd/AlignmentsProts $wd/all_trans.nm.fa $wd/AlignmentsCDS $wd/OG_names $wd/SequencesCDS
+		TRIM_selectcols $wd/AlignmentsCDS "CDS" $wd/trimmed_columns $wd/AlignmentsCDS.trm.complete && touch $wd/AlignmentsCDS.trm.complete
+		# fix names to only have assembly name
+		CDS_rename $wd/AlignmentsCDS.trm
+		# concatenate SCO alignments (only do SCO_$min_frac_orthos if relaxed != false)
 		if [[ "$relaxed" != false ]]
 		then
 			cat_alignments \
-				$wd/SCO_$min_num_orthos \
+				$wd/SCO_$min_frac_orthos \
 				$wd/AlignmentsCDS.trm.nm \
 				$wd/AlignmentsConcatenated \
 				CDS
-			ALIGNMENT_STATS $wd/SCO_${min_num_orthos}.CDS.align
+			ALIGNMENT_STATS $wd/SCO_${min_frac_orthos}.CDS.align
 		fi
 		cat_alignments \
 			$wd/SCO_strict \
@@ -344,7 +308,44 @@ MAIN_PIPE () {
 			fi
 		fi
 	fi	
-	
+
+
+	#######################################################
+	# Run Prot workflow ################
+	######################
+	if [[ "$TREE_DATA" = "PROT" || "$TREE_DATA" = "BOTH" ]]
+	then
+		echo "
+		##########################################
+		### Running Protein specific  workflow ###
+		##########################################
+		"
+		prot_rename $wd/AlignmentsProts.trm
+		if [[ "$relaxed" != false ]]
+		then
+			echo "$wd/SCO_$min_frac_orthos"
+			cat_alignments \
+				$wd/SCO_$min_frac_orthos \
+				$wd/AlignmentsProts.trm.nm \
+				$wd/AlignmentsConcatenated \
+				PROT
+			ALIGNMENT_STATS $wd/SCO_${min_frac_orthos}.PROT.align
+		fi
+		ALIGNMENT_STATS $wd/AlignmentsProts.trm.nm
+		cat_alignments \
+			$wd/SCO_strict \
+			$wd/AlignmentsProts.trm.nm \
+			$wd/AlignmentsConcatenated \
+			PROT
+		ALIGNMENT_STATS $wd/SCO_strict.PROT.align
+		for I in $wd/AlignmentsConcatenated/*.PROT.*.phy
+		do
+			TREE_BUILD $wd/SpeciesTree/ $I $threads "PROT"
+		done
+	fi
+
+
+
 	# runs Astral workflow on CDS, PROT, or BOTH
 	if [[ " ${tree_method[*]} " =~ " astral " ]]
 	then
@@ -359,7 +360,7 @@ MAIN_PIPE () {
 			# build ASTRAL tree from SCO_relaxed gene trees
 			if [[ "$relaxed" != false ]]
 			then
-				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_num_orthos
+				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_frac_orthos
 			fi
 
 			# Build ASTRAL tree from SCO_strict
@@ -376,7 +377,7 @@ MAIN_PIPE () {
 			# build ASTRAL tree from SCO_relaxed gene trees
 			if [[ "$relaxed" != false ]]
 			then
-				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_num_orthos
+				astral_GENE2SPECIES_TREE $tree_data $wd/${tree_data}_gene_trees $wd/SCO_$min_frac_orthos
 			fi
 
 			# Build ASTRAL tree from SCO_strict

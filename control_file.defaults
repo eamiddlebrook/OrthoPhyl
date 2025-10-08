@@ -14,7 +14,7 @@ export min_frac_orthos=0.30
 # data set to use for tree building (CDS,prot,both)
 export TREE_DATA=CDS
 #species tree options
-export use_partitions=true # allow users to turn off (with "false") the use of partitions for RAxML and IQTree (speeds stuff up a lot)
+export use_partitions=false # allow users to turn off (with "false") the use of partitions for RAxML and IQTree (speeds stuff up a lot)
 # structural gene annotation options
 export prodigal_options="-m -q"
 # prefix for OrthoFinder output (legacy)

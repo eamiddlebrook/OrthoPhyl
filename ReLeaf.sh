@@ -139,10 +139,10 @@ logs=$addasm_dir/logs
 if [[ relaxed=="False" ]]
 then
 	relaxed="False"
-elif [[ relaxed=="True" && -f $wd/OG_SCO_$min_num_orthos ]]
+elif [[ relaxed=="True" && -f $wd/OG_SCO_$min_frac_orthos ]]
 then
 	relaxed=="True"
-elif [ -f $wd/OG_SCO_$min_num_orthos ]
+elif [ -f $wd/OG_SCO_$min_frac_orthos ]
 then
 	relaxed="True"
 fi
@@ -194,6 +194,7 @@ MAIN_PIPE () {
 		#	true		
 		TRIM_selectcols $new_CDS_alignments "CDS" $OLD_trim_cols $wd/TRIM_selectcols_CDS.complete \
 			&& touch $wd/TRIM_selectcols_CDS.complete
+		CDS_rename $new_CDS_alignments.trm
 
 	fi
 
