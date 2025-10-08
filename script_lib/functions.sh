@@ -472,6 +472,70 @@ ANI_species_shortlist () {
 	done
 }
 
+MASH_species_shortlist () {
+	echo '
+	#############################################
+	######## Use MASH To Create Genome ##########
+	######## Shortlist for OrthoFinder ##########
+	#############################################
+	'
+	date
+	func_timing_start
+
+	# set variables
+	#   the mygenome_list stuff is to deal with passing array variable to function
+	local genome_dir=$1
+	local number_shortlist=$2
+	local MASH_complete=MASH_complete
+	local mygenome_list=($(ls $genome_dir))
+	
+	echo "MASH clustering is being done on sequences in ${genome_dir}"
+	echo "Representative genomes from ${number_shortlist} clusters will be used to generate HMM profiles for each orthogroup"
+	
+	cd $store || exit 1
+	MASH_working_dir=$store/MASH_working_dir
+	prots_shortlist=$store/$prots.shortlist/
+	
+	mkdir $MASH_working_dir
+	cd $MASH_working_dir
+
+	MASH_out=MASH_out
+	mkdir $prots_shortlist
+
+	# use MASH directly for an all-vs-all assembly comparison
+	if [ -f genome_names ]
+	then
+		rm genome_names
+	fi
+       	for genome1 in ${mygenome_list[@]}
+        do
+          	echo "$genome1" >> genome_names
+        done
+	cd $genome_dir || exit
+	if [ -f $MASH_working_dir/$MASH_complete ]
+	then
+		echo "MASH already run"
+		echo "Skipping ahead"
+	else
+		echo "NOTE: All MASH output sent to file (too verbose)." 
+		echo "If you think an error occured with MASH, please check MASH_working_dir/MASH.stdout"
+		mash triangle \
+			-p $threads \
+			$genome_dir/*.fa \
+			> $MASH_working_dir/MASH.stdout \
+			&2 > $MASH_working_dir/$MASH_out\
+			&& touch $MASH_working_dir/$MASH_complete \
+			|| exit
+	fi
+       	cd $MASH_working_dir || exit
+	# makes a rough NJ tree to find the X most distantly related representetives
+	# writes to Species_shortlist
+	python $ANI_genome_picking $MASH_out genome_names $number_shortlist > MASH_picking.stdout
+	for I in $(cat Species_shortlist)
+	do
+		cp $prots/${I%.*}.faa $prots_shortlist/
+	done
+}
 
 ORTHO_RUN () {
 	echo '
