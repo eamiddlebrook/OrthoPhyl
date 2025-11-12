@@ -230,6 +230,7 @@ ARG_PARSE () {
 				if (( $(echo ${2} | awk '{if ($1 == 1 || $1 == 0 ) print 1;}') ))
 				then
 					relaxed=false
+					unset $min_frac_orthos
 				else
 					min_frac_orthos=${2}
 					ARGS_SET+=m

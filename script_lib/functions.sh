@@ -486,7 +486,11 @@ MASH_species_shortlist () {
 	#   the mygenome_list stuff is to deal with passing array variable to function
 	local genome_dir=$1
 	local number_shortlist=$2
-	local MASH_complete=MASH_complete
+	local threads=$3
+	local prots=$4
+	local ANI_genome_picking=$5
+
+	local MASH_complete="MASH_complete"
 	local mygenome_list=($(ls $genome_dir))
 	
 	echo "MASH clustering is being done on sequences in ${genome_dir}"
@@ -494,12 +498,12 @@ MASH_species_shortlist () {
 	
 	cd $store || exit 1
 	MASH_working_dir=$store/MASH_working_dir
-	prots_shortlist=$store/$prots.shortlist/
+	prots_shortlist=${prots}.shortlist/
 	
 	mkdir $MASH_working_dir
 	cd $MASH_working_dir
 
-	MASH_out=MASH_out
+	MASH_out=$MASH_working_dir/MASH_out
 	mkdir $prots_shortlist
 
 	# use MASH directly for an all-vs-all assembly comparison
@@ -520,17 +524,17 @@ MASH_species_shortlist () {
 		echo "NOTE: All MASH output sent to file (too verbose)." 
 		echo "If you think an error occured with MASH, please check MASH_working_dir/MASH.stdout"
 		mash triangle \
-			-p $threads \
-			$genome_dir/*.fa \
-			> $MASH_working_dir/MASH.stdout \
-			&2 > $MASH_working_dir/$MASH_out\
-			&& touch $MASH_working_dir/$MASH_complete \
+			-k 17 -s 5000 \
+			-E -p $threads \
+			*.f*a \
+			> $MASH_out	&& touch $MASH_working_dir/$MASH_complete \
 			|| exit
 	fi
        	cd $MASH_working_dir || exit
 	# makes a rough NJ tree to find the X most distantly related representetives
 	# writes to Species_shortlist
-	python $ANI_genome_picking $MASH_out genome_names $number_shortlist > MASH_picking.stdout
+	cat $MASH_out | awk '{$3=100*(1-$3) ; print $0 }' | sed 's/ /\t/g' > $MASH_out.similarity
+	python $ANI_genome_picking $MASH_out.similarity genome_names $number_shortlist > MASH_picking.stdout
 	for I in $(cat Species_shortlist)
 	do
 		cp $prots/${I%.*}.faa $prots_shortlist/

@@ -60,7 +60,8 @@ for line in f:
     l3 = l2.replace("\t\t", "\t")
     l4 = l3.split("\t")
     #store the names of selected genomes in a dict with their avg ANI to other genomes
-    full_dict[l4[0]][l4[1]] = float(l4[2])
+    if l4[0] != l4[1]:
+        full_dict[l4[0]][l4[1]] = float(l4[2])
 f.close()
 
 
@@ -79,8 +80,8 @@ print ("Of " + str(total_comparison) + " total comparisons")
 print ("##################################################")
 
 #rm self entries
-for key in full_dict:
-    del full_dict[key][key]
+#for key in full_dict:
+#    del full_dict[key][key]
 
 full_dict_copy = copy.deepcopy(full_dict)
 
@@ -119,7 +120,7 @@ def cluster(in_dict,first_iteration):
         #del full_dict[max_ANI_pair][I]
     for I in max_ANI_pair:
         for key in full_dict:
-            if key != I:
+            if I in full_dict[key]:
                 #print (key)
                 #print ("This is I   " + str(I))
                 del full_dict[key][I]

@@ -25,7 +25,7 @@ echo "Loading required files..."
 export script_home=$(dirname "$(readlink -f "$0")")
 source $HOME/.bash_profile
 source $HOME/.bashrc
-source $script_home/control_file.defaults || { echo "cannot open control_file.defaults. This file is required for telling OrthoPhyl what parameters to use if not provided on the CMD line"; exit 1 ;}
+source $script_home/control_file.ReLeaf.defaults || { echo "cannot open control_file.ReLeaf.defaults. This file is required for telling OrthoPhyl what parameters to use if not provided on the CMD line"; exit 1 ;}
 source $script_home/control_file.paths || { echo "cannot open control_file.paths. This file is required for telling OrthoPhyl where some exteranl programs are."; exit 1 ;}
 
 
@@ -213,7 +213,7 @@ MAIN_PIPE () {
 	
 	
 	# run standard ML workflow on PROT and/or CDS supermatrix
-	if [[ " ${tree_method[*]} " =~ " raxml " || " ${tree_method[*]} " =~ " iqtree " || " ${tree_method[*]} " =~ " fasttree " ]]
+	if [[ " ${tree_method[*]} " =~ " raxml " || " ${tree_method[*]} " =~ " iqtree " || " ${tree_method[*]} " =~ " fastTree " ]]
 	then
 		RUN_ML_SUPERMATRIX_WORKFLOW 
 		# takes global variables...ugh
