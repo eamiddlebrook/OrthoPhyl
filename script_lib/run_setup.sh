@@ -104,6 +104,7 @@ SET_RIGOR () {
         echo "  Strict and relaxed single copy orthologs*"
         echo "  Full partition model merging for IQTree to reducing overfitting (takes for-ever)"
         echo "  *(unless overridden on command line)"
+        export use_partitions=true
         export tree_method=("iqtree" "astral")
         export IQtree_CDS_partition_options="-m MFP+MERGE --rclusterf 10" # cluster partitions with FreeRate models using a fast$
         export IQtree_PROT_partition_options="-m MFP+MERGE --rclusterf 10" # cluster partitions with FreeRate models using a fas$
@@ -132,7 +133,7 @@ SET_RIGOR () {
         then 
             echo "  Using OGs found in at least"$min_frac_orthos" fracton of samples" 
         else
-            min_frac_orthos=1
+            relaxed=false
             echo "  Only using OGs found in all samples (strict single copy orthologs)" 
         fi
 
@@ -142,6 +143,7 @@ SET_RIGOR () {
         echo "  Good for: "
         echo "  iqtree will test GTR and FreeRate models for CDS and standard models for Prots"
         echo "     but will not merge paritions (genes)"
+        export use_partitions=true
         export tree_method=("iqtree" "astral")
         export IQtree_CDS_partition_options="-m MFP" # test GTR and FreeRate models
         export IQtree_PROT_partition_options="" # tests standard PROT models

@@ -41,7 +41,7 @@ GET_OLD_TREE_INFO () {
     if [[ -z ${tree_method+x} ]]
     then
         echo "Setting tree methods based on old trees"
-        tree_method=$OLD_tree_method
+        tree_method=(${OLD_tree_method[@]})
     else
         diff=$(echo ${tree_method[@]} ${OLD_tree_method[@]} | tr ' ' '\n' | sort | uniq -u )
         if [ $(echo ${tree_method[@]} ${diff[@]} | tr ' ' '\n' | sort | uniq -D | uniq | wc -l ) -gt 0 ]
@@ -52,6 +52,20 @@ GET_OLD_TREE_INFO () {
         fi
     fi
     
+    # test is FastTree was used.
+    if [[ " ${tree_method[*]} " =~ " fastTree " ]] || [[ " ${tree_method[*]} " =~ " astral " ]]
+    then
+        echo "#######################################################################################"
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        echo "STILL IN DEVELOPMENT"
+        echo "Adding sequences to FastTree trees from original Orthophyl Run is still in development."
+        echo "   This should be functional now, but some more testing is needed (big trees, low support and such)"
+        echo "Tree(s) built by iqtree will be added to."
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        echo "#######################################################################################"
+        sleep 10
+    fi
+
     ################################
     #### set the SCO set to use ####
     ###### For tree building #######
@@ -76,7 +90,7 @@ GET_OLD_TREE_INFO () {
     if [[ -z ${TREE_DATA+x} ]]
     then
         echo "Setting to use CDS, PROTs, or BOTH based on old trees"
-		TREE_DATA_list=$OLD_TREE_DATA_list
+		TREE_DATA_list=(${OLD_TREE_DATA_list[@]})
     else 
         if [ "$TREE_DATA" = "BOTH" ]
         then
@@ -270,9 +284,9 @@ ADD_2_ALIGNMENTS () {
 ADD_2_IQTREE () {
 
     echo "
-    ################################
-    RUNNING ADD_2_IQTREE 4 realll!!!
-    ################################
+    ###############################
+    ### RUNNING ADD_2_IQTREE!!! ###
+    ###############################
     "
     new_alignment=$1 # new concatenated alignment with same length as one that generated $old_tree
     old_tree=$2 # old tree to contrain the new one
@@ -280,31 +294,61 @@ ADD_2_IQTREE () {
     new_prefix=$4 # new tree location/name
     threads=$5
 
+    if [ -f $old_scheme ]
+    then
+        partition_scheme="-p $old_scheme"
+    fi
+    
     iqtree -s $new_alignment \
         -g $old_tree \
-        -p $old_scheme \
+        $partition_scheme \
         --prefix $new_prefix \
         -T AUTO --threads-max $threads
 }
 ADD_2_fasttree () {
-    echo "(mock) RUNNING ADD_2_FASTTREE!!!"
-    new_alignment=$1 # new concatenated alignment with same length as one that generated $old_tree
-    old_tree=$2 # old tree to contrain the new one
-    old_scheme=$3 # tree_file.best_scheme from old iqtree run
-    new_prefix=$4 # new tree location/name
-    threads=$5
+    echo "#################################"
+    echo "### RUNNING ADD_2_FASTTREE!!! ###"
+    echo "#################################"
+    local new_alignment=$1 # new concatenated alignment with same length as one that generated $old_tree
+    local old_tree=$2 # old tree to contrain the new one
+    local new_prefix=$3 # new tree location/name
+    local tree_data=$4
+    local threads=$5
 
     # lots to do before this works
     #need to get bioperl to work in my mamba environment
      #works in a clean env...
     #need to collaps bad splits...dont think I can do it during constraint conversion
+    
+    if [[ $tree_data == "CDS" ]]
+    then
+        fasttree_speciestree_options=$fasttree_CDS_speciestree_options
+        alignemnt="-nt "$new_alignment
+    elif [[ $J == "PROT" ]]
+    then
+        fasttree_speciestree_options=$fasttree_PROT_speciestree_options
+        alignment=$new_alignment
+    fi
+    
+    #need to get bioperl to work in my mamba environment
+     #works in a clean env...
+    #need to collaps bad splits...dont think I can do it during constraint conversion
+    echo " Creating contraint tree from Earlier OP run"
     constraint_tree=$addasm_dir/$(basename $old_tree).contraints
-    perl ~/gits/OrthoPhyl/script_lib/TreeToConstraints.pl < \
-        $old_tree \
-        > $constraint_tree
-    fasttree \
-        -i $blah \
-        -c $blag
+    python $script_home/python_scripts/Newick2FastTreeConstraints.py $old_tree > $constraint_tree.fa
+    cat $I | awk -vRS=">" -vFS="\n" -vOFS="" \
+        '$0!=""{$1=substr($1,1,15);$1=sprintf ("%-17s",$1)}$0!=""' \
+        > TMP.phy1
+    local num=$(cat TMP.phy1 | wc -l)
+    local len=$(cat TMP.phy1 | head -n 1 | awk '{print length($2)}')
+    echo -e "\t"$num"\t"$len > $constraint_tree
+    cat TMP.phy1 >> $constraint_tree
+    rm TMP.phy1
+    echo "Running FastTree..."
+    FastTreeMP $fasttree_speciestree_options \
+		-out ./fastTree.${output_name}.tree_working \
+         -constraints $constraint_tree \
+        $alignemnt
 }
 
 
@@ -370,17 +414,18 @@ RUN_ML_SUPERMATRIX_WORKFLOW () {
                 done
             done
         fi
-        if [[ " ${tree_method[*]} " =~ " fasttree " ]]
+        if [[ " ${tree_method[*]} " =~ " fastTree " ]]
         then
             for I in ${SCO_sets[@]}
             do
                 for J in ${TREE_DATA_list[@]}
                 do
+                
                 ADD_2_fasttree \
                     $AlignmentsConcatenated/$I.$J.trm.sco.nm.fa \
-                    $OLD_TREES/fasttree.$I.$J.tree \
-                    $OLD_iqtree_output/fasttree.$I.$J.best_scheme \
-                    $new_trees/fasttree.$I.$J.addasm
+                    $OLD_TREES/fastTree.$I.$J.tree \
+                    $new_trees/fastTree.$I.$J.addasm \
+                    $J \
                     $threads
                 done
             done

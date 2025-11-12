@@ -15,15 +15,21 @@ protein trees
 	    [X] build_gene_trees
 	    [X] build_ASTRAL_trees
     
-    # Low priority
-    [] fix OrthoFinder only SCO ident
-    [] add back in Alignments assesment
+# Low priority
+[] fix OrthoFinder only SCO ident
+[X] add back in Alignments assesment
 
 ## big task
+{X} switch from FastANI to MASH for for protein shortlist
+    {X} FastANI is an aftraction of kmer distance to get ~ANI 
+    {X} Might as well use Kmer sketch distance directly
+    {} Add variable to evo distance? need more and shorter kmers for order level stuff 
+
 [] synteny aware orthology (like genespace)
 [] add "best genomes" choice to ANI subsample 
+[] add root assemblies for automatic tree generation
 [] allow users to input precomputted HMMs
-[X I think] fix all dirtbag multithreading to use number of jobs 
+[X] fix all dirtbag multithreading to use number of jobs 
 [] something about saturation
     entropy? Nah
     nuc fraction distance? Maybe
@@ -42,6 +48,10 @@ protein trees
 [X] clean up the paralog remover
 
 ## add new sequences to old analysis
+    {X} switch to MASCE for codon aware alignments 
+    {X} trimal backtranslation isnt trimming aware and doesnt throw an error...
+        {X} save trimmed prot columns, translate columns to nuc, then trim nuc with them
+    {X }Revert to MAFFT because MACSE is so damn slow!!!
     {X} find prots for each OG
         {X} NEED TO FIX NAMES FIRST FOR PARALOG SCORE
     {X} add to OG alignments
@@ -49,4 +59,4 @@ protein trees
         Nah - Scalable pplacer: https://github.com/gillichu/PLUSplacer-taxtastic
         {X} IQtree: Can do using a guide tree. 
             {X} If we can use all the precomputed model parameters, that would be awesome
-    {} fix addasm not working with previous Orthophyl only run
+    {X} fix addasm not working with previous Orthophyl only run

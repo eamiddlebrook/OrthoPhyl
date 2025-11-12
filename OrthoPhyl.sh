@@ -203,7 +203,8 @@ MAIN_PIPE () {
 	then
 		export ANI=true
 		#ANI script makes a prot directory from shortlist for orthofinder ($prots.shortlist)
-		ANI_species_shortlist $ANI_dataset $ANI_shortlist
+		MASH_species_shortlist $ANI_dataset $ANI_shortlist $threads $prots $ANI_genome_picking
+		#ANI_species_shortlist $ANI_dataset $ANI_shortlist $threads
 		prots4ortho=${prots}.shortlist
 		ORTHO_RUN $prots4ortho
 		# find genes from full set for each OG (make HMM profile and search against all prots)

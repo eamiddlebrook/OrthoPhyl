@@ -193,6 +193,12 @@ or
 -s  path to the main directory for output
 Optional:
 -t  threads to use [4]
+-R|--rigor	Set the overall analysis rigor. This overrides most conflicting parameters set with other arguments except "-o\|--omics" and "-m\|--min_frac_orthos" for a fast run. (fast, medium, full) 
+	full: Run Iqtree2 on CDS and PROT concatenated alignments with partion merging and GTR + freerate family model testing for CDS and standard PROT models. 
+		Additionally, run ASTRAL gene to species tree consensus on CDS and PROT sequences
+		Analyses will be performed on strict and relaxed single copy orthologs (found in >=30% taxa)
+	medium: Run Iqtree2 with GTR and FreeRate models for CDS and standard models for Prots
+	fast: Run FastTree on concatenated PROT alignments using only strict single copy orthologs 
 -p  phylogenetic tree software to use astral, fasttree, raxml, and/or iqtree [\"fasttree iqtree astral\"]
 	i.e. -p \"fasttree iqtree astral\"
 -o  "omics" data to use for tree building ([CDS], PROT, BOTH)

@@ -230,4 +230,6 @@ ARG_PARSE_addem () {
 		USAGE
 		exit 1
 	fi
+echo $ARGS_SET
+echo $tree_method
 }
