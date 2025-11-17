@@ -9,7 +9,9 @@
     - [Manual Install](#ManualInstall)
     - [Test Install](#TestInstall)
 3. [Running OrthoPhyl](#RunningOrthoPhyl)
-    - [Run Examples](#RunExamples)
+    - [OrthoPhyl Examples](#RunExamples)
+4. [Running ReLeaf](#RunningReLeaf)
+    - [ReLeaf Examples](#ReLeafExamples)
 4. [More Notes on OrthoPhyl](#NotesOnOrthoPhyl)
 5. [Known Errors, Issues, and What-have-yous](#KnownErrors)
 6. [Future Capabilities](#FutureCapabilities)
@@ -174,6 +176,11 @@ This script takes about 20 hr to complete with 20 cores. Most of this is ML tree
 ```
 bash OrthoPhyl.sh -T TESTER -t 3
 ```
+#### Test ReLeaf from manual install
+First run the ```-T TESTER_fasttest``` from above.
+```
+./ReLeaf.sh -g TESTER/genomes_fasttest_addasm/ -a TESTER/annots_nucls_fasttest_addasm/,TESTER/annots_prots_fasttest_addasm/ -s ./TESTER/Workflow_test.fasttest$(date +%m-%d-%Y)
+```
 
 <a name="RunningOrthoPhyl"></a>
 
@@ -264,6 +271,55 @@ singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/eco
 ```
 ./OrthoPhyl.sh -g TESTER/genomes -s TESTER/TESTER_full_genomes -m .3 -n 30 -p "iqtree astral" -o PROT
 ```
+<a name="RunningReLeaf"></a>
+## Running Releaf
+```
+USAGE: ReLeaf.sh -g Path_to_directory_of_assemblies -a path_to_CDS_dir,path_to_PROTS_dir -s Previous_OP_output
+***Check out github.com/eamiddlebrook/OrthoPhyl for lots of details***
+# ALL arguments are optional if set with \"-c control_file.your_args\"
+#   Many default parameters are set in control_file.defaults
+Required:
+-g|--genome_dir  path to genomes directiory
+or
+-a|--annotations  paths to protien and transcript directories.
+       They should be delared as \"-a path_to_CDS_dir,path_to_prot_dir\"
+-s|--storage_dir  path to the main directory output from original OrthoPhyl run
+Optional:
+-t|--threads  threads to use [4]
+-p|--phylo_tool  phylogenetic tree software to use astral, fasttree, and/or iqtree [\"fasttree iqtree astral\"]
+	i.e. -p \"fasttree iqtree astral\"
+	Default: Will be taked from trees available in storage_dir
+-o|--omics  "omics" data to use for tree building ([CDS], PROT, BOTH)
+	for divergent sequences, it is good to compare protein trees to 
+	nucleotide trees to identify artifacts of saturation (long branch attraction)
+	Default: Will be taked from trees available in storage_dir
+-h|--help  display a description and a super useful usage message
+
+```
+<a name="ReLeafExamples"></a>
+### Run Examples 
+#### Exapmle1: Run Releaf on new bacterial assemblies, benerating the same trees from the original OP run
++ Generate tree(s) with the same methods and datasets as original OP run (-p and -o NOT set)
++ Original OP run Directory ( -s OP_OUT_DIR_PATH )
++ Add assemblies to OP trees ( -g PATH_TO_ASMS )
+
+```
+./ReLeaf.sh -g TESTER/genomes_fasttest_addasm/ \
+	-s TESTER/Workflow_test.fasttest11-17-2025/
+```
+#### Example2: Run Releaf on new bacterial assemblies and annotation files, generating a tree with only FastTree using the CDS data
++ Use assemblies ( -g PATH_TO_ASMS )
++ Use annotation files ( -a PATH_TO_CDS_files,PATH_TO_PROT_FILES )
++ Add samples to OP run ( -s OP_OUT_DIR_PATH )
++ only generate new trees using FastTree, ( -p fasttree )
++ Only generate new trees using CDS sequences ( -o CDS )
+```
+./ReLeaf.sh -g TESTER/genomes_fasttest_addasm/ \
+	-a TESTER/annots_nucls_fasttest_addasm/,TESTER/annots_prots_fasttest_addasm/ \
+	-s TESTER/Workflow_test.fasttest11-17-2025/ \
+	-p fasttree -o CDS
+```
+
 <a name="NotesOnOrthoPhyl"></a>
 
 ## More Notes on OrthoPhyl: 
