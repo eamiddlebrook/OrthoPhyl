@@ -93,7 +93,8 @@ mamba create -n orthophyl -c bioconda -c conda-forge \
 git prodigal=2.6.3 orthofinder=2.5.4 \
 bbmap=39.01 fasttree=2.1.11 hmmer=3.3.2 pal2nal=14.1 \
 ete3 raxml=8.2.12 trimal=1.4.1 \
-parallel=20160622 r-essentials=4.1
+parallel=20160622 r-essentials=4.1 \
+iqtree=3.0.1 mash=2.3
 ```
 #### Sometimes R (r-essentials) can be a pain. 
 If it is causing problems with the conda/mamba install, remove it and install manually:
@@ -107,6 +108,12 @@ Alternatively, close and reopen terminal.
 #### To remove parallel's citation reminder (BUT DONT FORGET TO CITE!) run:
 ```
 mamba activate orthophylo
+parallel --citation
+```
+If you are on a a newer RHEL/CentOS machine, you might need to install libnsl to get parallel to run.
+```
+#If parallel fails to run...
+sudo dnf install libnsl
 parallel --citation
 ```
 #### Test R install
@@ -130,15 +137,6 @@ cd Alignment_Assessment/
 # convert script to python3
 2to3 -w Alignment_Assessment_v2.py 
 
-# install fastANI
-cd ~/Downloads
-wget https://github.com/ParBLiSS/FastANI/releases/download/v1.33/fastANI-Linux64-v1.33.zip
-unzip fastANI-Linux64-v1.33.zip
-# For macOS !!!!! NOT SOLVED !!!!!!
-# git clone https://github.com/ParBLiSS/FastANI.git
-# and follow install instructions. This has been a huge pain on my machine...not solved
-mkdir ~/apps/
-mv fastANI ~/apps/ # or anywhere else you would like to put it. Change control_file.required to reflect path
 ```
 
 #### Edit ```${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
