@@ -9,7 +9,9 @@
     - [Manual Install](#ManualInstall)
     - [Test Install](#TestInstall)
 3. [Running OrthoPhyl](#RunningOrthoPhyl)
-    - [Run Examples](#RunExamples)
+    - [OrthoPhyl Examples](#RunExamples)
+4. [Running ReLeaf](#RunningReLeaf)
+    - [ReLeaf Examples](#ReLeafExamples)
 4. [More Notes on OrthoPhyl](#NotesOnOrthoPhyl)
 5. [Known Errors, Issues, and What-have-yous](#KnownErrors)
 6. [Future Capabilities](#FutureCapabilities)
@@ -93,7 +95,8 @@ mamba create -n orthophyl -c bioconda -c conda-forge \
 git prodigal=2.6.3 orthofinder=2.5.4 \
 bbmap=39.01 fasttree=2.1.11 hmmer=3.3.2 pal2nal=14.1 \
 ete3 raxml=8.2.12 trimal=1.4.1 \
-parallel=20160622 r-essentials=4.1
+parallel=20160622 r-essentials=4.1 \
+iqtree=3.0.1 mash=2.3
 ```
 #### Sometimes R (r-essentials) can be a pain. 
 If it is causing problems with the conda/mamba install, remove it and install manually:
@@ -107,6 +110,12 @@ Alternatively, close and reopen terminal.
 #### To remove parallel's citation reminder (BUT DONT FORGET TO CITE!) run:
 ```
 mamba activate orthophylo
+parallel --citation
+```
+If you are on a a newer RHEL/CentOS machine, you might need to install libnsl to get parallel to run.
+```
+#If parallel fails to run...
+sudo dnf install libnsl
 parallel --citation
 ```
 #### Test R install
@@ -130,15 +139,6 @@ cd Alignment_Assessment/
 # convert script to python3
 2to3 -w Alignment_Assessment_v2.py 
 
-# install fastANI
-cd ~/Downloads
-wget https://github.com/ParBLiSS/FastANI/releases/download/v1.33/fastANI-Linux64-v1.33.zip
-unzip fastANI-Linux64-v1.33.zip
-# For macOS !!!!! NOT SOLVED !!!!!!
-# git clone https://github.com/ParBLiSS/FastANI.git
-# and follow install instructions. This has been a huge pain on my machine...not solved
-mkdir ~/apps/
-mv fastANI ~/apps/ # or anywhere else you would like to put it. Change control_file.required to reflect path
 ```
 
 #### Edit ```${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
@@ -175,6 +175,11 @@ If the test was successful, there should be 4 species trees found in the FINAL_S
 This script takes about 20 hr to complete with 20 cores. Most of this is ML tree building. Will make an artificial set of truncated genomes later
 ```
 bash OrthoPhyl.sh -T TESTER -t 3
+```
+#### Test ReLeaf from manual install
+First run the ```-T TESTER_fasttest``` from above.
+```
+./ReLeaf.sh -g TESTER/genomes_fasttest_addasm/ -a TESTER/annots_nucls_fasttest_addasm/,TESTER/annots_prots_fasttest_addasm/ -s ./TESTER/Workflow_test.fasttest$(date +%m-%d-%Y)
 ```
 
 <a name="RunningOrthoPhyl"></a>
@@ -266,6 +271,55 @@ singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/eco
 ```
 ./OrthoPhyl.sh -g TESTER/genomes -s TESTER/TESTER_full_genomes -m .3 -n 30 -p "iqtree astral" -o PROT
 ```
+<a name="RunningReLeaf"></a>
+## Running Releaf
+```
+USAGE: ReLeaf.sh -g Path_to_directory_of_assemblies -a path_to_CDS_dir,path_to_PROTS_dir -s Previous_OP_output
+***Check out github.com/eamiddlebrook/OrthoPhyl for lots of details***
+# ALL arguments are optional if set with \"-c control_file.your_args\"
+#   Many default parameters are set in control_file.defaults
+Required:
+-g|--genome_dir  path to genomes directiory
+or
+-a|--annotations  paths to protien and transcript directories.
+       They should be delared as \"-a path_to_CDS_dir,path_to_prot_dir\"
+-s|--storage_dir  path to the main directory output from original OrthoPhyl run
+Optional:
+-t|--threads  threads to use [4]
+-p|--phylo_tool  phylogenetic tree software to use astral, fasttree, and/or iqtree [\"fasttree iqtree astral\"]
+	i.e. -p \"fasttree iqtree astral\"
+	Default: Will be taked from trees available in storage_dir
+-o|--omics  "omics" data to use for tree building ([CDS], PROT, BOTH)
+	for divergent sequences, it is good to compare protein trees to 
+	nucleotide trees to identify artifacts of saturation (long branch attraction)
+	Default: Will be taked from trees available in storage_dir
+-h|--help  display a description and a super useful usage message
+
+```
+<a name="ReLeafExamples"></a>
+### Run Examples 
+#### Exapmle1: Run Releaf on new bacterial assemblies, benerating the same trees from the original OP run
++ Generate tree(s) with the same methods and datasets as original OP run (-p and -o NOT set)
++ Original OP run Directory ( -s OP_OUT_DIR_PATH )
++ Add assemblies to OP trees ( -g PATH_TO_ASMS )
+
+```
+./ReLeaf.sh -g TESTER/genomes_fasttest_addasm/ \
+	-s TESTER/Workflow_test.fasttest11-17-2025/
+```
+#### Example2: Run Releaf on new bacterial assemblies and annotation files, generating a tree with only FastTree using the CDS data
++ Use assemblies ( -g PATH_TO_ASMS )
++ Use annotation files ( -a PATH_TO_CDS_files,PATH_TO_PROT_FILES )
++ Add samples to OP run ( -s OP_OUT_DIR_PATH )
++ only generate new trees using FastTree, ( -p fasttree )
++ Only generate new trees using CDS sequences ( -o CDS )
+```
+./ReLeaf.sh -g TESTER/genomes_fasttest_addasm/ \
+	-a TESTER/annots_nucls_fasttest_addasm/,TESTER/annots_prots_fasttest_addasm/ \
+	-s TESTER/Workflow_test.fasttest11-17-2025/ \
+	-p fasttree -o CDS
+```
+
 <a name="NotesOnOrthoPhyl"></a>
 
 ## More Notes on OrthoPhyl: 

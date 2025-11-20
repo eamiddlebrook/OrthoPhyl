@@ -2,32 +2,26 @@
 
 USAGE () {
 echo "
-USAGE: ReLeaf.sh -g Path_to_directory_of_assemblies -s Previous_OP_output
+USAGE: ReLeaf.sh -g Path_to_directory_of_assemblies -a path_to_CDS_dir,path_to_PROTS_dir -s Previous_OP_output
 ***Check out github.com/eamiddlebrook/OrthoPhyl for lots of details***
 # ALL arguments are optional if set with \"-c control_file.your_args\"
 #   Many default parameters are set in control_file.defaults
-#   I will work to expose the more useful ones in later versions of OP
 Required:
 -g|--genome_dir  path to genomes directiory
 or
 -a|--annotations  paths to protien and transcript directories.
-       They should be delared as \"-a path_to_transcript_dir,path_to_prot_dir\"
+       They should be delared as \"-a path_to_CDS_dir,path_to_prot_dir\"
 -s|--storage_dir  path to the main directory output from original OrthoPhyl run
 Optional:
 -t|--threads  threads to use [4]
--p|--phylo_tool  phylogenetic tree software to use astral, fasttree, raxml, and/or iqtree [\"fasttree iqtree astral\"]
+-p|--phylo_tool  phylogenetic tree software to use astral, fasttree, and/or iqtree [\"fasttree iqtree astral\"]
 	i.e. -p \"fasttree iqtree astral\"
+	Default: Will be taked from trees available in storage_dir
 -o|--omics  "omics" data to use for tree building ([CDS], PROT, BOTH)
 	for divergent sequences, it is good to compare protein trees to 
 	nucleotide trees to identify artifacts of saturation (long branch attraction)
--x|-trimal_param  trimal paramerter string (in double \"quotes\")
--m|--min_frac_orthos  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
-        Expects a float from 0-1
-        A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
-        [0.30]
--T|--test  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast,TESTER_fasttest)
+	Default: Will be taked from trees available in storage_dir
 -h|--help  display a description and a super useful usage message
-###############################################################\n
 "
 }
 
