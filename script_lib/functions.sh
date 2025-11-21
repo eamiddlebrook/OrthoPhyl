@@ -1497,7 +1497,7 @@ TREE_BUILD () {
 		then
 			safe="--safe"
 		fi
-		iqtree2 -s $input_alignment \
+		iqtree -s $input_alignment \
 		--prefix iqtree.${output_name} $IQtree_partitions $IQtree_speciestree_options $safe\
 		-T AUTO --threads-max $threads --seed 1234 > iqtree.${output_name}.long_log
 		treefile=$(ls iqtree.${output_name}.treefile)

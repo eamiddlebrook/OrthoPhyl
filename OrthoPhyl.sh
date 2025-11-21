@@ -214,37 +214,13 @@ MAIN_PIPE () {
 			$wd/all_prots.nm.fa \
 			$store/OG_alignmentsToHMM
 		GET_OG_NAMES $wd/OG_names $store/OG_alignmentsToHMM/hmm_round2/AlignmentsProts/
-		test_macse () {
-			ALIGN_PROT_n_CDS \
-				$wd \
-				$wd/OG_names \
-				$wd/all_trans.nm.fa \
-				$wd/SequencesCDS \
-				$gen_code \
-				$wd/AlignmentsCDS \
-				$wd/AlignmentsProts \
-				$threads \
-				$wd/logs
-		}
-		#test_macse
+		
 	else
 		# this is broken now....need to update for MACSE
 		prots4ortho=${prots}.fixed
 		ORTHO_RUN ${prots4ortho}
 		REALIGN_ORTHOGROUP_PROTS
 		GET_OG_NAMES $wd/OG_names $orthodir/MultipleSequenceAlignments
-		test_macse () {
-			ALIGN_PROT_n_CDS \
-				$wd \
-				$wd/OG_names \
-				$wd/all_trans.nm.fa \
-				$wd/SequencesCDS \
-				$gen_code \
-				$wd/AlignmentsCDS \
-				$wd/AlignmentsProts \
-				$wd/threads \
-				$wd/logs
-		}
 	fi
 
 	# trim protein sequences and also make a file for 
