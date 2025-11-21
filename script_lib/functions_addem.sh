@@ -53,14 +53,14 @@ GET_OLD_TREE_INFO () {
     fi
     
     # test is FastTree was used.
-    if [[ " ${tree_method[*]} " =~ " fastTree " ]] || [[ " ${tree_method[*]} " =~ " astral " ]]
+    if [[ " ${tree_method[*]} " =~ " astral " ]]
     then
         echo "#######################################################################################"
         echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
         echo "STILL IN DEVELOPMENT"
-        echo "Adding sequences to FastTree trees from original Orthophyl Run is still in development."
-        echo "   This should be functional now, but some more testing is needed (big trees, low support and such)"
-        echo "Tree(s) built by iqtree will be added to."
+        echo "Adding sequences to ASTRAL trees from original Orthophyl Run is still in development."
+        echo "   However, doing a full rerun with only ASTRAL should be pretty fast"
+        echo "Tree(s) built by IQTree will be added to."
         echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
         echo "#######################################################################################"
         sleep 10

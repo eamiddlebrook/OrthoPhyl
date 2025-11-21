@@ -18,7 +18,7 @@ Running...
 ######################
 # set up environment #
 ######################
-echo "Loading required files..."
+echo "Loading required files and environment..."
 
 # grab the Orthophyl directory no matter where script was run from
 #used for loading stuff from git repo
