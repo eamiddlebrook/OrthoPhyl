@@ -5,7 +5,7 @@ import sys
 from collections import defaultdict
 from ete3 import Tree
 
-min_support=1
+min_support=.95
 
 try:
     t = Tree(sys.argv[1])

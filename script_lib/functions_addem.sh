@@ -330,14 +330,12 @@ ADD_2_fasttree () {
         alignment=$new_alignment
     fi
     
-    #need to get bioperl to work in my mamba environment
-     #works in a clean env...
-    #need to collaps bad splits...dont think I can do it during constraint conversion
+    #Converting OLD_tree to constraints
+    #  Only splits with >.95 support will be kept
     echo " Creating contraint tree from Earlier OP run"
     constraint_tree=$addasm_dir/$(basename $old_tree).contraints
     python $script_home/python_scripts/Newick2FastTreeConstraints.py $old_tree > $constraint_tree.fa
-    cat $I | awk -vRS=">" -vFS="\n" -vOFS="" \
-        '$0!=""{$1=substr($1,1,15);$1=sprintf ("%-17s",$1)}$0!=""' \
+    cat $constraint_tree.fa | awk -vRS=">" -vFS="\n" -vOFS="" '$0!=""{$1=$1" ";print $0}' \
         > TMP.phy1
     local num=$(cat TMP.phy1 | wc -l)
     local len=$(cat TMP.phy1 | head -n 1 | awk '{print length($2)}')
