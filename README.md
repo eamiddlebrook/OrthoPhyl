@@ -3,32 +3,48 @@
 <br /> <br />
 ## Table of Contents
 
-1. [About](#About)
-2. [Getting Started](#GettingStarted)
+1. [About OrthoPhyl](#AboutOP)
+2. [About ReLeaf](#AboutRL)
+3. [Getting Started](#GettingStarted)
     - [Singularity](#Singularity)
     - [Manual Install](#ManualInstall)
     - [Test Install](#TestInstall)
-3. [Running OrthoPhyl](#RunningOrthoPhyl)
+4. [Running OrthoPhyl](#RunningOrthoPhyl)
     - [OrthoPhyl Examples](#RunExamples)
-4. [Running ReLeaf](#RunningReLeaf)
+5. [Running ReLeaf](#RunningReLeaf)
     - [ReLeaf Examples](#ReLeafExamples)
 4. [More Notes on OrthoPhyl](#NotesOnOrthoPhyl)
 5. [Known Errors, Issues, and What-have-yous](#KnownErrors)
 6. [Future Capabilities](#FutureCapabilities)
 7. [OrthoPhyl Citation](#OrthoPhylCitation)
 
-<a name="About"></a>
+<a name="AboutOP"></a>
 
-## About
+## About OrthoPhyl
 ### For the version used in *OrthoPhyl – Streamlining large scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales* see the OrthoPhyl_1.0 branch.
 ### Developed at Los Alamos National Labs (LANL - C22064)
 #### Written by Earl Middlbrook with input from Robab Katani at Penn State and Jeanne Fair at LANL.
 #### The software is available through a GLPv3 open source licence. 
 #### Purpose
 This software is designed to generate phylogenetic trees from bacterial genome assemblies. While many methods use whole genome alignments to generate informative sites to base tress on, OrthoPhyl annotates bacterial genes, identifies orthologous sequences, aligns related proteins to inform transcript alignments, then builds species trees with two methods. The first is a conventional gene concatenation and ML tree estemation method. The second attempts to reconcile gene trees with a unified species tree using quartets (ASTRAL). Both methods allow filtering of gene lists on number of species represented, length, and gappiness in order to tune signal-to-noise ratio for tree estimation. 
+####
 The main advantages of this software pipeline are three fold: 1) It extends the evolutionary distance input species can represent (over whole genome alignment and k-mer methods) while maintaining phylogenetic resolution, 2) this software is designed to be very user friendly, requiring just a single to estimate trees from a directory of assemblies. Additionally a Singularity image is now available to avoid dependancy hell and 3) this pipeline is amenable to estimating trees for 1000s of bacterial genome assemblies. To handle large numbers of genomes, the pipline calculates a diversity-representing subset of genomes to run OrthoFinder on, then expands the found OrthoGroups to all assemblies with an iterative HMM search strategy.
 ![screenshot](/img/OP2.0_workflow.png)
 Grey boxes indicate processes. Orange, tan, and purple boxes represent user input, intermediate files, and species tree outputs, respectively. Purple arrows show iterative approaches. The workflow is divided into four main tasks: a) annotate assemblies, clean-up files, and remove identical CDSs. If more than “N” assemblies are being analyzed, b1) identify a subset of diversity-spanning assemblies, b2) pass them through OrthoFinder to generate orthogroups, and b3) expand the OrthoFinder-identified orthogroups to the full dataset of assemblies through iterative HMM searches. c) Align full orthogroup protein sets, generate and trim matching codon alignments, then filter orthogroups by taxon representation. Finally, d) estimate species tree topologies with concatenated codon alignment supermatrices along with a gene tree to species tree consensus method.
+
+<a name="AboutRL"></a>
+
+## About ReLeaf
+#### Purpose
+ReLeaf is a pipeline developed to add new samples to previously complete OrthoPhyl runs. It only requires the storage directory (-s storage) from the prefious run and the directory(s) for new samples (-a CDS,PROT and/or -g assemblies). ReLeaf will then look in the storage directory and identify what methods were used to generate trees, then automatically recreate these analyses using the same parameters from the previous OP run along with:
++ OP HMMs for orthogroup identification
++ OP OrthoGroup alignemnts as guides
++ OP Trees as contraints for tree generation
++ OP gene/partition ML models 
+
+Reusing these original OP files can substantially reduce runtimes when compared to rerunning the full analysis adding only a few samples. This is especially true when the original run included a full partiation merging scheme from IQTree (which can take days on bacterial ~1000 samples). 
+##### 
+Note: Adding samples to OP ASTRAL trees is not yet supported. However ASTRAl tree generation is pretty fast, so a full OP rerun is not "too" burdensome.
 
 <a name="GettingStarted"></a>
 ## Getting Started
