@@ -59,6 +59,7 @@ singularity_images=~/singularity_images/
 mkdir ${singularity_images}
 cd ${singularity_images}
 singularity pull library://earlyevol/default/orthophyl
+mv orthophyl_latest.sif OrthoPhyl_v2.2.1.sif
 ```
 Congradulations! You can skip down to testing the "install"!
 
@@ -109,7 +110,7 @@ mamba create -n orthophyl --file $Path_to_gits/OrthoPhyl/orthophyl_env.XXX.txt -
 ```
 mamba create -n orthophyl -c bioconda -c conda-forge \
 git prodigal=2.6.3 orthofinder=2.5.4 \
-bbmap=39.01 fasttree=2.1.11 hmmer=3.3.2 pal2nal=14.1 \
+bbmap=39.01 fasttree=2.1.11 hmmer=3.3.2 \
 ete3 raxml=8.2.12 trimal=1.4.1 \
 parallel=20160622 r-essentials=4.1 \
 iqtree=3.0.1 mash=2.3
@@ -125,7 +126,7 @@ source ~/.bashrc
 Alternatively, close and reopen terminal. 
 #### To remove parallel's citation reminder (BUT DONT FORGET TO CITE!) run:
 ```
-mamba activate orthophylo
+mamba activate orthophyl
 parallel --citation
 ```
 If you are on a a newer RHEL/CentOS machine, you might need to install libnsl to get parallel to run.
@@ -162,11 +163,18 @@ cd Alignment_Assessment/
 <a name="TestInstall"></a>
 ## Test Install 
 ### Test Singularity container
-You must specify an output directory (-s) if running through singularity, because the script will try to write directly to the container (wont work)
+You must specify an output directory (-s) if running through singularity, because the script will try to write directly to the container (wont work). The ```-t 4 ``` allows OP to run on 4 cores. Change if required.
 ```
-singularity run ${singularity_images}/OrthoPhyl.0.9.3.sif -T TESTER_chloroplast -s ./tester_chloroplast_output -t 4
+singularity run ${singularity_images}/OrthoPhyl_v2.2.1.sif -T TESTER_fasttest -s ./tester_fasttest_output -t 4
 ```
-#### Test Manual install
+If ```ls ./tester_fasttest_output/FINAL_SPECIES_TREES``` returns trees with prefixes [astral fasttree iqtree] with [SCO_3 SCO_strict] and [CDS PROT] suffixes (12 total trees), the pipline ran successfully!
+#### Test Releaf within the singularity container
+```
+singularity exec ${singularity_images}/OrthoPhyl_v2.2.1.sif -a TESTER/annots_nucls_fasttest_addasm,TESTER/annots_prots_fasttest_addasm -t 4 -s ./tester_fasttest_output
+```
+If ```ls ./tester_fasttest_output/FINAL_SPECIES_TREES``` returns trees (iqtree.[].treefile fasttree.[].tree), then the ReLeaf pipeline ran successfully!
+
+### Test Manual install
 To test 'conda activate' within OrthoPhyl, make sure the conda environment is not activated
 ```
 mamba deactivate
