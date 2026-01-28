@@ -212,8 +212,9 @@ MAIN_PIPE () {
 			$orthodir/Orthogroups/Orthogroups.GeneCount.tsv \
 			$orthodir/MultipleSequenceAlignments \
 			$wd/all_prots.nm.fa \
+			$hmm_reps \
 			$store/OG_alignmentsToHMM
-		GET_OG_NAMES $wd/OG_names $store/OG_alignmentsToHMM/hmm_round2/AlignmentsProts/
+		GET_OG_NAMES $wd/OG_names $wd/AlignmentsProts/
 		
 	else
 		# this is broken now....need to update for MACSE

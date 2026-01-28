@@ -588,7 +588,9 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 	local gene_counts=$1
 	local OF_alignments=$2
 	local all_prots=$3
-	local OG_alignmentsToHMM=$4
+	local hmm_reps=$4
+	local OG_alignmentsToHMM=$5
+	
 
 	local alignments_TMP="$OG_alignmentsToHMM/alignments/"
 
@@ -715,7 +717,6 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 
 	echo $orthodir
 	cd $orthodir || exit
-	reps=2
 	if [ -f $store/ANI_ORTHOFINDER_TO_ALL_SEQS.complete ]
         then
             	echo "ANI_ORTHOFINDER_TO_ALL_SEQS previously completed."
@@ -747,7 +748,7 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 				>> $OG_alignmentsToHMM/hmm_reps.tsv
 		done
 
-		for rep in $(seq $reps)
+		for rep in $(seq $hmm_reps)
 		do
 			echo "##############  LIST OF ALIGNMENTS TO START Rep $rep  ############"
 			cd $OG_alignmentsToHMM
@@ -776,6 +777,8 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 				cp $alignments_TMP/${I}.fa $wd/AlignmentsProts/${I}.faa
 			fi
 		done
+		mkdir $OG_alignmentsToHMM/hmms_final
+		cp $OG_alignmentsToHMM/hmm_round$hmm_reps/hmms/*.hmm $OG_alignmentsToHMM/hmms_final/
 	fi \
 	&& touch $store/ANI_ORTHOFINDER_TO_ALL_SEQS.complete
 }

@@ -83,9 +83,9 @@ total_tree_rerun=FALSE
 #########################################
 #Could speed this up by only searching for OGs in the SCO_sets
 
-if [ -d "$store/OG_alignmentsToHMM/hmm_round2/hmms/" ]
+if [ -d "$store/OG_alignmentsToHMM/hmms_final/" ]
 then
-	hmm_dir="$store/OG_alignmentsToHMM/hmm_round2/hmms/"
+	hmm_dir="$store/OG_alignmentsToHMM/hmms_final/"
 	ls $hmm_dir/*.hmm > /dev/null || echo "NO hmm files found in "$hmm_dir
 	echo "Did the original OrthoPhyl run complete?"
 elif [ -d "$store/annots_prots.fixed/OrthoFinder/Results_ortho/MultipleSequenceAlignments/" ]

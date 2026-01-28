@@ -24,6 +24,9 @@ export orthofinder_rerun=false
 export ANI_shortlist=20 # max number of seqs to run through Orthofinder
 # genetic code of dataset to use with MACSE
 gen_code=11
+# number of rounds of HMMsearch and alignment to run durrinf ANI_ORTHOFINDER_TO_ALL_SEQS
+#   can be useful to add a round if the full dataset has some diversity (order level)
+hmm_reps=2
 ### Options for CDS tree methods
 # methods to run for generating final species trees 
 export tree_method=("fasttree" "iqtree" "astral")
