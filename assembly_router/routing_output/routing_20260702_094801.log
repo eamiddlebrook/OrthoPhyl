@@ -1,0 +1,8 @@
+2026-07-02 09:48:01,514 [INFO] 
+Routing assembly: GCF_000013145.1
+2026-07-02 09:48:01,515 [INFO] Query taxonomy: d__Bacteria; p__Pseudomonadota; c__Alphaproteobacteria; o__Hyphomicrobiales; f__Rhizobiaceae; g__Rhizobium
+2026-07-02 09:48:01,515 [INFO] ✗ NO MATCH FOUND in any database
+2026-07-02 09:48:01,515 [INFO]   → New OrthoPhyl run required
+2026-07-02 09:48:01,598 [INFO] 
+→ Decision saved: routing_output/routing_decision_GCF_000013145.1.json
+2026-07-02 09:48:01,603 [INFO] → Summary saved: routing_output/routing_summary_GCF_000013145.1.txt

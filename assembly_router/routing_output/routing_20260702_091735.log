@@ -1,0 +1,10 @@
+2026-07-02 09:17:35,791 [INFO] Routing assembly: GCF_000013145.1
+2026-07-02 09:17:35,791 [INFO] Taxonomy: d__Bacteria;p__Pseudomonadota;c__Alphaproteobacteria;o__Rickettsiales;f__Rickettsiaceae;g__Rickettsia
+2026-07-02 09:17:35,791 [INFO] Searching 3 databases...
+2026-07-02 09:17:35,792 [INFO] ✓ Matched database: Rickettsiales_releaf_compatable
+2026-07-02 09:17:35,792 [INFO]   Clade: d__Bacteria;p__Pseudomonadota;c__Alphaproteobacteria;o__Rickettsiales
+2026-07-02 09:17:35,792 [INFO]   Rank: order
+2026-07-02 09:17:35,792 [INFO]   Genomes: 1151
+2026-07-02 09:17:35,792 [INFO]   → Use ReLeaf to add to existing phylogeny
+2026-07-02 09:17:36,026 [INFO] Decision saved to routing_output/routing_decision_GCF_000013145.1.json
+2026-07-02 09:17:36,030 [INFO] Summary saved to routing_output/routing_summary_GCF_000013145.1.txt

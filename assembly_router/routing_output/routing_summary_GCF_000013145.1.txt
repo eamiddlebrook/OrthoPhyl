@@ -1,0 +1,55 @@
+======================================================================
+ASSEMBLY ROUTING DECISION (Multi-Database Query)
+======================================================================
+
+Assembly ID: GCF_000013145.1
+Assembly: /home/earlm/scratch/orthophylo/Rickettsiales/genomes_to_keep/GCF_000013145.1.fna
+Query Taxonomy: d__Bacteria; p__Pseudomonadota; c__Alphaproteobacteria; o__Hyphomicrobiales; f__Rhizobiaceae; g__Rhizobium
+
+Pipeline: OrthoPhyl
+Reason: Novel taxonomy not represented in any database
+
+Action Required:
+  Create new database for genus 'Rhizobium'
+  Download taxonomy: d__Bacteria;p__Pseudomonadota;c__Alphaproteobacteria;o__Hyphomicrobiales;f__Rhizobiaceae;g__Rhizobium
+  Target rank: genus
+
+======================================================================
+COMMAND(S) TO RUN
+======================================================================
+
+# Step 1: Download and filter related genomes from NCBI
+# This will download genomes, run CheckM QC, and filter by quality
+../utils/gather_filter_asms.sh \
+    Rhizobium \
+    routing_output/orthophyl_new_genomes \
+    8
+
+# Note: The script will create routing_output/orthophyl_new_genomes/genomes_to_keep/
+# with high-quality, non-redundant genomes.
+# Quality filters (adjust in script if needed):
+#   - Completeness >= 95%
+#   - Contamination <= 1.0%
+#   - Duplication <= 2%
+#   - Removes RefSeq/GenBank redundancy
+#   - Filters by assembly stats (N50, GC content, length)
+
+# Step 2: Run OrthoPhyl on expanded genome set
+# Note: Your query genome (GCF_000013145.1.fna) should be in routing_output/orthophyl_new_genomes/genomes_to_keep
+./OrthoPhyl.sh \
+    -g routing_output/orthophyl_new_genomes/genomes_to_keep \
+    -o routing_output/orthophyl_output \
+    -t 8 \
+    --tree_method iqtree \
+    --TREE_DATA CDS \
+    --use_partitions true
+
+# Step 3: Create new database entry
+# Add this line to your orthophyl_runs.tsv:
+Rhizobium	routing_output/orthophyl_output	d__Bacteria;p__Pseudomonadota;c__Alphaproteobacteria;o__Hyphomicrobiales;f__Rhizobiaceae;g__Rhizobium
+
+# Then rebuild the database index:
+python create_hierarchical_database_v2.py \
+    --input orthophyl_runs.tsv \
+    --output-dir /home/earlm/scratch/orthophylo/ReLeaf_database \
+    --update

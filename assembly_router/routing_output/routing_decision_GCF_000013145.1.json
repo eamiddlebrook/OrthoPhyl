@@ -1,0 +1,12 @@
+{
+  "pipeline": "OrthoPhyl",
+  "reason": "Novel taxonomy not represented in any database",
+  "assembly": "/home/earlm/scratch/orthophylo/Rickettsiales/genomes_to_keep/GCF_000013145.1.fna",
+  "assembly_id": "GCF_000013145.1",
+  "query_taxonomy": "d__Bacteria; p__Pseudomonadota; c__Alphaproteobacteria; o__Hyphomicrobiales; f__Rhizobiaceae; g__Rhizobium",
+  "download_taxonomy": "d__Bacteria;p__Pseudomonadota;c__Alphaproteobacteria;o__Hyphomicrobiales;f__Rhizobiaceae;g__Rhizobium",
+  "download_rank": "genus",
+  "download_value": "Rhizobium",
+  "suggestion": "Create new database for genus 'Rhizobium'",
+  "command": "# Step 1: Download and filter related genomes from NCBI\n# This will download genomes, run CheckM QC, and filter by quality\n../utils/gather_filter_asms.sh \\\n    Rhizobium \\\n    routing_output/orthophyl_new_genomes \\\n    8\n\n# Note: The script will create routing_output/orthophyl_new_genomes/genomes_to_keep/\n# with high-quality, non-redundant genomes.\n# Quality filters (adjust in script if needed):\n#   - Completeness >= 95%\n#   - Contamination <= 1.0%\n#   - Duplication <= 2%\n#   - Removes RefSeq/GenBank redundancy\n#   - Filters by assembly stats (N50, GC content, length)\n\n# Step 2: Run OrthoPhyl on expanded genome set\n# Note: Your query genome (GCF_000013145.1.fna) should be in routing_output/orthophyl_new_genomes/genomes_to_keep\n./OrthoPhyl.sh \\\n    -g routing_output/orthophyl_new_genomes/genomes_to_keep \\\n    -o routing_output/orthophyl_output \\\n    -t 8 \\\n    --tree_method iqtree \\\n    --TREE_DATA CDS \\\n    --use_partitions true\n\n# Step 3: Create new database entry\n# Add this line to your orthophyl_runs.tsv:\nRhizobium\trouting_output/orthophyl_output\td__Bacteria;p__Pseudomonadota;c__Alphaproteobacteria;o__Hyphomicrobiales;f__Rhizobiaceae;g__Rhizobium\n\n# Then rebuild the database index:\npython create_hierarchical_database_v2.py \\\n    --input orthophyl_runs.tsv \\\n    --output-dir /home/earlm/scratch/orthophylo/ReLeaf_database \\\n    --update"
+}
