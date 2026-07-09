@@ -274,7 +274,7 @@ singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/eco
 ```
 #### Example3: Run the same OrthoPhyl command from the manual install, also incorporate preannoated samples with protein seqs in ```~/Projects/annots/protiens/``` and transripts in ```~/Projects/annots/transcripts/``` 
 ```
-./OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -a ~/Projects/annots/protiens/,~/Projects/annots/transcripts/ -s ~/Projects/phylogenetics/ecoli/ -t 12 
+./OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -a ~/Projects/annots/transcripts/,~/Projects/annots/protiens/ -s ~/Projects/phylogenetics/ecoli/ -t 12 
 
 ```
 #### Example4: Run OrthoPhyl to build a species tree with 
@@ -343,6 +343,7 @@ Optional:
 	-s TESTER/Workflow_test.fasttest11-17-2025/ \
 	-p fasttree -o CDS
 ```
+##### Note: Trees generated with FastTree using CDs alignments must be present in ```OP_OUT_DIR_PATH```
 
 <a name="NotesOnOrthoPhyl"></a>
 
@@ -375,6 +376,16 @@ I will implement a more robust ANI estimator soooon...
 It means that an upstream process failed and the directory used to enumerate a loop is empty
 
 I will attempt to make errors easier to track...
+
+#### Errors during OrthoFinder step
+I sometimes get a series of errors like this: 
+```
+$HOME/mambaforge/envs/orthophyl/bin/scripts_of/newick.py:54: SyntaxWarning: invalid escape sequence '\['
+  _ILEGAL_NEWICK_CHARS = ":;(),\[\]\t\n\r="
+$HOME/mambaforge/envs/orthophyl/bin/scripts_of/newick.py:57: SyntaxWarning: invalid escape sequence '\['
+  _NHX_RE = "\[&&NHX:[^\]]*\]"
+```
+This doesnt seem to mess with OP running successfully. OrthoFinder appears to generate the orthogroups as expected, so the issue is likely somewhere downstream. I will eventually track this down and figure out what is happening, or incorporate a newer version of OF that might have fixed the issue.
 
 #### I have gotten an error with gather_filter_genomes when pulling extra genomes via wget:
 ```
