@@ -14,10 +14,7 @@ conda activate gather_genomes || exit
 
 
 export taxon="$1"
-export $wd=$2
-
-
-
+export wd=$2
 threads=$3
 # Set these if you hav a good idea of the expected values
 # if not, set to "default" and they will be set as the average+-(3*stddev)
