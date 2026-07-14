@@ -1,7 +1,6 @@
 #!/bin/bash
 # USAGE:
-# utils/gather_genomes.X.sh taxID_# output_dir_name
-
+# utils/gather_genomes.X.sh taxID_# PATH_TO/output_dir_name
 
 source ~/.bash_profile
 #checkM and R are incompatable in conda, so this script needs its own conda ENV
@@ -13,11 +12,12 @@ checkm-genome bbmap entrez-direct ncbi-datasets-cli
 
 conda activate gather_genomes || exit
 
-#proxy-work
 
 export taxon="$1"
-export NCBI_assemblies=$2
-wd=$(pwd)/$NCBI_assemblies
+export $wd=$2
+
+
+
 threads=$3
 # Set these if you hav a good idea of the expected values
 # if not, set to "default" and they will be set as the average+-(3*stddev)
