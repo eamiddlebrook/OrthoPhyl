@@ -77,11 +77,85 @@ echo "
 	#   led to a few corrupt gz files (~6/150)
 	#   while 0/880 DL'd with datasets were corrupt
 	#   Plus datasets is natively multithreaded
-	datasets download genome taxon $taxon --dehydrated
-	unzip ncbi_dataset.zip
-	datasets rehydrate --gzip --directory ./
+	
+	# Download with retry logic for NCBI server failures
+	max_retries=3
+	attempt=1
+	success=false
+	
+	while [ $attempt -le $max_retries ] && [ "$success" = "false" ]; do
+		echo "Download attempt $attempt of $max_retries..."
+		
+		# Clean up any partial downloads from previous attempts
+		if [ $attempt -gt 1 ]; then
+			echo "Cleaning up partial downloads from previous attempt..."
+			rm -rf ncbi_dataset ncbi_dataset.zip
+		fi
+		
+		# Download and dehydrate
+		if datasets download genome taxon $taxon --dehydrated; then
+			if unzip -q ncbi_dataset.zip; then
+				# Rehydrate with error checking
+				if datasets rehydrate --gzip --directory ./ 2>&1 | tee rehydrate.log; then
+					# Check for 503 errors in output
+					if grep -q "503 Service Unavailable" rehydrate.log; then
+						unavailable_count=$(grep -c "503 Service Unavailable" rehydrate.log)
+						echo "WARNING: $unavailable_count files unavailable due to NCBI server errors (503)"
+						
+						# Check if we got at least some files
+						if [ -d "ncbi_dataset/data" ]; then
+							retrieved_count=$(ls ncbi_dataset/data/ | grep -c GC)
+							echo "Retrieved $retrieved_count assemblies (some failed)"
+							
+							if [ $retrieved_count -gt 0 ]; then
+								if [ $attempt -lt $max_retries ]; then
+									echo "Will retry to get missing files..."
+								else
+									echo "WARNING: Proceeding with $retrieved_count assemblies (some downloads failed)"
+									echo "You may want to re-run this later to get complete dataset"
+									success=true
+								fi
+							else
+								echo "ERROR: No assemblies retrieved"
+							fi
+						else
+							echo "ERROR: ncbi_dataset/data/ directory not created"
+						fi
+					else
+						# No errors in rehydration
+						echo "✓ Download completed successfully"
+						success=true
+					fi
+				else
+					echo "ERROR: Rehydration failed"
+				fi
+			else
+				echo "ERROR: Failed to unzip ncbi_dataset.zip"
+			fi
+		else
+			echo "ERROR: datasets download command failed"
+		fi
+		
+		# If not successful and more retries available, wait and retry
+		if [ "$success" = "false" ] && [ $attempt -lt $max_retries ]; then
+			# Exponential backoff: 30s, 60s, 120s
+			wait_time=$((30 * 2**(attempt-1)))
+			echo "Waiting ${wait_time}s before retry (NCBI servers may be overloaded)..."
+			sleep $wait_time
+		fi
+		
+		attempt=$((attempt + 1))
+	done
+	
+	if [ "$success" = "false" ]; then
+		echo "ERROR: Failed to download genomes after $max_retries attempts"
+		echo "NCBI servers may be experiencing issues. Try again later."
+		exit 1
+	fi
+	
 	# generate a file with all accessions grabbed by datasets
 	ls ncbi_dataset/data/ | grep GC > assemblies_datasets.names
+	echo "Successfully retrieved $(cat assemblies_datasets.names | wc -l) assemblies"
 }
 
 

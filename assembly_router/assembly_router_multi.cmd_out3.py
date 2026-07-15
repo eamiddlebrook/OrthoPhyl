@@ -500,8 +500,8 @@ class MultiDatabaseRouter:
                     logger.warning(f"Line {line_num}: insufficient fields")
                     continue
                 
-                assembly_path = Path(fields[0])
-                taxonomy = fields[1]
+                assembly_path = Path(fields[0]).expanduser()  # Expand ~ to home directory
+                taxonomy = fields[1].strip('"')  # Remove quotes if present
                 assembly_id = fields[2] if len(fields) > 2 else None
                 
                 try:
@@ -637,8 +637,8 @@ Examples:
             decisions = router.batch_route(Path(args.batch))
         else:
             decision = router.route_assembly(
-                Path(args.assembly),
-                args.taxonomy,
+                Path(args.assembly).expanduser(),  # Expand ~ to home directory
+                args.taxonomy.strip('"'),  # Remove quotes if present
                 args.assembly_id
             )
             decisions = [decision]
