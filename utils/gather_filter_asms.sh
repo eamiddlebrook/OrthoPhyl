@@ -14,8 +14,23 @@ conda activate gather_genomes || exit
 
 
 export taxon="$1"
-export wd=$2
+# deal with WD below
 threads=$3
+
+## Convert wd to absolute path (handles relative paths, ~, and absolute paths)
+if [[ "$2" = ~* ]]; then
+    # Expand tilde
+    wd="${2/#\~/$HOME}"
+elif [[ "$2" = /* ]]; then
+	# Already absolute path
+    export wd="$2"
+else
+    # Relative path - make absolute
+	export wd="$(cd "$(dirname "$2")" 2>/dev/null && pwd)/$(basename "$2")"
+fi
+
+
+echo "Working directory (absolute): $wd"
 # Set these if you hav a good idea of the expected values
 # if not, set to "default" and they will be set as the average+-(3*stddev)
 # of course stddev is a bit weird because the values are almost surely not normal..
@@ -152,7 +167,6 @@ echo "
 	
 	# generate a file with all accessions grabbed by datasets
 	ls ncbi_dataset/data/ | grep GC > assemblies_datasets.names
-	echo "Successfully retrieved $(cat assemblies_datasets.names | wc -l) assemblies"
 }
 
 
@@ -205,15 +219,15 @@ get_asm_metadata () {
 
 get_non_datasets_assemblies () {
 	echo "############################################"
-        echo "###### Identify and DL all assemblies ######"
-        echo "#### in NCBI asm DB but not in datasets ####"
-        echo "############################################"
+	echo "###### Identify and DL all assemblies ######"
+	echo "#### in NCBI asm DB but not in datasets ####"
+	echo "############################################"
 
 	#get info for assemblies not in datasets
 	#  Uses All-$taxon.assembly.BS_to_meta to identify asm accessions
-        cat All-$taxon.assembly.BS_to_meta | \
-        grep -vf assemblies_datasets_uniq.names \
-        > assemblies_not_in_datasets.BS_to_meta
+	cat All-$taxon.assembly.BS_to_meta | \
+	grep -vf assemblies_datasets_uniq.names \
+	> assemblies_not_in_datasets.BS_to_meta
 
 	mkdir assemblies_additional
 	cd assemblies_additional
@@ -390,7 +404,7 @@ get_stats_with_checkM () {
 	max_genomes=200
 	threads=$threads
 	checkM_input=$1
-        checkM_dir=$2
+    checkM_dir=$2
 	checkM_type=$3
 	suffix=$4
 	if [[ $checkM_type == "protien" ]]
@@ -402,23 +416,23 @@ get_stats_with_checkM () {
 	else
 		echo "Unknown checkM input type" && exit
 	fi
-        mkdir $checkM_dir
-        cd $checkM_dir || exit
-        # split assemblies into different directories
-        J=0
+	mkdir $checkM_dir
+	cd $checkM_dir || exit
+	# split assemblies into different directories
+	J=0
 	K=0
 	for I in $(ls $checkM_input/*.$suffix)
         do
           	if [ $((J % max_genomes)) -eq 0 ]
-                then
-                    	K=$((K+1))
-                        mkdir $checkM_dir/${checkM_type}_${K}
-                        mkdir $checkM_dir/${checkM_type}_${K}_out
-                        cd $checkM_dir/${checkM_type}_${K}
-                fi
-                # make simlinks for assembly/proteome subsets
-                ln -s $I ./
-                J=$((J+1))
+			then
+					K=$((K+1))
+					mkdir $checkM_dir/${checkM_type}_${K}
+					mkdir $checkM_dir/${checkM_type}_${K}_out
+					cd $checkM_dir/${checkM_type}_${K}
+			fi
+			# make simlinks for assembly/proteome subsets
+			ln -s $I ./
+			J=$((J+1))
         done
 
         # run checkM on each proteome subset
