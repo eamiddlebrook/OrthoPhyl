@@ -582,11 +582,10 @@ class PipelineWrapper:
         cmd = [
             str(self.orthophyl_script),
             '-g', str(input_dir),
-            '-o', str(output_dir),
+            '-s', str(output_dir),
             '-t', str(self.threads),
-            '--tree_method', 'iqtree',
-            '--TREE_DATA', 'CDS',
-            '--use_partitions', 'true'
+            '-p', 'iqtree',
+            '-o', 'CDS'
         ]
         
         logger.info(f"\n  Running OrthoPhyl for {taxon_name}...")
