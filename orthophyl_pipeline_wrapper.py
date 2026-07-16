@@ -472,14 +472,29 @@ class PipelineWrapper:
             
             # Stage 1: Download genomes
             download_dir = self.orthophyl_dir / "downloads" / taxon_name
-            if not self._check_checkpoint(f"download_{taxon_name}") or not self.resume:
-                if not self.skip_download:
-                    self._download_genomes(taxon_name, download_dir)
-                    self._write_checkpoint(f"download_{taxon_name}")
-                else:
-                    logger.info(f"  Skipping download (--skip-download)")
-            else:
+            
+            # Check if download already completed successfully
+            download_complete = self._verify_download_complete(download_dir, taxon_name)
+            
+            if download_complete and self.resume:
                 logger.info(f"  ✓ Download already complete (resuming)")
+                genomes_to_keep = download_dir / "genomes_to_keep"
+                genome_files = list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta"))
+                logger.info(f"    Found {len(genome_files)} genomes")
+            elif not self.skip_download:
+                self._download_genomes(taxon_name, download_dir)
+                self._write_checkpoint(f"download_{taxon_name}")
+            else:
+                logger.info(f"  Skipping download (--skip-download)")
+                # Verify genomes exist if skipping download
+                genomes_to_keep = download_dir / "genomes_to_keep"
+                if not genomes_to_keep.exists():
+                    raise FileNotFoundError(
+                        f"--skip-download specified but no genomes found at: {genomes_to_keep}\n"
+                        f"Please either:\n"
+                        f"  1. Remove --skip-download to allow downloading\n"
+                        f"  2. Manually place genomes in {genomes_to_keep}/"
+                    )
             
             # Stage 2: Add query genomes
             genomes_to_keep = download_dir / "genomes_to_keep"
@@ -563,13 +578,36 @@ class PipelineWrapper:
         if result.returncode != 0:
             raise RuntimeError(f"Genome download failed for {taxon_name}. Check log: {log_file}")
         
-        # Count downloaded genomes
+        # Verify download success
         genomes_to_keep = output_dir / "genomes_to_keep"
-        if genomes_to_keep.exists():
-            n_genomes = len(list(genomes_to_keep.glob("*.fna")))
-            logger.info(f"  ✓ Downloaded and filtered {n_genomes} genomes")
-        else:
-            raise FileNotFoundError(f"Expected directory not found: {genomes_to_keep}")
+        if not genomes_to_keep.exists():
+            raise FileNotFoundError(
+                f"Download appeared to succeed but expected directory not found: {genomes_to_keep}\n"
+                f"Check log: {log_file}"
+            )
+        
+        # Count downloaded genomes
+        genome_files = list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta"))
+        n_genomes = len(genome_files)
+        
+        if n_genomes == 0:
+            raise RuntimeError(
+                f"Download completed but no genomes found in {genomes_to_keep}\n"
+                f"This could mean:\n"
+                f"  - No genomes available for taxon '{taxon_name}' in NCBI\n"
+                f"  - All genomes filtered out due to quality thresholds\n"
+                f"  - Incorrect taxon name\n"
+                f"Check log: {log_file}"
+            )
+        
+        logger.info(f"  ✓ Downloaded and filtered {n_genomes} genomes")
+        
+        # Write success marker for this download
+        success_file = output_dir / ".download_complete"
+        with open(success_file, 'w') as f:
+            f.write(f"Download completed: {datetime.now().isoformat()}\n")
+            f.write(f"Taxon: {taxon_name}\n")
+            f.write(f"Genomes: {n_genomes}\n")
     
     def _run_orthophyl(
         self,
@@ -775,6 +813,43 @@ class PipelineWrapper:
         """Write a checkpoint flag."""
         checkpoint_file = self.checkpoint_dir / f"{name}.flag"
         checkpoint_file.write_text(datetime.now().isoformat())
+    
+    def _verify_download_complete(self, download_dir: Path, taxon_name: str) -> bool:
+        """Verify that genome download completed successfully.
+        
+        Checks for:
+        1. Checkpoint flag exists
+        2. Download success marker exists
+        3. genomes_to_keep directory exists and contains genomes
+        
+        Returns:
+            bool: True if download is complete and valid
+        """
+        # Check checkpoint
+        if not self._check_checkpoint(f"download_{taxon_name}"):
+            return False
+        
+        # Check success marker
+        success_file = download_dir / ".download_complete"
+        if not success_file.exists():
+            logger.warning(f"  ⚠ Checkpoint exists but no success marker found")
+            logger.warning(f"    Download may have been interrupted")
+            return False
+        
+        # Check genomes_to_keep directory
+        genomes_to_keep = download_dir / "genomes_to_keep"
+        if not genomes_to_keep.exists():
+            logger.warning(f"  ⚠ Success marker exists but genomes_to_keep directory not found")
+            return False
+        
+        # Check for genome files
+        genome_files = list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta"))
+        if len(genome_files) == 0:
+            logger.warning(f"  ⚠ genomes_to_keep directory exists but contains no genomes")
+            return False
+        
+        # All checks passed
+        return True
     
     def _load_routing_results(self) -> Dict:
         """Load previously computed routing results."""
