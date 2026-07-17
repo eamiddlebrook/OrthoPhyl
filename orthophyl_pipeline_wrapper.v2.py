@@ -57,7 +57,8 @@ class PipelineWrapper:
         resume: bool = False,
         skip_download: bool = False,
         dry_run: bool = False,
-        verbose: bool = False
+        verbose: bool = False,
+        low_ram: bool = False
     ):
         self.input_file = Path(input_file)
         self.database_dir = Path(database_dir)
@@ -69,6 +70,7 @@ class PipelineWrapper:
         self.skip_download = skip_download
         self.dry_run = dry_run
         self.verbose = verbose
+        self.low_ram = low_ram
         
         # Script paths (relative to this wrapper)
         self.script_dir = Path(__file__).parent
@@ -115,6 +117,7 @@ class PipelineWrapper:
                 logger.info(f"  Gather script: {self.gather_script}")
                 logger.info(f"  Resume: {self.resume}")
                 logger.info(f"  Skip download: {self.skip_download}")
+                logger.info(f"  Low RAM mode: {self.low_ram}")
             
             # Phase 1: Initialization
             self._phase_initialization()
@@ -575,6 +578,11 @@ class PipelineWrapper:
             str(self.threads)
         ]
         
+        # Add low RAM flag if specified
+        if self.low_ram:
+            cmd.append('--reduced_tree')
+            logger.info(f"  Using CheckM --reduced_tree option (low RAM mode)")
+        
         logger.info(f"  Downloading genomes for {taxon_name}...")
         if self.verbose:
             logger.info(f"    Command: {' '.join(cmd)}")
@@ -1013,6 +1021,11 @@ Examples:
         action='store_true',
         help='Enable verbose output (show all commands and detailed progress)'
     )
+    parser.add_argument(
+        '--low-ram',
+        action='store_true',
+        help='Use reduced memory mode for CheckM (passes --reduced_tree to gather_filter_asms.sh)'
+    )
     
     args = parser.parse_args()
     
@@ -1032,7 +1045,8 @@ Examples:
         resume=args.resume,
         skip_download=args.skip_download,
         dry_run=args.dry_run,
-        verbose=args.verbose
+        verbose=args.verbose,
+        low_ram=args.low_ram
     )
     
     return wrapper.run()
