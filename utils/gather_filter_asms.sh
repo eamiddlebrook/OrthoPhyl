@@ -17,6 +17,13 @@ export taxon="$1"
 # deal with WD below
 threads=$3
 
+# Check for --reduced_tree flag (low RAM mode for CheckM)
+reduced_tree_flag=""
+if [[ "$4" == "--reduced_tree" ]]; then
+    reduced_tree_flag="--reduced_tree"
+    echo "Low RAM mode enabled: Using CheckM --reduced_tree option"
+fi
+
 ## Convert wd to absolute path (handles relative paths, ~, and absolute paths)
 if [[ "$2" = ~* ]]; then
     # Expand tilde
@@ -407,14 +414,21 @@ get_stats_with_checkM () {
     checkM_dir=$2
 	checkM_type=$3
 	suffix=$4
+	
+	# Add reduced_tree flag if set (passed from wrapper)
 	if [[ $checkM_type == "protien" ]]
 	then
-		checkM_args="-t $threads -g -x $suffix"
+		checkM_args="-t $threads -g -x $suffix $reduced_tree_flag"
 	elif [[ $checkM_type == "genome" ]]
 	then
-		checkM_args="-t $threads -x $suffix"
+		checkM_args="-t $threads -x $suffix $reduced_tree_flag"
 	else
 		echo "Unknown checkM input type" && exit
+	fi
+	
+	# Log CheckM settings
+	if [[ -n "$reduced_tree_flag" ]]; then
+		echo "  Using --reduced_tree option (low RAM mode)"
 	fi
 	mkdir $checkM_dir
 	cd $checkM_dir || exit
@@ -442,6 +456,7 @@ get_stats_with_checkM () {
         do
           	in=$checkM_dir/${checkM_type}_${J}
                 out=$checkM_dir/${checkM_type}_${J}_out
+                echo "  Running CheckM batch $J of $K with args: ${checkM_args}"
                 checkm lineage_wf ${checkM_args} $in $out
                 J=$((J+1))
         done
