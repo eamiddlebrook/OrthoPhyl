@@ -503,10 +503,11 @@ get_asm_stats () {
 		> $wd/assemblies_all.stats.txt
 	
 	# Parse bbmap output and reformat
-	# bbmap format: #filename n_scaffolds scaf_bp contig_bp ... scaf_N50(col8) ... gc_avg(col13) ...
+	# bbmap columns: n_scaffolds(1) scaf_bp(3) scaf_N50(6) gc_avg(18) filename(20)
+	# Target CheckM format: acc(1) ... GC(14) GC_std(15) Genome-size(16) #scaffs(17) scaff_N50(18)
 	cat assemblies_all.stats.bbmap.txt | \
 		grep -v "^#" | \
-		awk 'NR>1 {print $1,$2,$3,$8,$13}' | \
+		awk 'NR>1 {print $20,$1,$3,$6,$18}' | \
 		sed 's|.*/||; s/.fna//g' | \
 		awk '{print $1,"bbmap","NA","NA","NA","NA","NA","NA","NA","NA","0.00","100","0",$5,"NA",$3,$2,$4}' \
 		>> $wd/assemblies_all.stats.txt
