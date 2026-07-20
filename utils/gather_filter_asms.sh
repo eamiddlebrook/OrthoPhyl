@@ -19,10 +19,18 @@ threads=$3
 
 # Check for --reduced_tree flag (low RAM mode for CheckM)
 reduced_tree_flag=""
-if [[ "$4" == "--reduced_tree" ]]; then
-    reduced_tree_flag="--reduced_tree"
-    echo "Low RAM mode enabled: Using CheckM --reduced_tree option"
-fi
+use_bbmap=false
+
+# Parse optional flags
+for arg in "$@"; do
+    if [[ "$arg" == "--reduced_tree" ]]; then
+        reduced_tree_flag="--reduced_tree"
+        echo "Low RAM mode enabled: Using CheckM --reduced_tree option"
+    elif [[ "$arg" == "--use-bbmap" ]]; then
+        use_bbmap=true
+        echo "Using bbmap statswrapper instead of CheckM for genome statistics"
+    fi
+done
 
 ## Convert wd to absolute path (handles relative paths, ~, and absolute paths)
 if [[ "$2" = ~* ]]; then
@@ -77,8 +85,13 @@ main () {
 	all_sample_metadata
 	aggregate_assemblies "$wd"/assemblies_all.TMP
 	#filter_asm_by_taxCheck
-	get_stats_with_checkM "$wd"/assemblies_all.TMP/ $wd/checkM_out genome fna
-	###get_asm_stats # bbmap stats superseded by checkm
+	
+	# Choose stats method based on flag
+	if [ "$use_bbmap" = true ]; then
+		get_asm_stats "$wd"/assemblies_all.TMP/
+	else
+		get_stats_with_checkM "$wd"/assemblies_all.TMP/ $wd/checkM_out genome fna
+	fi
 	filter_asm_by_stats $MIN_LEN $MAX_LEN $MIN_N50 $MIN_GC $MAX_GC $MAX_dup $MIN_completeness $MAX_contam
 	get_all_asms_to_remove
 	filter_for_redundancy
@@ -108,12 +121,12 @@ echo "
 		# Clean up any partial downloads from previous attempts
 		if [ $attempt -gt 1 ]; then
 			echo "Cleaning up partial downloads from previous attempt..."
-			rm -rf ncbi_dataset ncbi_dataset.zip
+			rm -rf ncbi_dataset ncbi_dataset.zip README.md rehydrate.log
 		fi
 		
 		# Download and dehydrate
 		if datasets download genome taxon $taxon --dehydrated; then
-			if unzip -q ncbi_dataset.zip; then
+			if unzip -o -q ncbi_dataset.zip; then
 				# Rehydrate with error checking
 				if datasets rehydrate --gzip --directory ./ 2>&1 | tee rehydrate.log; then
 					# Check for 503 errors in output
@@ -470,21 +483,37 @@ get_stats_with_checkM () {
 		>> $wd/assemblies_all.stats.txt
 }
 
-# CheckM gives all these stats, plus the completeness etc.
-#   might be faster though, so if someone wants to only filter on simples stats
-#   It could be useful...will save for now. 
-#   Could format like CheckM output to use the same filtering function
 get_asm_stats () {
 	echo "###############################################"
         echo "###### get stats (BBmap) for assemblies  ######"
 	echo "###############################################"
+	local input_dir=$1
 	cd $wd
-	# get stats for assemblies.
-	statswrapper.sh assemblies_additional/* > assemblies_additional.stats
-	statswrapper.sh assemblies_datasets_uniq/* > assemblies_datasets.stats
-	cat assemblies_additional.stats assemblies_datasets.stats |\
-	grep -v n_scaffolds > assemblies_all.stats.txt
 
+	echo "Running statswrapper.sh on assemblies..."
+	# Run bbmap statswrapper on all assemblies
+	statswrapper.sh ${input_dir}*.fna > assemblies_all.stats.bbmap.txt
+	
+	# Convert bbmap output to format expected by filter function
+	# bbmap columns: #file n_scaffolds scaf_bp ... n50 ... gc_avg
+	# Expected format matches checkM: acc lineage ... duplication_ratio completeness contamination GC GC_std Genome-size #scaffs scaff_N50
+	# For bbmap: set dup=0, completeness=100, contamination=0 as placeholders
+	echo "Converting bbmap stats to expected format..."
+	echo "acc lineage #markerGenes #genomes_based_on missing 1copy 2copy 3copy 4copy 5+copy duplication_ratio completeness contamination GC GC_std Genome-size #scaffs scaff_N50" \
+		> $wd/assemblies_all.stats.txt
+	
+	# Parse bbmap output and reformat
+	# bbmap format: #filename n_scaffolds scaf_bp contig_bp ... scaf_N50(col8) ... gc_avg(col13) ...
+	cat assemblies_all.stats.bbmap.txt | \
+		grep -v "^#" | \
+		awk 'NR>1 {print $1,$2,$3,$8,$13}' | \
+		sed 's|.*/||; s/.fna//g' | \
+		awk '{print $1,"bbmap","NA","NA","NA","NA","NA","NA","NA","NA","0.00","100","0",$5,"NA",$3,$2,$4}' \
+		>> $wd/assemblies_all.stats.txt
+	
+	echo "Stats collection complete using bbmap"
+	echo "Note: Completeness, contamination, and duplication set to placeholders (100, 0, 0)"
+	echo "      Filtering will only use: genome size, N50, and GC content"
 }
 
 filter_asm_by_stats () {
