@@ -57,7 +57,7 @@ class PipelineWrapper:
         resume: bool = False,
         skip_download: bool = False,
         dry_run: bool = False,
-        verbose: bool = False,
+        verbose: int = 0,
         low_ram: bool = False,
         use_bbmap: bool = False
     ):
@@ -106,8 +106,10 @@ class PipelineWrapper:
             logger.info("ORTHOPHYL PIPELINE WRAPPER")
             if self.dry_run:
                 logger.info("*** DRY RUN MODE - No commands will be executed ***")
-            if self.verbose:
-                logger.info("*** VERBOSE MODE - Detailed output enabled ***")
+            if self.verbose == 1:
+                logger.info("*** VERBOSE MODE (Level 1) - Showing stdout ***")
+            elif self.verbose >= 2:
+                logger.info("*** VERBOSE MODE (Level 2) - Showing stdout and stderr ***")
             logger.info("=" * 70)
             
             if self.verbose:
@@ -275,7 +277,12 @@ class PipelineWrapper:
         # Run routing
         log_file = self.logs_dir / "routing.log"
         with open(log_file, 'w') as f:
-            result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
+            if self.verbose == 1:
+                result = subprocess.run(cmd, stderr=f, text=True)
+            elif self.verbose >= 2:
+                result = subprocess.run(cmd, text=True)
+            else:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
         
         if result.returncode != 0:
             raise RuntimeError(f"Routing failed. Check log: {log_file}")
@@ -420,13 +427,27 @@ class PipelineWrapper:
         
         log_file = self.logs_dir / f"releaf_{database_name}.log"
         with open(log_file, 'w') as f:
-            result = subprocess.run(
-                cmd,
-                stdout=f,
-                stderr=subprocess.STDOUT,
-                text=True,
-                cwd=str(output_dir)
-            )
+            if self.verbose == 1:
+                result = subprocess.run(
+                    cmd,
+                    stderr=f,
+                    text=True,
+                    cwd=str(output_dir)
+                )
+            elif self.verbose >= 2:
+                result = subprocess.run(
+                    cmd,
+                    text=True,
+                    cwd=str(output_dir)
+                )
+            else:
+                result = subprocess.run(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    cwd=str(output_dir)
+                )
         
         if result.returncode != 0:
             raise RuntimeError(f"ReLeaf failed for {database_name}. Check log: {log_file}")
@@ -473,7 +494,12 @@ class PipelineWrapper:
         
         log_file = self.logs_dir / f"releaf_version_{database_name}.log"
         with open(log_file, 'w') as f:
-            result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, universal_newlines=True)
+            if self.verbose == 1:
+                result = subprocess.run(cmd, stderr=f, text=True)
+            elif self.verbose >= 2:
+                result = subprocess.run(cmd, text=True)
+            else:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
         
         if result.returncode != 0:
             logger.error(f"  ✗ Failed to create database version. Check log: {log_file}")
@@ -600,12 +626,24 @@ class PipelineWrapper:
         
         log_file = self.logs_dir / f"download_{taxon_name}.log"
         with open(log_file, 'w') as f:
-            result = subprocess.run(
-                cmd,
-                stdout=f,
-                stderr=subprocess.STDOUT,
-                text=True
-            )
+            if self.verbose == 1:
+                result = subprocess.run(
+                    cmd,
+                    stderr=f,
+                    text=True
+                )
+            elif self.verbose >= 2:
+                result = subprocess.run(
+                    cmd,
+                    text=True
+                )
+            else:
+                result = subprocess.run(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    text=True
+                )
         
         if result.returncode != 0:
             raise RuntimeError(f"Genome download failed for {taxon_name}. Check log: {log_file}")
@@ -671,12 +709,24 @@ class PipelineWrapper:
         
         log_file = self.logs_dir / f"orthophyl_{taxon_name}.log"
         with open(log_file, 'w') as f:
-            result = subprocess.run(
-                cmd,
-                stdout=f,
-                stderr=subprocess.STDOUT,
-                text=True
-            )
+            if self.verbose == 1:
+                result = subprocess.run(
+                    cmd,
+                    stderr=f,
+                    text=True
+                )
+            elif self.verbose >= 2:
+                result = subprocess.run(
+                    cmd,
+                    text=True
+                )
+            else:
+                result = subprocess.run(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    text=True
+                )
         
         if result.returncode != 0:
             raise RuntimeError(f"OrthoPhyl failed for {taxon_name}. Check log: {log_file}")
@@ -744,7 +794,12 @@ class PipelineWrapper:
         
         log_file = self.logs_dir / f"database_{taxon_name}.log"
         with open(log_file, 'w') as f:
-            result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
+            if self.verbose == 1:
+                result = subprocess.run(cmd, stderr=f, text=True)
+            elif self.verbose >= 2:
+                result = subprocess.run(cmd, text=True)
+            else:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
         
         if result.returncode != 0:
             raise RuntimeError(f"Database creation failed for {taxon_name}. Check log: {log_file}")
@@ -1024,8 +1079,9 @@ Examples:
     )
     parser.add_argument(
         '-v', '--verbose',
-        action='store_true',
-        help='Enable verbose output (show all commands and detailed progress)'
+        action='count',
+        default=0,
+        help='Verbose output: -v shows stdout from subprocesses, -vv shows stdout and stderr'
     )
     parser.add_argument(
         '--low-ram',
