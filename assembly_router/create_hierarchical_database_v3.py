@@ -385,6 +385,7 @@ def create_database_for_run(
     # Create database_config.json
     config = {
         "created": datetime.now().isoformat(),
+        "last_updated": datetime.now().isoformat(),
         "version": "1.0",
         "database_type": "hierarchical_taxonomy",
         "clade_name": clade_name,
@@ -406,7 +407,18 @@ def create_database_for_run(
                 "data_type": t['data_type']
             }
             for t in validation['available_trees']
-        ]
+        ],
+        # Taxon source metadata (for auto-gather feature)
+        "source_taxon_name": None,
+        "source_taxid": None,
+        "source_rank": None,
+        "assembly_accessions": [],
+        "n_assemblies_at_creation": validation['n_genomes'],
+        "quality_filters": {
+            "min_completeness": None,
+            "max_contamination": None,
+            "min_n50": None
+        }
     }
     
     config_file = db_dir / "database_config.json"

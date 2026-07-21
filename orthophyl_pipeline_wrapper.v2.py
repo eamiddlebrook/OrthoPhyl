@@ -48,9 +48,9 @@ class PipelineWrapper:
     
     def __init__(
         self,
-        input_file: Path,
-        database_dir: Path,
-        output_dir: Path,
+        input_file: Optional[Path] = None,
+        database_dir: Path = None,
+        output_dir: Path = None,
         threads: int = 8,
         gather_script: Optional[Path] = None,
         orthophyl_runs_tsv: Optional[Path] = None,
@@ -59,10 +59,14 @@ class PipelineWrapper:
         dry_run: bool = False,
         verbose: int = 0,
         low_ram: bool = False,
-        use_bbmap: bool = False
+        use_bbmap: bool = False,
+        # NEW: Taxon mode parameters
+        taxon: Optional[str] = None,
+        taxon_rank: Optional[str] = None,
+        update_existing: bool = False
     ):
-        self.input_file = Path(input_file)
-        self.database_dir = Path(database_dir)
+        self.input_file = Path(input_file) if input_file else None
+        self.database_dir = Path(database_dir) if database_dir else None
         self.output_dir = Path(output_dir)
         self.threads = threads
         self.gather_script = Path(gather_script) if gather_script else None
@@ -73,6 +77,12 @@ class PipelineWrapper:
         self.verbose = verbose
         self.low_ram = low_ram
         self.use_bbmap = use_bbmap
+        
+        # NEW: Taxon mode
+        self.taxon = taxon
+        self.taxon_rank = taxon_rank
+        self.update_existing = update_existing
+        self.taxon_mode = taxon is not None
         
         # Script paths (relative to this wrapper)
         self.script_dir = Path(__file__).parent
@@ -104,6 +114,10 @@ class PipelineWrapper:
         try:
             logger.info("=" * 70)
             logger.info("ORTHOPHYL PIPELINE WRAPPER")
+            if self.taxon_mode:
+                logger.info(f"*** TAXON MODE: {self.taxon} ***")
+                if self.update_existing:
+                    logger.info("*** UPDATE MODE: Checking for new assemblies ***")
             if self.dry_run:
                 logger.info("*** DRY RUN MODE - No commands will be executed ***")
             if self.verbose == 1:
@@ -114,7 +128,12 @@ class PipelineWrapper:
             
             if self.verbose:
                 logger.info(f"Configuration:")
-                logger.info(f"  Input file: {self.input_file}")
+                if self.taxon_mode:
+                    logger.info(f"  Taxon: {self.taxon}")
+                    logger.info(f"  Taxon rank: {self.taxon_rank or 'auto-detect'}")
+                    logger.info(f"  Update existing: {self.update_existing}")
+                else:
+                    logger.info(f"  Input file: {self.input_file}")
                 logger.info(f"  Database dir: {self.database_dir}")
                 logger.info(f"  Output dir: {self.output_dir}")
                 logger.info(f"  Threads: {self.threads}")
@@ -127,26 +146,13 @@ class PipelineWrapper:
             # Phase 1: Initialization
             self._phase_initialization()
             
-            # Phase 2: Routing
-            routing_results = self._phase_routing()
-            
-            # Phase 3a: ReLeaf route
-            if routing_results['releaf_batch']:
-                self._phase_releaf(routing_results['releaf_batch'])
-            
-            # Phase 3b: OrthoPhyl route
-            if routing_results['orthophyl_batch']:
-                self._phase_orthophyl(routing_results['orthophyl_batch'])
-            
-            # Phase 4: Results aggregation
-            self._phase_aggregation()
-            
-            logger.info("=" * 70)
-            logger.info("PIPELINE COMPLETE!")
-            logger.info("=" * 70)
-            
-            self._save_final_status()
-            return 0
+            # Branch based on mode
+            if self.taxon_mode:
+                # NEW: Taxon mode workflow
+                return self._run_taxon_mode()
+            else:
+                # Original: Batch mode workflow
+                return self._run_batch_mode()
             
         except Exception as e:
             logger.error(f"Pipeline failed: {e}", exc_info=True)
@@ -154,6 +160,51 @@ class PipelineWrapper:
             self.pipeline_status['error'] = str(e)
             self._save_final_status()
             return 1
+    
+    def _run_batch_mode(self) -> int:
+        """Run original batch mode workflow."""
+        # Phase 2: Routing
+        routing_results = self._phase_routing()
+        
+        # Phase 3a: ReLeaf route
+        if routing_results['releaf_batch']:
+            self._phase_releaf(routing_results['releaf_batch'])
+        
+        # Phase 3b: OrthoPhyl route
+        if routing_results['orthophyl_batch']:
+            self._phase_orthophyl(routing_results['orthophyl_batch'])
+        
+        # Phase 4: Results aggregation
+        self._phase_aggregation()
+        
+        logger.info("=" * 70)
+        logger.info("PIPELINE COMPLETE!")
+        logger.info("=" * 70)
+        
+        self._save_final_status()
+        return 0
+    
+    def _run_taxon_mode(self) -> int:
+        """Run taxon mode workflow."""
+        # Check if database exists for this taxon
+        existing_db = self._check_existing_taxon_database()
+        
+        if existing_db and self.update_existing:
+            # Update mode: add new assemblies to existing database
+            logger.info(f"\n✓ Found existing database: {existing_db['db_dir']}")
+            logger.info(f"  Current assemblies: {existing_db['n_assemblies']}")
+            return self._run_taxon_update_mode(existing_db)
+        elif existing_db and not self.update_existing:
+            # Database exists but not in update mode
+            logger.error(f"\n✗ Database already exists for taxon '{self.taxon}': {existing_db['db_dir']}")
+            logger.error(f"  Use --update-existing to add new assemblies to this database")
+            logger.error(f"  Or use a different --output-dir to create a new run")
+            return 1
+        else:
+            # Create new database from taxon
+            logger.info(f"\n→ No existing database found for taxon '{self.taxon}'")
+            logger.info(f"  Creating new database...")
+            return self._run_taxon_create_mode()
     
     def _phase_initialization(self):
         """Phase 1: Initialize directory structure and validate dependencies."""
@@ -980,6 +1031,294 @@ class PipelineWrapper:
         
         return {'releaf_batch': releaf_batch, 'orthophyl_batch': dict(orthophyl_batch)}
     
+    def _check_existing_taxon_database(self) -> Optional[Dict]:
+        """Check if a database exists for the specified taxon.
+        
+        Returns:
+            Dict with database info if found, None otherwise
+        """
+        logger.info(f"\nChecking for existing database for taxon: {self.taxon}")
+        
+        if not self.database_dir or not self.database_dir.exists():
+            return None
+        
+        # Search all databases for matching taxon
+        for db_dir in self.database_dir.glob("*_db"):
+            config_file = db_dir / "database_config.json"
+            if not config_file.exists():
+                continue
+            
+            try:
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                
+                # Check if source_taxon_name matches
+                if config.get('source_taxon_name') == self.taxon:
+                    logger.info(f"  ✓ Found matching database by taxon name")
+                    return {
+                        'db_dir': db_dir,
+                        'config': config,
+                        'n_assemblies': len(config.get('assembly_accessions', [])),
+                        'clade_name': config.get('clade_name')
+                    }
+                
+                # Also check clade_name for fuzzy match
+                if config.get('clade_name', '').lower() == self.taxon.lower():
+                    logger.info(f"  ✓ Found matching database by clade name")
+                    return {
+                        'db_dir': db_dir,
+                        'config': config,
+                        'n_assemblies': config.get('n_genomes', 0),
+                        'clade_name': config.get('clade_name')
+                    }
+            except Exception as e:
+                logger.warning(f"  ⚠ Error reading {config_file}: {e}")
+                continue
+        
+        return None
+    
+    def _run_taxon_create_mode(self) -> int:
+        """Create new database from taxon query."""
+        logger.info("\n" + "=" * 70)
+        logger.info("TAXON MODE: CREATE NEW DATABASE")
+        logger.info("=" * 70)
+        
+        # Import taxon gatherer
+        sys.path.insert(0, str(self.script_dir / "utils"))
+        try:
+            from taxon_assembly_gatherer import TaxonAssemblyGatherer
+        except ImportError as e:
+            raise ImportError(f"Failed to import TaxonAssemblyGatherer: {e}")
+        
+        # Query NCBI for assemblies
+        logger.info(f"\nQuerying NCBI for {self.taxon} assemblies...")
+        gatherer = TaxonAssemblyGatherer(
+            taxon_name=self.taxon,
+            rank=self.taxon_rank,
+            output_dir=self.output_dir / "taxon_query"
+        )
+        
+        if self.dry_run:
+            logger.info("  [DRY RUN] Would query NCBI and download assemblies")
+            logger.info("=" * 70)
+            logger.info("PIPELINE COMPLETE (DRY RUN)!")
+            logger.info("=" * 70)
+            self._save_final_status()
+            return 0
+        
+        # Get assemblies
+        assemblies = gatherer.query_ncbi()
+        
+        if not assemblies:
+            logger.error(f"✗ No assemblies found for taxon '{self.taxon}'")
+            return 1
+        
+        logger.info(f"  ✓ Found {len(assemblies)} assemblies")
+        
+        # Download assemblies
+        logger.info(f"\nDownloading {len(assemblies)} assemblies...")
+        download_dir = self.output_dir / "downloaded_assemblies"
+        download_dir.mkdir(parents=True, exist_ok=True)
+        
+        gatherer.download_assemblies(assemblies, download_dir)
+        
+        # Run OrthoPhyl on downloaded assemblies
+        logger.info(f"\nRunning OrthoPhyl on {self.taxon} assemblies...")
+        orthophyl_output = self.output_dir / "orthophyl_run"
+        
+        self._run_orthophyl(
+            input_dir=download_dir,
+            output_dir=orthophyl_output,
+            taxon_name=self.taxon,
+            assemblies=[]  # No query assemblies in create mode
+        )
+        
+        # Create database with metadata
+        logger.info(f"\nCreating database for {self.taxon}...")
+        self._create_taxon_database(
+            taxon_name=self.taxon,
+            orthophyl_output=orthophyl_output,
+            gatherer=gatherer,
+            assemblies=assemblies
+        )
+        
+        logger.info("=" * 70)
+        logger.info("TAXON MODE COMPLETE!")
+        logger.info("=" * 70)
+        logger.info(f"  Database created: {self.taxon}_db")
+        logger.info(f"  Assemblies: {len(assemblies)}")
+        
+        self._save_final_status()
+        return 0
+    
+    def _run_taxon_update_mode(self, existing_db: Dict) -> int:
+        """Update existing database with new assemblies."""
+        logger.info("\n" + "=" * 70)
+        logger.info("TAXON MODE: UPDATE EXISTING DATABASE")
+        logger.info("=" * 70)
+        
+        # Import taxon gatherer
+        sys.path.insert(0, str(self.script_dir / "utils"))
+        try:
+            from taxon_assembly_gatherer import TaxonAssemblyGatherer
+        except ImportError as e:
+            raise ImportError(f"Failed to import TaxonAssemblyGatherer: {e}")
+        
+        # Query NCBI for assemblies
+        logger.info(f"\nQuerying NCBI for {self.taxon} assemblies...")
+        gatherer = TaxonAssemblyGatherer(
+            taxon_name=self.taxon,
+            rank=self.taxon_rank,
+            output_dir=self.output_dir / "taxon_query"
+        )
+        
+        if self.dry_run:
+            logger.info("  [DRY RUN] Would check for new assemblies and update database")
+            logger.info("=" * 70)
+            logger.info("PIPELINE COMPLETE (DRY RUN)!")
+            logger.info("=" * 70)
+            self._save_final_status()
+            return 0
+        
+        # Get all assemblies
+        all_assemblies = gatherer.query_ncbi()
+        
+        if not all_assemblies:
+            logger.error(f"✗ No assemblies found for taxon '{self.taxon}'")
+            return 1
+        
+        logger.info(f"  ✓ Found {len(all_assemblies)} total assemblies in NCBI")
+        
+        # Compare with existing database
+        existing_accessions = set(existing_db['config'].get('assembly_accessions', []))
+        new_assemblies = [a for a in all_assemblies if a['accession'] not in existing_accessions]
+        
+        if not new_assemblies:
+            logger.info(f"\n✓ Database is up to date! No new assemblies found.")
+            logger.info(f"  Current assemblies: {len(existing_accessions)}")
+            logger.info(f"  NCBI assemblies: {len(all_assemblies)}")
+            self._save_final_status()
+            return 0
+        
+        logger.info(f"\n→ Found {len(new_assemblies)} new assemblies to add")
+        logger.info(f"  Existing: {len(existing_accessions)}")
+        logger.info(f"  New: {len(new_assemblies)}")
+        
+        # Download new assemblies
+        logger.info(f"\nDownloading {len(new_assemblies)} new assemblies...")
+        download_dir = self.output_dir / "new_assemblies"
+        download_dir.mkdir(parents=True, exist_ok=True)
+        
+        gatherer.download_assemblies(new_assemblies, download_dir)
+        
+        # Run ReLeaf to add to existing database
+        logger.info(f"\nRunning ReLeaf to add new assemblies to database...")
+        
+        db_dir = existing_db['db_dir']
+        config = existing_db['config']
+        
+        # Get tree method and data type from config
+        tree_methods = config.get('available_tree_methods', ['iqtree'])
+        tree_data_types = config.get('available_data_types', ['CDS'])
+        tree_method = tree_methods[0] if tree_methods else 'iqtree'
+        tree_data = tree_data_types[0] if tree_data_types else 'CDS'
+        
+        releaf_output = self.output_dir / "releaf_update"
+        
+        self._run_releaf(
+            database_dir=db_dir,
+            input_genomes=download_dir,
+            output_dir=releaf_output,
+            tree_method=tree_method,
+            tree_data=tree_data,
+            database_name=existing_db['clade_name']
+        )
+        
+        # Update database metadata
+        logger.info(f"\nUpdating database metadata...")
+        self._update_taxon_database_metadata(
+            db_dir=db_dir,
+            new_assemblies=new_assemblies
+        )
+        
+        logger.info("=" * 70)
+        logger.info("TAXON UPDATE COMPLETE!")
+        logger.info("=" * 70)
+        logger.info(f"  Database: {existing_db['clade_name']}")
+        logger.info(f"  Added assemblies: {len(new_assemblies)}")
+        logger.info(f"  Total assemblies: {len(existing_accessions) + len(new_assemblies)}")
+        
+        self._save_final_status()
+        return 0
+    
+    def _create_taxon_database(
+        self,
+        taxon_name: str,
+        orthophyl_output: Path,
+        gatherer,
+        assemblies: List[Dict]
+    ):
+        """Create database with taxon metadata."""
+        # Get taxonomy from gatherer
+        taxonomy = gatherer.get_taxonomy_string()
+        
+        # Create database entry
+        self._create_database_entry(
+            taxon_name=taxon_name,
+            orthophyl_output=orthophyl_output,
+            taxonomy=taxonomy
+        )
+        
+        # Update database config with taxon metadata
+        db_dir = self.database_dir / f"{taxon_name}_db"
+        if db_dir.exists():
+            config_file = db_dir / "database_config.json"
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                
+                # Add taxon metadata
+                config['source_taxon_name'] = taxon_name
+                config['source_taxid'] = gatherer.taxid
+                config['source_rank'] = gatherer.rank
+                config['assembly_accessions'] = [a['accession'] for a in assemblies]
+                config['n_assemblies_at_creation'] = len(assemblies)
+                config['last_updated'] = datetime.now().isoformat()
+                
+                # Save updated config
+                with open(config_file, 'w') as f:
+                    json.dump(config, f, indent=2)
+                
+                logger.info(f"  ✓ Updated database metadata with taxon info")
+    
+    def _update_taxon_database_metadata(
+        self,
+        db_dir: Path,
+        new_assemblies: List[Dict]
+    ):
+        """Update database metadata after adding new assemblies."""
+        config_file = db_dir / "database_config.json"
+        if not config_file.exists():
+            logger.warning(f"  ⚠ Config file not found: {config_file}")
+            return
+        
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+        
+        # Update metadata
+        existing_accessions = config.get('assembly_accessions', [])
+        new_accessions = [a['accession'] for a in new_assemblies]
+        config['assembly_accessions'] = existing_accessions + new_accessions
+        config['last_updated'] = datetime.now().isoformat()
+        config['n_genomes'] = len(config['assembly_accessions'])
+        
+        # Save updated config
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        
+        logger.info(f"  ✓ Updated database metadata")
+        logger.info(f"    Total assemblies: {len(config['assembly_accessions'])}")
+    
     def _save_final_status(self):
         """Save final pipeline status."""
         self.pipeline_status['end_time'] = datetime.now().isoformat()
@@ -1094,7 +1433,33 @@ Examples:
         help='Use bbmap statswrapper instead of CheckM for genome statistics (faster, less RAM, but no completeness/contamination filtering)'
     )
     
+    # NEW: Taxon mode arguments
+    parser.add_argument(
+        '--taxon',
+        help='Taxon name for auto-gather mode (e.g., "Methylorubrum"). Mutually exclusive with --input.'
+    )
+    parser.add_argument(
+        '--taxon-rank',
+        choices=['species', 'genus', 'family', 'order', 'class', 'phylum'],
+        help='Taxonomic rank for --taxon query (default: auto-detect)'
+    )
+    parser.add_argument(
+        '--update-existing',
+        action='store_true',
+        help='Update existing database with new assemblies (taxon mode only)'
+    )
+    
     args = parser.parse_args()
+    
+    # Validate argument combinations
+    if args.taxon and args.input:
+        parser.error("--taxon and --input are mutually exclusive. Use --taxon for auto-gather mode or --input for batch mode.")
+    
+    if not args.taxon and not args.input:
+        parser.error("Either --taxon or --input must be specified.")
+    
+    if args.update_existing and not args.taxon:
+        parser.error("--update-existing requires --taxon mode.")
     
     # Configure logging based on verbosity
     if args.verbose:
@@ -1114,7 +1479,10 @@ Examples:
         dry_run=args.dry_run,
         verbose=args.verbose,
         low_ram=args.low_ram,
-        use_bbmap=args.use_bbmap
+        use_bbmap=args.use_bbmap,
+        taxon=args.taxon,
+        taxon_rank=args.taxon_rank,
+        update_existing=args.update_existing
     )
     
     return wrapper.run()
