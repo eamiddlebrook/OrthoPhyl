@@ -1,0 +1,7 @@
+# Test dependencies for the OrthoPhyl wrapper/router unit suite.
+# Install into a virtualenv:
+#   python3 -m venv .venv-test
+#   .venv-test/bin/pip install -r tests/requirements-test.txt
+pytest>=7.0
+pytest-mock>=3.10
+pytest-cov>=4.0

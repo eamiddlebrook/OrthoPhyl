@@ -1,0 +1,7 @@
+# Test tooling
+.venv-test/
+.pytest_cache/
+__pycache__/
+*.pyc
+.coverage
+htmlcov/

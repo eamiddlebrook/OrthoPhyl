@@ -474,8 +474,8 @@ class PipelineWrapper:
         
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would run ReLeaf for {database_name}")
-        return
-        
+            return
+
         log_file = self.logs_dir / f"releaf_{database_name}.log"
         with open(log_file, 'w') as f:
             if self.verbose == 1:
@@ -528,8 +528,8 @@ class PipelineWrapper:
         
         if not db_dir:
             logger.warning(f"  ⚠ Could not find database for {database_name}")
-        return
-        
+            return
+
         cmd = [
             'python', str(self.releaf_versioner),
             '--database-dir', str(db_dir),
@@ -541,8 +541,8 @@ class PipelineWrapper:
         
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would create new database version")
-        return
-        
+            return
+
         log_file = self.logs_dir / f"releaf_version_{database_name}.log"
         with open(log_file, 'w') as f:
             if self.verbose == 1:
@@ -1093,11 +1093,11 @@ class PipelineWrapper:
         # Query NCBI for assemblies
         logger.info(f"\nQuerying NCBI for {self.taxon} assemblies...")
         gatherer = TaxonAssemblyGatherer(
-            taxon_name=self.taxon,
+            taxon=self.taxon,
             rank=self.taxon_rank,
             output_dir=self.output_dir / "taxon_query"
         )
-        
+
         if self.dry_run:
             logger.info("  [DRY RUN] Would query NCBI and download assemblies")
             logger.info("=" * 70)
@@ -1167,11 +1167,11 @@ class PipelineWrapper:
         # Query NCBI for assemblies
         logger.info(f"\nQuerying NCBI for {self.taxon} assemblies...")
         gatherer = TaxonAssemblyGatherer(
-            taxon_name=self.taxon,
+            taxon=self.taxon,
             rank=self.taxon_rank,
             output_dir=self.output_dir / "taxon_query"
         )
-        
+
         if self.dry_run:
             logger.info("  [DRY RUN] Would check for new assemblies and update database")
             logger.info("=" * 70)
@@ -1280,7 +1280,7 @@ class PipelineWrapper:
                 # Add taxon metadata
                 config['source_taxon_name'] = taxon_name
                 config['source_taxid'] = gatherer.taxid
-                config['source_rank'] = gatherer.rank
+                config['source_rank'] = gatherer.taxon_rank
                 config['assembly_accessions'] = [a['accession'] for a in assemblies]
                 config['n_assemblies_at_creation'] = len(assemblies)
                 config['last_updated'] = datetime.now().isoformat()

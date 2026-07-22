@@ -35,6 +35,8 @@ import sys
 import argparse
 import urllib.request
 import tarfile
+import gzip
+import shutil
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Set
 from datetime import datetime
@@ -445,8 +447,97 @@ class TaxonAssemblyGatherer:
         import json
         with open(output_file, 'w') as f:
             json.dump(metadata, f, indent=2)
-        
+
         logger.info(f"  ✓ Wrote metadata to {output_file}")
+
+    def query_ncbi(self) -> List[Dict]:
+        """Alias for gather_assemblies() -- the name used by the pipeline wrapper.
+
+        Returns the list of unique assembly dicts (each with an 'accession' key).
+        """
+        return self.gather_assemblies()
+
+    # NCBI rank name -> GTDB single-letter prefix.
+    _GTDB_PREFIX = {
+        'superkingdom': 'd',
+        'domain': 'd',
+        'phylum': 'p',
+        'class': 'c',
+        'order': 'o',
+        'family': 'f',
+        'genus': 'g',
+        'species': 's',
+    }
+    _GTDB_ORDER = ['d', 'p', 'c', 'o', 'f', 'g', 's']
+
+    def get_taxonomy_string(self) -> str:
+        """Build a GTDB-format taxonomy string for the resolved taxon.
+
+        Walks the NCBI lineage of ``self.taxid`` and renders it as
+        ``d__Bacteria;p__...;...`` up to the most specific defined rank. Ranks with no
+        NCBI name are rendered as empty (e.g. ``s__``).
+        """
+        lineage = self.taxonomy.get_lineage(self.taxid)
+
+        # Map NCBI-rank-named lineage onto GTDB prefixes.
+        by_prefix = {}
+        for ncbi_rank, name in lineage.items():
+            prefix = self._GTDB_PREFIX.get(ncbi_rank)
+            if prefix:
+                by_prefix[prefix] = name
+
+        # Emit ranks from domain down to the deepest one we actually have.
+        parts = []
+        deepest = None
+        for prefix in self._GTDB_ORDER:
+            if prefix in by_prefix:
+                deepest = prefix
+        if deepest is None:
+            return ""
+        for prefix in self._GTDB_ORDER:
+            name = by_prefix.get(prefix, "")
+            parts.append(f"{prefix}__{name}")
+            if prefix == deepest:
+                break
+        return ";".join(parts)
+
+    def download_assemblies(self, assemblies: List[Dict], download_dir: Path):
+        """Download genome FASTAs for the given assemblies from the NCBI FTP site.
+
+        Each assembly dict must carry an ``ftp_path`` and ``accession``. The genomic
+        FASTA is fetched from ``{ftp_path}/{basename}_genomic.fna.gz`` and written,
+        gunzipped, to ``download_dir/{accession}.fna``. Assemblies lacking an FTP path
+        are skipped with a warning.
+
+        Returns the list of Paths that were successfully written.
+        """
+        download_dir = Path(download_dir)
+        download_dir.mkdir(parents=True, exist_ok=True)
+
+        written = []
+        for asm in assemblies:
+            accession = asm['accession']
+            ftp_path = asm.get('ftp_path', '')
+            if not ftp_path or ftp_path == 'na':
+                logger.warning(f"  ⚠ No ftp_path for {accession}, skipping")
+                continue
+
+            basename = ftp_path.rstrip('/').split('/')[-1]
+            url = f"{ftp_path}/{basename}_genomic.fna.gz"
+            gz_dest = download_dir / f"{accession}.fna.gz"
+            fna_dest = download_dir / f"{accession}.fna"
+
+            try:
+                urllib.request.urlretrieve(url, gz_dest)
+                with gzip.open(gz_dest, 'rb') as gz, open(fna_dest, 'wb') as out:
+                    shutil.copyfileobj(gz, out)
+                gz_dest.unlink()
+                written.append(fna_dest)
+            except Exception as e:
+                logger.warning(f"  ⚠ Failed to download {accession}: {e}")
+
+        logger.info(f"  ✓ Downloaded {len(written)}/{len(assemblies)} assemblies")
+        return written
 
 
 def main():
