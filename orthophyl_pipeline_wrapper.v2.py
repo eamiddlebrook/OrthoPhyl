@@ -50,7 +50,7 @@ class PipelineWrapper:
         self,
         input_file: Optional[Path] = None,
         database_dir: Path = None,
-        output_dir: Path = None,
+        output_dir: Optional[Path] = None,
         threads: int = 8,
         gather_script: Optional[Path] = None,
         orthophyl_runs_tsv: Optional[Path] = None,
@@ -67,7 +67,15 @@ class PipelineWrapper:
     ):
         self.input_file = Path(input_file) if input_file else None
         self.database_dir = Path(database_dir) if database_dir else None
-        self.output_dir = Path(output_dir)
+        
+        # Default output_dir to database_dir/.pipeline_runs/<timestamp> if not provided
+        if output_dir:
+            self.output_dir = Path(output_dir)
+        else:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            self.output_dir = self.database_dir / '.pipeline_runs' / timestamp
+            logger.info(f"No --output-dir provided, using: {self.output_dir}")
+        
         self.threads = threads
         self.gather_script = Path(gather_script) if gather_script else None
         self.orthophyl_runs_tsv = Path(orthophyl_runs_tsv) if orthophyl_runs_tsv else None
@@ -102,11 +110,13 @@ class PipelineWrapper:
         # Checkpoint tracking
         self.checkpoint_dir = self.output_dir / "checkpoints"
         
-        # Status tracking
+        # Status tracking with success/failure lists
         self.pipeline_status = {
             'start_time': datetime.now().isoformat(),
             'phases': {},
-            'summary': {}
+            'summary': {},
+            'successes': [],
+            'failures': []
         }
     
     def run(self):
@@ -177,12 +187,19 @@ class PipelineWrapper:
         # Phase 4: Results aggregation
         self._phase_aggregation()
         
+        # Check for failures
+        failures = len(self.pipeline_status.get('failures', []))
+        
         logger.info("=" * 70)
-        logger.info("PIPELINE COMPLETE!")
+        if failures == 0:
+            logger.info("PIPELINE COMPLETE!")
+        else:
+            logger.error(f"PIPELINE COMPLETED WITH {failures} FAILURE(S)")
+            logger.error("See summary report for details")
         logger.info("=" * 70)
         
         self._save_final_status()
-        return 0
+        return 1 if failures > 0 else 0
     
     def _run_taxon_mode(self) -> int:
         """Run taxon mode workflow."""
@@ -431,16 +448,21 @@ class PipelineWrapper:
             
             # Run ReLeaf
             output_dir = self.releaf_dir / database_name
-            self._run_releaf(
-                database_dir=db_dir,
-                input_genomes=input_dir,
-                output_dir=output_dir,
-                tree_method=tree_method,
-                tree_data=tree_data,
-                database_name=database_name
-            )
-            
-            self._write_checkpoint(checkpoint_name)
+            try:
+                self._run_releaf(
+                    database_dir=db_dir,
+                    input_genomes=input_dir,
+                    output_dir=output_dir,
+                    tree_method=tree_method,
+                    tree_data=tree_data,
+                    database_name=database_name,
+                    n_assemblies=len(assemblies)
+                )
+                self._write_checkpoint(checkpoint_name)
+            except Exception as e:
+                logger.error(f"✗ ReLeaf failed for {database_name}: {e}")
+                # Continue with other databases rather than failing entire pipeline
+                continue
         
         self.pipeline_status['phases']['releaf'] = {
             'status': 'complete',
@@ -454,16 +476,25 @@ class PipelineWrapper:
         output_dir: Path,
         tree_method: str,
         tree_data: str,
-        database_name: str
+        database_name: str,
+        n_assemblies: int = 0
     ):
         """Execute ReLeaf for a single database."""
+        # Handle stale ReLeaf_dir from previous run
+        releaf_dir = database_dir / 'orthophyl_run' / 'ReLeaf_dir'
+        if releaf_dir.exists() and not self.resume:
+            logger.warning(f"  ⚠ Removing stale ReLeaf output: {releaf_dir}")
+            shutil.rmtree(releaf_dir)
+        
+        # Fix: Use correct ReLeaf.sh flags (see script_lib/arg_parse_addem.sh)
+        # -s/--storage_dir, -g/--genome_dir, -t/--threads, -p/--phylo_tool, -o/--omics
         cmd = [
             str(self.releaf_script),
-            '--store', str(database_dir / 'orthophyl_run'),
-            '--input_genomes', str(input_genomes),
-            '-t', str(self.threads),
-            '--tree_method', tree_method,
-            '--TREE_DATA', tree_data
+            '-s', str(database_dir / 'orthophyl_run'),  # --storage_dir (not --store)
+            '-g', str(input_genomes),                    # --genome_dir (not --input_genomes)
+            '-t', str(self.threads),                     # --threads
+            '-p', tree_method,                           # --phylo_tool (not --tree_method)
+            '-o', tree_data                              # --omics (not --TREE_DATA, expects CDS|PROT|BOTH)
         ]
         
         logger.info(f"  Running ReLeaf...")
@@ -501,34 +532,65 @@ class PipelineWrapper:
                 )
         
         if result.returncode != 0:
-            raise RuntimeError(f"ReLeaf failed for {database_name}. Check log: {log_file}")
+            error_msg = f"ReLeaf failed for {database_name}. Check log: {log_file}"
+            self.pipeline_status['failures'].append({
+                'type': 'releaf',
+                'database': database_name,
+                'error': error_msg,
+                'log': str(log_file)
+            })
+            raise RuntimeError(error_msg)
+        
+        # Verify expected outputs exist (ReLeaf writes to $store/ReLeaf_dir)
+        releaf_output = database_dir / 'orthophyl_run' / 'ReLeaf_dir'
+        expected_files = [
+            releaf_output / 'new_prot_alignments.trm.nm',
+            releaf_output / 'new_CDS_alignments.trm.nm',
+            releaf_output / 'new_trees'
+        ]
+        missing = [f for f in expected_files if not f.exists()]
+        if missing:
+            error_msg = (
+                f"ReLeaf completed but missing expected outputs:\n" +
+                "\n".join(f"  - {f}" for f in missing) +
+                f"\nCheck log: {log_file}"
+            )
+            self.pipeline_status['failures'].append({
+                'type': 'releaf',
+                'database': database_name,
+                'error': error_msg,
+                'log': str(log_file)
+            })
+            raise RuntimeError(error_msg)
         
         logger.info(f"  ✓ ReLeaf complete for {database_name}")
+        
+        # Track success
+        self.pipeline_status['successes'].append({
+            'type': 'releaf',
+            'database': database_name,
+            'assemblies': n_assemblies
+        })
             
         # Create new database version from ReLeaf output
         if self.releaf_versioner.exists():
-            self._create_releaf_version(database_name, output_dir)
+            self._create_releaf_version(database_name, database_dir)
         else:
             logger.warning(f"  ⚠ ReLeaf versioner not found, skipping version creation")
     
-    def _create_releaf_version(self, database_name: str, releaf_output_dir: Path):
+    def _create_releaf_version(self, database_name: str, database_dir: Path):
         """Create a new database version from ReLeaf output."""
         logger.info(f"\n  Creating new database version from ReLeaf output...")
         
-        # Find the database directory
-        db_dir = None
-        for db_path in self.database_dir.glob("*_db"):
-            config_file = db_path / "database_config.json"
-            if config_file.exists():
-                with open(config_file, 'r') as f:
-                    config = json.load(f)
-                if config.get('clade_name') == database_name:
-                    db_dir = db_path
-                    break
+        # ReLeaf writes to $store/ReLeaf_dir (inside database's orthophyl_run)
+        releaf_output_dir = database_dir / 'orthophyl_run' / 'ReLeaf_dir'
         
-        if not db_dir:
-            logger.warning(f"  ⚠ Could not find database for {database_name}")
+        if not releaf_output_dir.exists():
+            logger.warning(f"  ⚠ ReLeaf output not found: {releaf_output_dir}")
             return
+        
+        # Find the database directory
+        db_dir = database_dir
 
         cmd = [
             'python', str(self.releaf_versioner),
@@ -615,27 +677,32 @@ class PipelineWrapper:
             
             # Stage 3: Run OrthoPhyl
             orthophyl_output = self.orthophyl_dir / "orthophyl_runs" / taxon_name
-            if not self._check_checkpoint(f"orthophyl_{taxon_name}") or not self.resume:
-                self._run_orthophyl(
-                    input_dir=genomes_to_keep,
-                    output_dir=orthophyl_output,
-                    taxon_name=taxon_name,
-                    assemblies=assemblies
-                )
-                self._write_checkpoint(f"orthophyl_{taxon_name}")
-            else:
-                logger.info(f"  ✓ OrthoPhyl already complete (resuming)")
-            
-            # Stage 4: Create database
-            if not self._check_checkpoint(f"database_{taxon_name}") or not self.resume:
-                self._create_database_entry(
-                    taxon_name=taxon_name,
-                    orthophyl_output=orthophyl_output,
-                    taxonomy=assemblies[0]['download_taxonomy']
-                )
-                self._write_checkpoint(f"database_{taxon_name}")
-            else:
-                logger.info(f"  ✓ Database already created (resuming)")
+            try:
+                if not self._check_checkpoint(f"orthophyl_{taxon_name}") or not self.resume:
+                    self._run_orthophyl(
+                        input_dir=genomes_to_keep,
+                        output_dir=orthophyl_output,
+                        taxon_name=taxon_name,
+                        assemblies=assemblies
+                    )
+                    self._write_checkpoint(f"orthophyl_{taxon_name}")
+                else:
+                    logger.info(f"  ✓ OrthoPhyl already complete (resuming)")
+                
+                # Stage 4: Create database
+                if not self._check_checkpoint(f"database_{taxon_name}") or not self.resume:
+                    self._create_database_entry(
+                        taxon_name=taxon_name,
+                        orthophyl_output=orthophyl_output,
+                        taxonomy=assemblies[0]['download_taxonomy']
+                    )
+                    self._write_checkpoint(f"database_{taxon_name}")
+                else:
+                    logger.info(f"  ✓ Database already created (resuming)")
+            except Exception as e:
+                logger.error(f"✗ OrthoPhyl failed for {taxon_name}: {e}")
+                # Continue with other taxa rather than failing entire pipeline
+                continue
         
         self.pipeline_status['phases']['orthophyl'] = {
             'status': 'complete',
@@ -780,7 +847,14 @@ class PipelineWrapper:
                 )
         
         if result.returncode != 0:
-            raise RuntimeError(f"OrthoPhyl failed for {taxon_name}. Check log: {log_file}")
+            error_msg = f"OrthoPhyl failed for {taxon_name}. Check log: {log_file}"
+            self.pipeline_status['failures'].append({
+                'type': 'orthophyl',
+                'taxon': taxon_name,
+                'error': error_msg,
+                'log': str(log_file)
+            })
+            raise RuntimeError(error_msg)
         
         logger.info(f"  ✓ OrthoPhyl complete for {taxon_name}")
         
@@ -790,6 +864,13 @@ class PipelineWrapper:
             self._verify_queries_in_tree(tree_file, assemblies)
         else:
             logger.warning(f"  ⚠ Tree file not found: {tree_file}")
+        
+        # Track success
+        self.pipeline_status['successes'].append({
+            'type': 'orthophyl',
+            'taxon': taxon_name,
+            'assemblies': len(assemblies)
+        })
     
     def _verify_queries_in_tree(self, tree_file: Path, assemblies: List[Dict]):
         """Verify that query assemblies appear in the tree."""
@@ -868,15 +949,24 @@ class PipelineWrapper:
         (trees_dir / "releaf").mkdir(parents=True, exist_ok=True)
         (trees_dir / "orthophyl").mkdir(parents=True, exist_ok=True)
         
-        # Collect ReLeaf trees
+        # Collect ReLeaf trees - look in database's ReLeaf_dir (where ReLeaf actually writes)
         releaf_trees = []
-        for db_dir in self.releaf_dir.glob("*/"):
-            tree_file = db_dir / "ReLeaf_results" / "phylogeny_with_new_genomes.nwk"
-            if tree_file.exists():
-                dst = trees_dir / "releaf" / f"{db_dir.name}_phylogeny.nwk"
-                shutil.copy(tree_file, dst)
-                releaf_trees.append(db_dir.name)
-                logger.info(f"  ✓ Collected ReLeaf tree: {db_dir.name}")
+        for db_dir in self.database_dir.glob("*_db"):
+            releaf_output = db_dir / 'orthophyl_run' / 'ReLeaf_dir'
+            # Try multiple possible tree file names
+            tree_candidates = [
+                releaf_output / "new_trees" / "SCO_strict.CDS.iqtree.treefile.addasm",
+                releaf_output / "new_trees" / "SCO_strict.CDS.iqtree.treefile",
+                releaf_output / "new_trees" / "SCO_strict.PROT.iqtree.treefile.addasm",
+                releaf_output / "new_trees" / "SCO_strict.PROT.iqtree.treefile"
+            ]
+            for tree_file in tree_candidates:
+                if tree_file.exists():
+                    dst = trees_dir / "releaf" / f"{db_dir.name}_phylogeny.nwk"
+                    shutil.copy(tree_file, dst)
+                    releaf_trees.append(db_dir.name)
+                    logger.info(f"  ✓ Collected ReLeaf tree: {db_dir.name} ({tree_file.name})")
+                    break
         
         # Collect OrthoPhyl trees
         orthophyl_trees = []
@@ -900,18 +990,11 @@ class PipelineWrapper:
         }
     
     def _generate_summary_report(self, releaf_trees: List[str], orthophyl_trees: List[str]):
-        """Generate human-readable summary report."""
+        """Generate human-readable summary report with actual success/failure counts."""
         report_file = self.results_dir / "pipeline_summary.txt"
         
-        # Check for database versions
-        database_versions = {}
-        if self.releaf_versioner.exists():
-            for db_name in releaf_trees:
-                for db_path in self.database_dir.glob("*_db"):
-                    if db_path.name.replace('_db', '') in db_name:
-                        current_link = db_path / "current"
-                        if current_link.exists() and current_link.is_symlink():
-                            database_versions[db_name] = current_link.readlink().name
+        successes = self.pipeline_status.get('successes', [])
+        failures = self.pipeline_status.get('failures', [])
         
         with open(report_file, 'w') as f:
             f.write("=" * 70 + "\n")
@@ -925,15 +1008,27 @@ class PipelineWrapper:
             f.write("RESULTS:\n")
             f.write("-" * 70 + "\n\n")
             
-            f.write(f"ReLeaf Route (matched databases): {len(releaf_trees)} databases\n")
-            for db in sorted(releaf_trees):
-                f.write(f"  - {db}\n")
-            f.write("\n")
+            # Success counts
+            f.write(f"✓ Successful placements: {len(successes)}\n")
+            if successes:
+                for s in successes:
+                    if s['type'] == 'releaf':
+                        f.write(f"  - ReLeaf: {s['database']} ({s.get('assemblies', '?')} assemblies)\n")
+                    else:
+                        f.write(f"  - OrthoPhyl: {s['taxon']} ({s.get('assemblies', '?')} assemblies)\n")
+                f.write("\n")
             
-            f.write(f"OrthoPhyl Route (novel taxa): {len(orthophyl_trees)} taxa\n")
-            for taxon in sorted(orthophyl_trees):
-                f.write(f"  - {taxon} (new database created)\n")
-            f.write("\n")
+            # Failure counts
+            if failures:
+                f.write(f"✗ Failed placements: {len(failures)}\n")
+                for fail in failures:
+                    if fail['type'] == 'releaf':
+                        f.write(f"  - ReLeaf: {fail['database']}\n")
+                    else:
+                        f.write(f"  - OrthoPhyl: {fail['taxon']}\n")
+                    f.write(f"    Error: {fail['error']}\n")
+                    f.write(f"    Log: {fail['log']}\n")
+                f.write("\n")
             
             f.write("OUTPUT LOCATIONS:\n")
             f.write(f"  Trees: {self.results_dir}/trees/\n")
@@ -941,11 +1036,19 @@ class PipelineWrapper:
             f.write(f"  Routing decisions: {self.routing_dir}/\n")
             f.write("\n")
             
+            # Only show success banner if no failures
             f.write("=" * 70 + "\n")
-            f.write("All assemblies have been placed in phylogenetic trees!\n")
+            if not failures:
+                f.write("All assemblies have been placed in phylogenetic trees!\n")
+            else:
+                f.write(f"PIPELINE COMPLETED WITH {len(failures)} FAILURE(S)\n")
+                f.write("Please review the errors above and check the log files.\n")
             f.write("=" * 70 + "\n")
         
         logger.info(f"  Summary report: {report_file}")
+        
+        # Return failure count for exit code
+        return len(failures)
     
     def _check_checkpoint(self, name: str) -> bool:
         """Check if a checkpoint exists."""
@@ -1384,8 +1487,7 @@ Examples:
     )
     parser.add_argument(
         '--output-dir',
-        required=True,
-        help='Output directory for all results'
+        help='Output directory for all results (default: <database-dir>/.pipeline_runs/<timestamp>)'
     )
     parser.add_argument(
         '--threads',
