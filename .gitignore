@@ -5,3 +5,29 @@ __pycache__/
 *.pyc
 .coverage
 htmlcov/
+
+# Test outputs (ephemeral)
+TESTER/FULLTEST_OUT.*/
+TESTER/Workflow_test.*/
+TESTER/Methylorubrum_asms*/
+TESTER/OP_orchestrator_test*/
+TESTER/OP_DBs/
+TESTER/TESTER_custom.*/
+TESTER/TEST_gene_tree_method*/
+TESTER/adding_test*/
+TESTER/router_testing/
+TESTER/test/
+
+# Build artifacts
+*.sif
+OrthoPhyl.v2.2.1.router.*.sif
+
+# Temporary/runtime files
+integration_test_7_28.out
+timing
+timing.tmp.out/
+gen_files/
+gene_tree_tmp/
+routing_output/
+ncbi_stats*/
+TEST_backtrans
