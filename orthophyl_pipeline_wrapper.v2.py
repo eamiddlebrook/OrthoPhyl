@@ -65,6 +65,10 @@ class PipelineWrapper:
         taxon_rank: Optional[str] = None,
         update_existing: bool = False
     ):
+        # Validate mutually exclusive flags
+        if input_file and taxon:
+            raise ValueError("Cannot specify both --input and --taxon. Use one or the other.")
+        
         self.input_file = Path(input_file) if input_file else None
         self.database_dir = Path(database_dir) if database_dir else None
         
@@ -244,8 +248,23 @@ class PipelineWrapper:
         self._validate_dependencies()
         logger.info("✓ Dependencies validated")
         
-        # Initialize or validate databases
-        if not self.database_dir.exists() or not (self.database_dir / "database_index.json").exists():
+        # Initialize or validate databases (skip in taxon create mode)
+        if self.taxon_mode and not self.update_existing:
+            # Taxon create mode: database directory will be created during workflow
+            logger.info(f"✓ Taxon create mode: database will be created for '{self.taxon}'")
+            # Ensure database_dir exists as a directory (but may be empty)
+            if self.database_dir:
+                self.database_dir.mkdir(parents=True, exist_ok=True)
+        elif self.taxon_mode and self.update_existing:
+            # Taxon update mode: database directory must exist with databases
+            logger.info(f"✓ Taxon update mode: checking for existing database for '{self.taxon}'")
+            if not self.database_dir.exists():
+                raise FileNotFoundError(
+                    f"Database directory not found: {self.database_dir}\n"
+                    f"Cannot update non-existent database. Use create mode first."
+                )
+            # Database index is optional in taxon mode - we search for matching databases directly
+        elif not self.database_dir.exists() or not (self.database_dir / "database_index.json").exists():
             if self.orthophyl_runs_tsv and self.orthophyl_runs_tsv.exists():
                 logger.info("Creating initial databases...")
                 self._create_initial_databases()
@@ -1475,11 +1494,17 @@ Examples:
         """
     )
     
-    parser.add_argument(
+    # Mode selection: batch mode (--input) vs taxon mode (--taxon)
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument(
         '--input',
-        required=True,
-        help='Input TSV: assembly_path, taxonomy, [id]'
+        help='Input TSV: assembly_path, taxonomy, [id]. For batch mode.'
     )
+    mode_group.add_argument(
+        '--taxon',
+        help='Taxon name for auto-gather mode (e.g., "Methylorubrum"). For taxon mode.'
+    )
+    
     parser.add_argument(
         '--database-dir',
         required=True,
@@ -1535,11 +1560,7 @@ Examples:
         help='Use bbmap statswrapper instead of CheckM for genome statistics (faster, less RAM, but no completeness/contamination filtering)'
     )
     
-    # NEW: Taxon mode arguments
-    parser.add_argument(
-        '--taxon',
-        help='Taxon name for auto-gather mode (e.g., "Methylorubrum"). Mutually exclusive with --input.'
-    )
+    # Taxon mode arguments (--taxon is in mutually_exclusive_group above)
     parser.add_argument(
         '--taxon-rank',
         choices=['species', 'genus', 'family', 'order', 'class', 'phylum'],
@@ -1553,13 +1574,7 @@ Examples:
     
     args = parser.parse_args()
     
-    # Validate argument combinations
-    if args.taxon and args.input:
-        parser.error("--taxon and --input are mutually exclusive. Use --taxon for auto-gather mode or --input for batch mode.")
-    
-    if not args.taxon and not args.input:
-        parser.error("Either --taxon or --input must be specified.")
-    
+    # Validate argument combinations (mutually_exclusive_group handles --input vs --taxon)
     if args.update_existing and not args.taxon:
         parser.error("--update-existing requires --taxon mode.")
     

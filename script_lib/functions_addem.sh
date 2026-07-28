@@ -1,3 +1,14 @@
+safe_percent () {
+	# Calculate percent for progress tracking, ensuring it's >= 1 to avoid divide-by-zero
+	# Usage: percent=$(safe_percent $num_items)
+	local num=$1
+	local result=$(( num / 10 ))
+	if [ "$result" -lt 1 ]; then
+		echo 1
+	else
+		echo $result
+	fi
+}
 
 SET_UP_ADDASM_DIRS () {
     cd $store || exit
@@ -182,8 +193,28 @@ HMM_search () {
     all_prots=$3
     new_OG_prots=$4
     cd ${new_hmm_output} || exit 
-    num_OGs=$(ls $hmm_dir/*.hmm | wc -l) # this is 1+ the real num
+    
+    # Count HMM files and validate
+    num_OGs=$(ls $hmm_dir/*.hmm 2>/dev/null | wc -l)
+    if [ "$num_OGs" -eq 0 ]; then
+        echo "ERROR: No HMM files found in $hmm_dir"
+        echo ""
+        echo "ReLeaf requires HMMs from an OrthoPhyl run that used the MASH shortlist path."
+        echo "This happens when the number of input genomes exceeds the ANI_shortlist threshold (-n flag)."
+        echo ""
+        echo "Your OrthoPhyl run appears to have processed all genomes directly (no subsetting),"
+        echo "so no HMMs were built. To use ReLeaf, you need to:"
+        echo "  1. Re-run OrthoPhyl with a lower -n value to trigger HMM building, OR"
+        echo "  2. Use a larger dataset that requires subsetting"
+        echo ""
+        exit 1
+    fi
+    
+    # Calculate progress indicator, ensuring percent >= 1 to avoid divide-by-zero
     percent=$(( num_OGs / 10))
+    if [ "$percent" -lt 1 ]; then
+        percent=1
+    fi
     J=0
     for I in $hmm_dir/*.hmm
     do
@@ -245,8 +276,22 @@ ADD_2_ALIGNMENTS () {
     local new_alignments=$3
     local threads=$4
     
-    num_alignments=$(ls $OLD_alignments/OG* | wc -l) # this is 1+ the real num
+    # Count alignment files and validate
+    num_alignments=$(ls $OLD_alignments/OG* 2>/dev/null | wc -l)
+    if [ "$num_alignments" -eq 0 ]; then
+        echo "ERROR: No alignment files (OG*) found in $OLD_alignments"
+        echo ""
+        echo "ReLeaf requires alignments from a completed OrthoPhyl run."
+        echo "Please verify that the OrthoPhyl output directory is correct and complete."
+        echo ""
+        exit 1
+    fi
+    
+    # Calculate progress indicator, ensuring percent >= 1 to avoid divide-by-zero
     percent=$(( num_alignments / 10))
+    if [ "$percent" -lt 1 ]; then
+        percent=1
+    fi
 
     J=0
     for OG_alignment in $OLD_alignments/OG*

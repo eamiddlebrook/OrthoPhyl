@@ -82,3 +82,68 @@ of the marker.
 Still open (documented in the plan, not yet fixed): the `.fna`-only genome count in
 `_run_orthophyl`, and the hardcoded `added_genomes = 0` in
 `add_releaf_version.count_genomes_in_releaf`.
+
+---
+
+## Integration tests
+
+**Location:** `tests/integration/`
+
+Integration tests run the **real** `OrthoPhyl.sh` and `ReLeaf.sh` scripts on small test
+datasets, asserting correct outputs and topology. See
+[`../INTEGRATION_TEST_PLAN.md`](../INTEGRATION_TEST_PLAN.md) for the full plan.
+
+### Why integration tests?
+
+Unit tests (above) mock all subprocess calls, so they catch logic bugs but **cannot detect**:
+- Wrong CLI flags passed to real tools (the mock accepts any argv).
+- False-success scenarios where a tool fails but the wrapper doesn't detect it.
+- Actual tool integration breakage (e.g., iqtree output format changes).
+
+Integration tests fill that gap by running the real bioinformatics pipeline and asserting
+on the actual scientific outputs (trees, alignments, taxon presence, **topology
+correctness via Robinson-Foulds distance**).
+
+### Running integration tests
+
+Integration tests are **opt-in** (too slow for rapid iteration):
+
+```bash
+# Requires the full OrthoPhyl conda environment
+conda activate OrthoPhyl
+
+# Run integration tests explicitly
+pytest -m integration -v
+
+# Or via environment variable (for CI)
+ORTHOPHYL_RUN_INTEGRATION=1 pytest tests/integration/
+```
+
+**Why opt-in?** OrthoPhyl takes ~5–15 minutes on the fasttest dataset. Unit tests run in
+seconds; integration tests are for nightly CI or pre-release validation.
+
+### Test data
+
+- **Base dataset:** `TESTER/genomes_fasttest` (6 orchid chloroplast genomes, ~150 kb each)
+- **Add-assembly dataset:** `TESTER/genomes_fasttest_addasm` (2 additional genomes for ReLeaf)
+- **Reference trees:** `TESTER/REFERENCE_TESTER_TREES/` (gold-standard topologies for comparison)
+
+### What's tested
+
+| Suite | Tests |
+|-------|-------|
+| `test_orthophyl_fasttest.py` | OrthoPhyl.sh end-to-end: exit 0, trees generated, HMMs/alignments present, all taxa in tree, **topology matches reference (RF=0)** |
+| `test_releaf_fasttest.py` | ReLeaf.sh add-assembly: exit 0, new alignments/trees, added taxa present, original taxa retained, 8 total taxa |
+
+The **topology comparison** (Robinson-Foulds distance = 0) is the strongest assertion — it
+catches not just "a tree was produced" but "the *correct* tree was produced."
+
+### Tool requirements
+
+Integration tests are automatically skipped if required tools are missing:
+- `iqtree`, `orthofinder`, `mafft`, `hmmbuild`, `hmmsearch`, `trimal`
+
+Activate the OrthoPhyl conda environment to get all tools:
+```bash
+conda activate OrthoPhyl
+```

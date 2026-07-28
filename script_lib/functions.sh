@@ -11,6 +11,18 @@ BAIL () {
 	exit 1
 }
 
+safe_percent () {
+	# Calculate percent for progress tracking, ensuring it's >= 1 to avoid divide-by-zero
+	# Usage: percent=$(safe_percent $num_items)
+	local num=$1
+	local result=$(( num / 10 ))
+	if [ "$result" -lt 1 ]; then
+		echo 1
+	else
+		echo $result
+	fi
+}
+
 SET_UP_DIR_STRUCTURE () {
 	echo '
        	###################################################
