@@ -10,6 +10,41 @@ import pytest
 from .helpers.tree_compare import clean_taxon_name
 
 
+def is_in_container():
+    """Detect if running inside a Singularity or Docker container.
+    
+    Returns:
+        bool: True if inside a container
+    """
+    # Check for Singularity
+    if os.path.exists('/.singularity.d') or 'SINGULARITY_CONTAINER' in os.environ:
+        return True
+    
+    # Check for Docker
+    if os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv'):
+        return True
+    
+    # Check cgroup for container indicators
+    try:
+        with open('/proc/1/cgroup', 'r') as f:
+            content = f.read()
+            if 'docker' in content or 'lxc' in content or 'kubepods' in content:
+                return True
+    except (FileNotFoundError, PermissionError):
+        pass
+    
+    return False
+
+
+# Detect container environment at module load
+IN_CONTAINER = is_in_container()
+
+if IN_CONTAINER:
+    print("\n" + "="*80)
+    print("CONTAINER DETECTED: Running in container-aware mode")
+    print("="*80 + "\n")
+
+
 def _collect_basenames(directory, patterns):
     """
     Collect cleaned taxon basenames from files matching patterns.

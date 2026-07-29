@@ -8,12 +8,52 @@ objects as fixtures.
 
 import importlib.util
 import sys
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
 
 # Repo root is the parent of the tests/ directory.
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def get_writable_tmp_dir():
+    """Get a writable temporary directory, container-aware.
+    
+    In Singularity containers, /tmp may not be writable or may be bind-mounted.
+    This function tries multiple locations in order of preference:
+    1. PYTEST_TMP_DIR environment variable (user override)
+    2. Standard tempfile.gettempdir() (respects TMPDIR, TMP, TEMP env vars)
+    3. Current working directory / .pytest_tmp (fallback for read-only /tmp)
+    
+    Returns:
+        Path: A writable temporary directory
+    """
+    # 1. Check for explicit override
+    if 'PYTEST_TMP_DIR' in os.environ:
+        tmp_dir = Path(os.environ['PYTEST_TMP_DIR'])
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        return tmp_dir
+    
+    # 2. Try standard temp directory
+    try:
+        std_tmp = Path(tempfile.gettempdir())
+        # Test if writable
+        test_file = std_tmp / f".pytest_write_test_{os.getpid()}"
+        try:
+            test_file.touch()
+            test_file.unlink()
+            return std_tmp
+        except (OSError, PermissionError):
+            pass
+    except Exception:
+        pass
+    
+    # 3. Fallback to CWD-relative temp (for containers with read-only /tmp)
+    fallback = Path.cwd() / ".pytest_tmp"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 def load_module(path, name=None):

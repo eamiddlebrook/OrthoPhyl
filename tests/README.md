@@ -147,3 +147,44 @@ Activate the OrthoPhyl conda environment to get all tools:
 ```bash
 conda activate OrthoPhyl
 ```
+
+---
+
+## Running tests in containers (Singularity/Docker)
+
+The test suite is **container-aware** and handles common container issues automatically:
+- Read-only `/tmp` directories
+- Bind-mounted filesystems
+- Permission issues
+- Path resolution
+
+**Quick start:**
+```bash
+# Singularity with writable temp directory
+singularity exec \
+  --bind /scratch:/scratch \
+  --env TMPDIR=/scratch/pytest_tmp \
+  OrthoPhyl.sif \
+  pytest tests/unit/
+
+# Docker with volume mount
+docker run --rm \
+  -v $(pwd):/work \
+  -e TMPDIR=/tmp/pytest_tmp \
+  -w /work \
+  orthophyl:latest \
+  pytest tests/unit/
+```
+
+**For complete container testing documentation, see [`CONTAINER_TESTING.md`](CONTAINER_TESTING.md)**, which covers:
+- Temporary directory handling (PYTEST_TMP_DIR, TMPDIR fallbacks)
+- Container detection (automatic)
+- HPC/SLURM examples
+- CI/CD configurations
+- Troubleshooting common issues
+- Environment variables
+
+**Key environment variables:**
+- `PYTEST_TMP_DIR=/path` — Override temp directory location
+- `TMPDIR=/path` — Standard temp directory (fallback)
+- `ORTHOPHYL_RUN_INTEGRATION=1` — Enable integration tests
