@@ -1237,19 +1237,39 @@ class PipelineWrapper:
         
         logger.info(f"  ✓ Found {len(assemblies)} assemblies")
         
-        # Download assemblies
-        logger.info(f"\nDownloading {len(assemblies)} assemblies...")
+        # Verify gather script is available (required for create mode)
+        if not self.gather_script or not self.gather_script.exists():
+            logger.error(f"\n❌ ERROR: Genome download script is required for taxon create mode")
+            logger.error(f"  Please provide --gather-script utils/gather_filter_asms.sh")
+            return 1
+        
+        # Download assemblies using gather_filter_asms.sh (with QC filtering)
+        logger.info(f"\nDownloading and QC-filtering {len(assemblies)} assemblies...")
+        logger.info(f"  Using: {self.gather_script}")
         download_dir = self.output_dir / "downloaded_assemblies"
-        download_dir.mkdir(parents=True, exist_ok=True)
         
-        gatherer.download_assemblies(assemblies, download_dir)
+        if not self.skip_download and not self._verify_download_complete(download_dir, self.taxon):
+            self._download_genomes(self.taxon, download_dir)
+            self._write_checkpoint(f"download_{self.taxon}")
+        else:
+            logger.info(f"  ✓ Download already complete, skipping")
         
-        # Run OrthoPhyl on downloaded assemblies
+        # Verify filtered genomes exist
+        genomes_to_keep = download_dir / "genomes_to_keep"
+        if not genomes_to_keep.exists() or not list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta")):
+            logger.error(f"\n❌ ERROR: No genomes passed QC filtering")
+            logger.error(f"  Check {download_dir} for filtering logs")
+            return 1
+        
+        genome_count = len(list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta")))
+        logger.info(f"  ✓ {genome_count} genomes passed QC filtering")
+        
+        # Run OrthoPhyl on downloaded assemblies (using filtered genomes)
         logger.info(f"\nRunning OrthoPhyl on {self.taxon} assemblies...")
         orthophyl_output = self.output_dir / "orthophyl_run"
         
         self._run_orthophyl(
-            input_dir=download_dir,
+            input_dir=genomes_to_keep,  # Use filtered genomes, not raw download_dir
             output_dir=orthophyl_output,
             taxon_name=self.taxon,
             assemblies=[]  # No query assemblies in create mode
@@ -1331,6 +1351,9 @@ class PipelineWrapper:
         download_dir = self.output_dir / "new_assemblies"
         download_dir.mkdir(parents=True, exist_ok=True)
         
+        # TODO: New assemblies downloaded here via TaxonAssemblyGatherer are NOT yet
+        # QC-filtered (completeness/contamination/N50). Harmonize with gather_filter_asms.sh
+        # filtering in a future update. See create-mode for the filtered path.
         gatherer.download_assemblies(new_assemblies, download_dir)
         
         # Run ReLeaf to add to existing database

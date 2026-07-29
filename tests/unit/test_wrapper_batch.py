@@ -202,19 +202,49 @@ class TestReleafPhase:
         releaf_calls = [c for c in recording_run if "ReLeaf.sh" in " ".join(c["cmd"])]
         assert releaf_calls, "expected a ReLeaf.sh invocation"
         cmd = releaf_calls[0]["cmd"]
-        assert "--store" in cmd
-        assert "--input_genomes" in cmd
-        assert "--tree_method" in cmd and "iqtree" in cmd
-        assert "--TREE_DATA" in cmd and "CDS" in cmd
+        # Fixed flags: -s (not --store), -g (not --input_genomes), -p (not --tree_method), -o (not --TREE_DATA)
+        assert "-s" in cmd
+        assert "-g" in cmd
+        assert "-p" in cmd and "iqtree" in cmd
+        assert "-o" in cmd and "CDS" in cmd
 
     def test_version_creation_runs_when_db_found(
-        self, Wrapper, tmp_path, make_db_dir, recording_run
+        self, Wrapper, tmp_path, make_db_dir, recording_run, monkeypatch
     ):
         # Regression test for bugs B2/B3 (fixed): unconditional 'return's in
         # _create_releaf_version made version creation dead code. With a matching
         # *_db present and the versioner script existing, the versioner must run.
         w, batch = self._prepare(Wrapper, tmp_path, make_db_dir)
         w.dry_run = False
+        
+        # Mock subprocess.run to also create expected ReLeaf output files
+        original_run = recording_run
+        def fake_run_with_outputs(cmd, *args, **kwargs):
+            result = {"cmd": list(cmd), "args": args, "kwargs": kwargs}
+            original_run.append(result)
+            
+            # If this is a ReLeaf.sh call, create the expected output files
+            if "ReLeaf.sh" in " ".join(cmd):
+                # Find the -s/--storage_dir argument
+                for i, arg in enumerate(cmd):
+                    if arg == "-s" and i + 1 < len(cmd):
+                        storage_dir = Path(cmd[i + 1])
+                        releaf_dir = storage_dir / "ReLeaf_dir"
+                        releaf_dir.mkdir(parents=True, exist_ok=True)
+                        (releaf_dir / "new_prot_alignments.trm.nm").write_text("fake")
+                        (releaf_dir / "new_CDS_alignments.trm.nm").write_text("fake")
+                        (releaf_dir / "new_trees").mkdir(exist_ok=True)
+                        break
+            
+            class FakeCompleted:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return FakeCompleted()
+        
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", fake_run_with_outputs)
+        
         w._phase_releaf(batch)
         version_calls = [
             c for c in recording_run

@@ -145,12 +145,18 @@ def fake_database_dir(tmp_path):
 
 def _make_taxon_wrapper(Wrapper, tmp_path, database_dir, taxon="Methylorubrum", **overrides):
     """Helper to create a wrapper in taxon mode."""
+    # Create a fake gather script (required for create mode)
+    fake_gather = tmp_path / "fake_gather_filter_asms.sh"
+    fake_gather.write_text("#!/bin/bash\necho 'fake gather script'\n")
+    fake_gather.chmod(0o755)
+    
     kwargs = dict(
         input_file=None,
         database_dir=database_dir,
         output_dir=tmp_path / "out",
         taxon=taxon,
         threads=4,
+        gather_script=fake_gather,  # Provide gather_script for create mode
     )
     kwargs.update(overrides)
     return Wrapper(**kwargs)
@@ -218,6 +224,16 @@ class TestTaxonCreateMode:
         
         # Track if _run_orthophyl was called
         orthophyl_called = []
+        
+        # Patch _download_genomes to create fake filtered genomes
+        def patched_download(taxon_name, output_dir):
+            genomes_to_keep = output_dir / "genomes_to_keep"
+            genomes_to_keep.mkdir(parents=True, exist_ok=True)
+            (genomes_to_keep / "GCF_000001.1.fna").write_text(">fake1\nATCG\n")
+            (genomes_to_keep / "GCF_000002.1.fna").write_text(">fake2\nATCG\n")
+            # Create success marker
+            (output_dir / ".download_complete").write_text(f"Download completed\nTaxon: {taxon_name}\nGenomes: 2\n")
+        monkeypatch.setattr(w, "_download_genomes", patched_download)
         
         # Patch _run_orthophyl to create fake output and track calls
         def patched_run_op(*args, **kwargs):
