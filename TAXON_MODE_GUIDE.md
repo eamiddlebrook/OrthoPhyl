@@ -18,12 +18,15 @@ python orthophyl_pipeline_wrapper.v2.py \
     --taxon-rank genus \
     --database-dir databases/ \
     --output-dir methylorubrum_run/ \
+    --gather-script utils/gather_filter_asms.sh \
     --threads 32
 ```
 
+**Note**: The `--gather-script` argument is **required** for taxon create mode. It provides the robust genome download and QC filtering pipeline.
+
 This will:
 1. Query NCBI for all *Methylorubrum* assemblies
-2. Download assemblies (with quality filtering)
+2. Download assemblies via `gather_filter_asms.sh` (with CheckM/bbmap QC filtering)
 3. Run OrthoPhyl to build phylogeny
 4. Create `Methylorubrum_db` with full metadata
 

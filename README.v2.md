@@ -44,6 +44,12 @@ The **OrthoPhyl Pipeline Wrapper v2** (`orthophyl_pipeline_wrapper.v2.py`) is an
 
 ## Architecture
 
+### OrthoPhyl Pipeline Overview
+
+![OrthoPhyl Workflow](/img/OP2.2.1_workflow.png)
+
+*Figure: OrthoPhyl workflow showing the main pipeline stages. Grey boxes indicate processes. Orange, tan, and purple boxes represent user input, intermediate files, and species tree outputs, respectively. Purple arrows show iterative approaches. The workflow is divided into four main tasks: a) annotate assemblies, clean-up files, and remove identical CDSs. If more than "N" assemblies are being analyzed, b1) identify a subset of diversity-spanning assemblies, b2) pass them through OrthoFinder to generate orthogroups, and b3) expand the OrthoFinder-identified orthogroups to the full dataset of assemblies through iterative HMM searches. c) Align full orthogroup protein sets, generate and trim matching codon alignments, then filter orthogroups by taxon representation. Finally, d) estimate species tree topologies with concatenated codon alignment supermatrices along with a gene tree to species tree consensus method.*
+
 ### Workflow Diagram
 
 ```
