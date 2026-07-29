@@ -34,6 +34,9 @@ import os
 import sys
 import argparse
 import urllib.request
+import urllib.error
+import subprocess
+import time
 import tarfile
 import gzip
 import shutil
@@ -201,6 +204,121 @@ class TaxonAssemblyGatherer:
         # Storage
         self.assemblies = []
     
+    def _download_file(self, url: str, output_file: Path, min_size_bytes: int = 1024) -> Path:
+        """Robustly download a file with resume support and retry logic.
+        
+        Strategy:
+        1. Download to a .partial temp file (never leave corrupt final file)
+        2. Primary: use wget --continue (resumes from partial bytes on interruption)
+        3. Fallback: use curl -C - if wget not available
+        4. Last resort: Python urllib retry loop (4 attempts with backoff)
+        5. Verify file size >= min_size_bytes after download
+        6. Atomic rename .partial -> final on success
+        
+        Args:
+            url: URL to download
+            output_file: Final destination path
+            min_size_bytes: Minimum expected file size (sanity check)
+        
+        Returns:
+            Path to successfully downloaded file
+        
+        Raises:
+            RuntimeError: If download fails after all retries
+        """
+        output_file = Path(output_file)
+        partial_file = output_file.with_suffix(output_file.suffix + '.partial')
+        
+        # Check if wget or curl is available
+        wget_available = shutil.which('wget') is not None
+        curl_available = shutil.which('curl') is not None
+        
+        max_attempts = 4
+        backoff_delays = [5, 15, 45, 120]  # seconds
+        
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(f"  Download attempt {attempt}/{max_attempts}...")
+                
+                # Remove partial file if it exists from a previous failed attempt
+                # (wget/curl will resume from it, but urllib needs a clean slate)
+                if attempt > 1 and not (wget_available or curl_available):
+                    if partial_file.exists():
+                        partial_file.unlink()
+                
+                # Try wget first (best resume support)
+                if wget_available:
+                    cmd = [
+                        'wget',
+                        '--continue',           # Resume partial downloads
+                        '--tries=3',            # Internal retries
+                        '--timeout=60',         # Socket timeout
+                        '--no-verbose',         # Less output
+                        '-O', str(partial_file),
+                        url
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    if result.returncode != 0:
+                        raise RuntimeError(f"wget failed: {result.stderr}")
+                
+                # Try curl if wget not available
+                elif curl_available:
+                    cmd = [
+                        'curl',
+                        '-L',                   # Follow redirects
+                        '-C', '-',              # Resume from partial
+                        '--retry', '3',         # Internal retries
+                        '--retry-delay', '5',   # Delay between retries
+                        '--max-time', '600',    # Max time for operation
+                        '-o', str(partial_file),
+                        url
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    if result.returncode != 0:
+                        raise RuntimeError(f"curl failed: {result.stderr}")
+                
+                # Fall back to Python urllib (no resume support)
+                else:
+                    logger.warning("  ⚠ wget/curl not found, using Python urllib (no resume support)")
+                    urllib.request.urlretrieve(url, partial_file)
+                
+                # Verify file size
+                if not partial_file.exists():
+                    raise RuntimeError("Download completed but file not found")
+                
+                file_size = partial_file.stat().st_size
+                if file_size < min_size_bytes:
+                    raise RuntimeError(
+                        f"Downloaded file too small: {file_size} bytes "
+                        f"(expected >= {min_size_bytes})"
+                    )
+                
+                # Success! Atomic rename to final destination
+                os.replace(partial_file, output_file)
+                size_mb = file_size / (1024 * 1024)
+                logger.info(f"  ✓ Downloaded: {size_mb:.1f} MB")
+                return output_file
+                
+            except (urllib.error.ContentTooShortError, urllib.error.URLError, 
+                    RuntimeError, subprocess.CalledProcessError) as e:
+                logger.warning(f"  ⚠ Attempt {attempt} failed: {e}")
+                
+                if attempt < max_attempts:
+                    delay = backoff_delays[attempt - 1]
+                    logger.info(f"  Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                else:
+                    # Clean up partial file on final failure
+                    if partial_file.exists():
+                        partial_file.unlink()
+                    raise RuntimeError(
+                        f"Failed to download {url} after {max_attempts} attempts. "
+                        f"Last error: {e}"
+                    )
+        
+        # Should never reach here, but just in case
+        raise RuntimeError(f"Download failed for unknown reason: {url}")
+    
     def _ensure_taxonomy_database(self):
         """Download taxonomy database if not present."""
         nodes_file = self.taxdump_dir / "nodes.dmp"
@@ -217,8 +335,9 @@ class TaxonAssemblyGatherer:
         taxdump_tar = self.taxdump_dir / "taxdump.tar.gz"
         
         try:
-            urllib.request.urlretrieve(taxdump_url, taxdump_tar)
-            logger.info("  ✓ Downloaded taxdump.tar.gz")
+            # Use robust download with retry and resume support
+            # taxdump.tar.gz is typically ~50-60 MB, set min size to 10 MB
+            self._download_file(taxdump_url, taxdump_tar, min_size_bytes=10 * 1024 * 1024)
             
             with tarfile.open(taxdump_tar, 'r:gz') as tar:
                 members = [m for m in tar.getmembers() 
@@ -239,15 +358,15 @@ class TaxonAssemblyGatherer:
         
         output_file = self.output_dir / f"assembly_summary_{db_type}.txt"
         
+        # Check for existing file (but not .partial files from failed downloads)
         if output_file.exists():
             logger.info(f"  ✓ Using existing file: {output_file}")
             return output_file
         
+        # Use robust download with retry and resume support
+        # Assembly summaries are typically 50-1500 MB, set min size to 10 MB
         try:
-            urllib.request.urlretrieve(urls[db_type], output_file)
-            size_mb = output_file.stat().st_size / (1024 * 1024)
-            logger.info(f"  ✓ Downloaded: {size_mb:.1f} MB")
-            return output_file
+            return self._download_file(urls[db_type], output_file, min_size_bytes=10 * 1024 * 1024)
         except Exception as e:
             raise RuntimeError(f"Failed to download assembly summary: {e}")
     
