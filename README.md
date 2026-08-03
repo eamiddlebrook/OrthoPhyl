@@ -1,460 +1,470 @@
-# **OrthoPhyl2 (v2.2.1)**: Bigger and Better Orthology-based Phylogenomics
-# Now Freaturing **ReLeaf!**: Rapidly Add Samples to Previous OrthoPhyl Runs
-<br /> <br />
+# OrthoPhyl Pipeline Wrapper v2
+
+## Quick Navigation
+
+📚 **[Jump to Detailed Documentation](#detailed-documentation)** | 🚀 **[Quick Start](#quick-start)** | 🔍 **[Troubleshooting](readmes/README_TROUBLESHOOTING.md)**
+
+---
+
 ## Table of Contents
 
-1. [About OrthoPhyl](#AboutOP)
-2. [About ReLeaf](#AboutRL)
-3. [Getting Started](#GettingStarted)
-    - [Singularity](#Singularity)
-    - [Manual Install](#ManualInstall)
-    - [Test Install](#TestInstall)
-4. [Running OrthoPhyl](#RunningOrthoPhyl)
-    - [OrthoPhyl Examples](#RunExamples)
-5. [Running ReLeaf](#RunningReLeaf)
-    - [ReLeaf Examples](#ReLeafExamples)
-4. [More Notes on OrthoPhyl](#NotesOnOrthoPhyl)
-5. [Known Errors, Issues, and What-have-yous](#KnownErrors)
-6. [Future Capabilities](#FutureCapabilities)
-7. [OrthoPhyl Citation](#OrthoPhylCitation)
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+3. [Quick Start](#quick-start)
+4. [Common Usage Examples](#common-usage-examples)
+5. [Essential Configuration](#essential-configuration)
+6. [Common Issues & Solutions](#common-issues--solutions)
+7. [Performance Considerations](#performance-considerations)
+8. [Detailed Documentation](#detailed-documentation)
+9. [Citation & Support](#citation--support)
 
-<a name="AboutOP"></a>
+---
 
-## About OrthoPhyl
-### For the version used in *OrthoPhyl – Streamlining large scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales* see the OrthoPhyl_1.0 branch.
-### Developed at Los Alamos National Labs (LANL - C22064)
-#### Written by Earl Middlbrook with input from Robab Katani at Penn State and Jeanne Fair at LANL.
-#### The software is available through a GLPv3 open source licence. 
-#### Purpose
-This software is designed to generate phylogenetic trees from bacterial genome assemblies. While many methods use whole genome alignments to generate informative sites to base tress on, OrthoPhyl annotates bacterial genes, identifies orthologous sequences, aligns related proteins to inform transcript alignments, then builds species trees with two methods. The first is a conventional gene concatenation and ML tree estemation method. The second attempts to reconcile gene trees with a unified species tree using quartets (ASTRAL). Both methods allow filtering of gene lists on number of species represented, length, and gappiness in order to tune signal-to-noise ratio for tree estimation. 
-####
-The main advantages of this software pipeline are three fold: 1) It extends the evolutionary distance input species can represent (over whole genome alignment and k-mer methods) while maintaining phylogenetic resolution, 2) this software is designed to be very user friendly, requiring just a single to estimate trees from a directory of assemblies. Additionally a Singularity image is now available to avoid dependancy hell and 3) this pipeline is amenable to estimating trees for 1000s of bacterial genome assemblies. To handle large numbers of genomes, the pipline calculates a diversity-representing subset of genomes to run OrthoFinder on, then expands the found OrthoGroups to all assemblies with an iterative HMM search strategy.
-![screenshot](/img/OP2.2.1_workflow.png)
-Grey boxes indicate processes. Orange, tan, and purple boxes represent user input, intermediate files, and species tree outputs, respectively. Purple arrows show iterative approaches. The workflow is divided into four main tasks: a) annotate assemblies, clean-up files, and remove identical CDSs. If more than “N” assemblies are being analyzed, b1) identify a subset of diversity-spanning assemblies, b2) pass them through OrthoFinder to generate orthogroups, and b3) expand the OrthoFinder-identified orthogroups to the full dataset of assemblies through iterative HMM searches. c) Align full orthogroup protein sets, generate and trim matching codon alignments, then filter orthogroups by taxon representation. Finally, d) estimate species tree topologies with concatenated codon alignment supermatrices along with a gene tree to species tree consensus method.
+## Overview
 
-<a name="AboutRL"></a>
+The **OrthoPhyl Pipeline Wrapper v2** (`orthophyl_pipeline_wrapper.v2.py`) is an automated orchestration system that intelligently routes genome assemblies to the appropriate phylogenetic placement pipeline. It seamlessly integrates two complementary approaches:
 
-## About ReLeaf
-#### Purpose
-ReLeaf is a pipeline developed to add new samples to previously complete OrthoPhyl runs. It only requires the storage directory (-s storage) from the prefious run and the directory(s) for new samples (-a CDS,PROT and/or -g assemblies). ReLeaf will then look in the storage directory and identify what methods were used to generate trees, then automatically recreate these analyses using the same parameters from the previous OP run along with:
-+ OP HMMs for orthogroup identification
-+ OP OrthoGroup alignemnts as guides
-+ OP Trees as contraints for tree generation
-+ OP gene/partition ML models 
+- **ReLeaf Route**: For assemblies matching existing databases (fast, adds to pre-computed phylogenies)
+- **OrthoPhyl Route**: For novel taxa requiring new phylogenetic analyses (comprehensive, creates new databases)
 
-Reusing these original OP files can substantially reduce runtimes when compared to rerunning the full analysis adding only a few samples. This is especially true when the original run included a full partiation merging scheme from IQTree (which can take days on bacterial ~1000 samples). 
-##### 
-Note: Adding samples to OP ASTRAL trees is not yet supported. However ASTRAl tree generation is pretty fast, so a full OP rerun is not "too" burdensome.
+### Key Features
 
-<a name="GettingStarted"></a>
-## Getting Started
-### Compatability
-#### This workflow has been tested on CentOS8 and debian(mint) machines, but should be pretty portable to other linux systems. 
+✅ **Intelligent Routing**: Automatically determines the best pipeline for each assembly  
+✅ **Database Management**: Creates and versions hierarchical taxonomy databases  
+✅ **Checkpoint/Resume**: Robust recovery from interruptions  
+✅ **Quality Control**: Integrated genome filtering with CheckM or bbmap  
+✅ **Batch Processing**: Handles multiple assemblies efficiently  
+✅ **Flexible Configuration**: Supports various tree methods and data types  
 
-<a name="Singularity"></a>
-### Singularity
-#### If you have Singularity you can run a prebuilt container. Grab the container which requires ~1.7gb space (at the moment):
-```
-singularity_images=~/singularity_images/
-mkdir ${singularity_images}
-cd ${singularity_images}
-singularity pull library://earlyevol/default/orthophyl
-mv orthophyl_latest.sif OrthoPhyl_v2.2.1.sif
-```
-Congradulations! You can skip down to testing the "install"!
+### What It Does
 
-<a name="ManualInstall"></a>
-### Manual Install
-#### Clone the Orthophylo repo
-Cloning takes a minute because of the large test files
-```
-Path_to_gits=~/gits
-mkdir ${Path_to_gits}
-cd ${Path_to_gits}/
-git clone https://github.com/eamiddlebrook/OrthoPhyl.git
-cd OrthoPhyl
-```
+1. **Routes** assemblies by querying multiple taxonomy databases
+2. **Executes** ReLeaf for assemblies matching existing databases
+3. **Downloads** related genomes for novel taxa from NCBI
+4. **Runs** OrthoPhyl to create comprehensive phylogenies for novel taxa
+5. **Creates** new database entries for future use
+6. **Aggregates** all results into a unified output structure
 
-#### Conda/mamba installable dependencies
-If you need to install conda or mamba we recomend mamba, however the commands are exactly the same (exept running the install)
-```
-cd ~/Downloads/ # or wherever you want to put the installer
-wget https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-Linux-x86_64.sh
-bash Mambaforge-Linux-x86_64.sh
-```
-...or
-```
-cd ~/Downloads/ # or wherever you want to put the installer
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash Miniconda3-latest-Linux-x86_64.sh
-```
-#### Follow on screen instructions
-Set up auto initialize. If you don't, it is up to you to figure out how to make the script happy with your decision, you can also run:
-```
-mamba init bash
-```
-On some Linux distros, using ```~/.bashrc``` only for interactive shells is enforced (Linux Mint). In this case, mamba will not be initialized correctly within OrthoPhyl. To fix, just copy the conda/mamba initialization block from the bottom of your ```~/.bashrc``` file (below, replace "..." with what is in your file), and place them at the bottom of ```~/.bash_profile```. 
-```
-# >>> conda initialize >>>
-...
-# <<< conda initialize <<<
-```
+---
 
+## Architecture
 
-#### Create conda environment and install dependencies
-It is highly recomended that you create an separate environment for this install. Might take some time....
-```
-mamba create -n orthophyl --file $Path_to_gits/OrthoPhyl/orthophyl_env.XXX.txt -c bioconda -c conda-forge
-```
-...or you can install different versions if neccessary. Compatability should be pretty good, but no promises.
-```
-mamba create -n orthophyl -c bioconda -c conda-forge \
-git prodigal=2.6.3 orthofinder=2.5.4 \
-bbmap=39.01 fasttree=2.1.11 hmmer=3.3.2 \
-ete3 raxml=8.2.12 trimal=1.4.1 \
-parallel=20160622 r-essentials=4.1 \
-iqtree=3.0.1 mash=2.3
-```
-#### Sometimes R (r-essentials) can be a pain. 
-If it is causing problems with the conda/mamba install, remove it and install manually:
-Go to https://cran.r-project.org/mirrors.html and pick an appropriate mirror. Then chose the linux distro you are using, download package files, and follow install instructions.
-
-#### To allow conda changes to take effect:
-```
-source ~/.bashrc
-```
-Alternatively, close and reopen terminal. 
-#### To remove parallel's citation reminder (BUT DONT FORGET TO CITE!) run:
-```
-mamba activate orthophyl
-parallel --citation
-```
-If you are on a a newer RHEL/CentOS machine, you might need to install libnsl to get parallel to run.
-```
-#If parallel fails to run...
-sudo dnf install libnsl
-parallel --citation
-```
-#### Test R install
-```
-Rscript --help
-```
-
-#### Other dependencies
-This reflects how I like to organize my machine, pick what works for you. The control_file.paths reflects this setup. If you choose to install the below packages in different locations, just change control_file.paths to reflect this.
-```
-cd ${Path_to_gits}/
-# Install ASTRAL
-git clone https://github.com/smirarab/ASTRAL.git
-cd ASTRAL
-unzip Astral.5.7.8.zip #change to curren version if needed
-
-cd ${Path_to_gits}/
-git clone https://github.com/nylander/catfasta2phyml.git
-git clone https://github.com/dportik/Alignment_Assessment.git
-cd Alignment_Assessment/
-# convert script to python3
-2to3 -w Alignment_Assessment_v2.py 
+### Workflow Diagram
 
 ```
+INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
+  │
+  ├─► PHASE 1: INITIALIZATION
+  │   ├─ Create directory structure
+  │   ├─ Validate dependencies
+  │   └─ Load/create databases
+  │
+  ├─► PHASE 2: ASSEMBLY ROUTING
+  │   └─ assembly_router_multi.cmd_out3.py
+  │       ├─ Query all databases
+  │       ├─ Find best taxonomic match
+  │       └─ Generate routing decisions
+  │           ├─► ReLeaf batch (matched)
+  │           └─► OrthoPhyl batch (novel)
+  │
+  ├─► PHASE 3A: RELEAF ROUTE (Matched Databases)
+  │   └─ For each database:
+  │       ├─ ReLeaf.sh
+  │       │   ├─ Add genomes to existing phylogeny
+  │       │   └─ Generate updated trees
+  │       └─ add_releaf_version.py
+  │           └─ Create new database version
+  │
+  ├─► PHASE 3B: ORTHOPHYL ROUTE (Novel Taxa)
+  │   └─ For each taxon:
+  │       ├─ gather_filter_asms.sh
+  │       │   ├─ Download genomes from NCBI
+  │       │   ├─ Run CheckM/bbmap QC
+  │       │   └─ Filter by quality metrics
+  │       ├─ Add query genomes
+  │       ├─ OrthoPhyl.sh
+  │       │   ├─ Annotate genomes
+  │       │   ├─ Run OrthoFinder
+  │       │   ├─ Build alignments
+  │       │   └─ Infer phylogeny
+  │       └─ create_hierarchical_database_v2.py
+  │           └─ Create new database entry
+  │
+  └─► PHASE 4: RESULTS AGGREGATION
+      ├─ Collect all trees
+      ├─ Generate summary report
+      └─ Create unified output structure
 
-#### Edit ```${Path_to_gits}/OrthoPhyl/control_file.paths``` to reflect system specific locations and conda environment name if binaries and conda env are in different locations than discribed above
-
-<a name="TestInstall"></a>
-## Test Install 
-### Test Singularity container
-You must specify an output directory (-s) if running through singularity, because the script will try to write directly to the container (wont work). The ```-t 4 ``` allows OP to run on 4 cores. Change if required.
-```
-singularity run ${singularity_images}/OrthoPhyl_v2.2.1.sif -T TESTER_fasttest -s ./tester_fasttest_output -t 4
-```
-If ```ls ./tester_fasttest_output/FINAL_SPECIES_TREES``` returns trees with prefixes [astral fasttree iqtree] with [SCO_3 SCO_strict] and [CDS PROT] suffixes (12 total trees), the pipline ran successfully!
-#### Test Releaf within the singularity container
-```
-singularity exec ${singularity_images}/OrthoPhyl_v2.2.1.sif -a TESTER/annots_nucls_fasttest_addasm,TESTER/annots_prots_fasttest_addasm -t 4 -s ./tester_fasttest_output
-```
-If ```ls ./tester_fasttest_output/FINAL_SPECIES_TREES``` returns trees (iqtree.[].treefile fasttree.[].tree), then the ReLeaf pipeline ran successfully!
-
-### Test Manual install
-To test 'conda activate' within OrthoPhyl, make sure the conda environment is not activated
-```
-mamba deactivate
-```
-#### Run super "fast" test locally
-Tested on RHEL 8.5 machine with Intel Core i7-8700 CPU and 16gb ram (~8 minute runtime using 3 cores)
-```
-bash ${Path_to_gits}/OrthoPhyl/OrthoPhyl.sh -T TESTER_fasttest -t 3
-```
-There should be a directory created at OrthoPhyl/TESTER/Workflow_test.fasttest$(date +%m-%d-%Y)
-If the test was successful, there should be 4 species trees found in the FINAL_SPECIES_TREES
-
-#### run Chloroplast test locally
-Tested on RHEL 8.5 machine with Intel Core i7-8700 CPU and 16gb ram (~8 minute runtime using 3 cores)
-```
-bash ${Path_to_gits}/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -t 3
-```
-There should be a directory created in OrthoPhyl/TESTER/Workflow_test.chloroplast$(date +%m-%d-%Y)
-If the test was successful, there should be 4 species trees found in the FINAL_SPECIES_TREES
-
-#### run bigger test locally
-This script takes about 20 hr to complete with 20 cores. Most of this is ML tree building. Will make an artificial set of truncated genomes later
-```
-bash OrthoPhyl.sh -T TESTER -t 3
-```
-#### Test ReLeaf from manual install
-First run the ```-T TESTER_fasttest``` from above.
-```
-./ReLeaf.sh -g TESTER/genomes_fasttest_addasm/ -a TESTER/annots_nucls_fasttest_addasm/,TESTER/annots_prots_fasttest_addasm/ -s ./TESTER/Workflow_test.fasttest$(date +%m-%d-%Y)
+OUTPUT: results/03_results/
+  ├─ trees/
+  │   ├─ releaf/
+  │   └─ orthophyl/
+  └─ pipeline_summary.txt
 ```
 
-<a name="RunningOrthoPhyl"></a>
+**📖 For detailed phase descriptions, see [Pipeline Phases Documentation](readmes/README_PIPELINE_PHASES.md)**
 
-## Running OrthoPhyl 
-```
-USAGE: OrthoPhyl.sh -g Path_to_directory_of_assemblies -s directory_to_store_output
-# ALL arguments are optional if set with \"-c control_file.your_args\"
-#   Many default parameters are set in control_file.defaults
-#   I will work to expose the more useful ones in later versions of OP
-Required:
--g  path to genomes directiory
-or
--a  paths to protien and transcript directories.
-       They should be delared as \"-a path_to_transcript_dir,path_to_prot_dir\"
--s  path to the main directory for output
-Optional:
--t  threads to use [4]
--R|--rigor	Set the overall analysis rigor. This overrides most conflicting parameters set with other arguments except "-o\|--omics" and "-m\|--min_frac_orthos" for a fast run. (fast, medium, full) 
-	full: Run Iqtree2 on CDS and PROT concatenated alignments with partion merging and GTR + freerate family model testing for CDS and standard PROT models. 
-		Additionally, run ASTRAL gene to species tree consensus on CDS and PROT sequences
-		Analyses will be performed on strict and relaxed single copy orthologs (found in >=30% taxa)
-	medium: Run Iqtree2 with GTR and FreeRate models for CDS and standard models for Prots
-	fast: Run FastTree on concatenated PROT alignments using only strict single copy orthologs 
--p  phylogenetic tree software to use astral, fasttree, raxml, and/or iqtree [\"fasttree iqtree astral\"]
-	i.e. -p \"fasttree iqtree astral\"
--o  "omics" data to use for tree building ([CDS], PROT, BOTH)
-	for divergent sequences, it is good to compare protein trees to 
-	nucleotide trees to identify artifacts of saturation (long branch attraction)
--c	path to a control file with required variables and any optional ones to override defaults.
-	Will override values set on command line! [NULL]
--x  trimal paramerter string (in double \"quotes\")
--r  flag to rerun orthofinder on the ANI_shorlist (true/[false])
--n  Max number of proteomes to run through OrthoFinder.
-	If more than this many assemblies are provided, a subset of proteomes (based on genomes/transcripts ANI) will be chosen for OrthoFinder to chew on [20]
--m  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
-        Expects a float from 0-1
-        A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
-        [0.30]
--d  Force ANI subsetting to run on transcript or genome Datasets. ([genome],transcript)
-	Using \"-a\" implies \"-d transcript\".
-	If \"-a\" is declared but you want to use the assemblies you have also provided, set \"-d genome\"
-	If \"-a\" not used but you want to use transcripts (annotated within OrthoPhyl by Prodigal) for ANI subsetting, set \"-d transcript\"
--T  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast)
--h  display a description and a super useful usage message
-###############################################################\n
-To run test datasets:
-# Test of full bacterial genomes
-bash OrthoPhyl.sh -T TESTER -t #threads
-# Big test with ~100 orchid chloroplasts
-bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
-# reduced chloroplast dataset
-bash OrthoPhyl.sh -T TESTER_fasttest -t #threads
-# When running through Singularity an output directory is required:
-singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads
-```
-<a name="RunExamples"></a>
-### Run Examples 
-#### Example1: Run OrthoPhyl on assemblies in ~/Projects/ASMS/ecoli/ using 12 cores within singularity and place all results and intermediate files in ~/Projects/phylogenetics/ecoli/
-```
-singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
+---
 
-```
-#### Example2: Run the same OrthoPhyl command from the manual install
-```
-./OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
+## Quick Start
 
-```
-#### Example3: Run the same OrthoPhyl command from the manual install, also incorporate preannoated samples with protein seqs in ```~/Projects/annots/protiens/``` and transripts in ```~/Projects/annots/transcripts/``` 
-```
-./OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -a ~/Projects/annots/transcripts/,~/Projects/annots/protiens/ -s ~/Projects/phylogenetics/ecoli/ -t 12 
+### Prerequisites
 
-```
-#### Example4: Run OrthoPhyl to build a species tree with 
-+ ASTRAL (-p astral) 
-+ from CDS (-o CDS) 
-+ codon alignment gene trees build by iqtree used by ASTRAL (control_file.user contains just the line "export gene_tree_methods=("iqtree")") 
-+ using only single copy orthologs found in 1/1 assemblies (-m 1)
-+ using only 15 asssemblies to generate HMMs with OrthoFinder (-n 15)  
-```
-./OrthoPhyl.sh -g TESTER/genomes_chloroplast/ -s TESTER/TESTER_custom.chloro.B -m 1 -n 15 -c control_file.user -p astral -o CDS
-```
-#### Example5: Run OrthoPhyl to build a species tree with 
-+ iqtree and ASTRAL (-p "iqtree astral") 
-+ from protein alignments (-o PROT) 
-+ protein alignment gene trees build by fasttree used by ASTRAL (default) 
-+ using only single copy orthologs found in .3/1 assemblies (-m .3)
-+ using 30 asssemblies to generate HMMs with OrthoFinder (-n 30)  
-```
-./OrthoPhyl.sh -g TESTER/genomes -s TESTER/TESTER_full_genomes -m .3 -n 30 -p "iqtree astral" -o PROT
-```
-<a name="RunningReLeaf"></a>
-## Running Releaf
-```
-USAGE: ReLeaf.sh -g Path_to_directory_of_assemblies -a path_to_CDS_dir,path_to_PROTS_dir -s Previous_OP_output
-***Check out github.com/eamiddlebrook/OrthoPhyl for lots of details***
-# ALL arguments are optional if set with \"-c control_file.your_args\"
-#   Many default parameters are set in control_file.defaults
-Required:
--g|--genome_dir  path to genomes directiory
-or
--a|--annotations  paths to protien and transcript directories.
-       They should be delared as \"-a path_to_CDS_dir,path_to_prot_dir\"
--s|--storage_dir  path to the main directory output from original OrthoPhyl run
-Optional:
--t|--threads  threads to use [4]
--p|--phylo_tool  phylogenetic tree software to use astral, fasttree, and/or iqtree [\"fasttree iqtree astral\"]
-	i.e. -p \"fasttree iqtree astral\"
-	Default: Will be taked from trees available in storage_dir
--o|--omics  "omics" data to use for tree building ([CDS], PROT, BOTH)
-	for divergent sequences, it is good to compare protein trees to 
-	nucleotide trees to identify artifacts of saturation (long branch attraction)
-	Default: Will be taked from trees available in storage_dir
--h|--help  display a description and a super useful usage message
+- Python 3.7+
+- OrthoPhyl conda environment
+- Access to taxonomy databases (or orthophyl_runs.tsv for initial setup)
 
-```
-<a name="ReLeafExamples"></a>
-### Run Examples 
-#### Exapmle1: Run Releaf on new bacterial assemblies, benerating the same trees from the original OP run
-+ Generate tree(s) with the same methods and datasets as original OP run (-p and -o NOT set)
-+ Original OP run Directory ( -s OP_OUT_DIR_PATH )
-+ Add assemblies to OP trees ( -g PATH_TO_ASMS )
+### Basic Usage
 
-```
-./ReLeaf.sh -g TESTER/genomes_fasttest_addasm/ \
-	-s TESTER/Workflow_test.fasttest11-17-2025/
-```
-#### Example2: Run Releaf on new bacterial assemblies and annotation files, generating a tree with only FastTree using the CDS data
-+ Use assemblies ( -g PATH_TO_ASMS )
-+ Use annotation files ( -a PATH_TO_CDS_files,PATH_TO_PROT_FILES )
-+ Add samples to OP run ( -s OP_OUT_DIR_PATH )
-+ only generate new trees using FastTree, ( -p fasttree )
-+ Only generate new trees using CDS sequences ( -o CDS )
-```
-./ReLeaf.sh -g TESTER/genomes_fasttest_addasm/ \
-	-a TESTER/annots_nucls_fasttest_addasm/,TESTER/annots_prots_fasttest_addasm/ \
-	-s TESTER/Workflow_test.fasttest11-17-2025/ \
-	-p fasttree -o CDS
-```
-##### Note: Trees generated with FastTree using CDs alignments must be present in ```OP_OUT_DIR_PATH```
+```bash
+# Simple run with existing databases
+python orthophyl_pipeline_wrapper.v2.py \
+    --input assemblies.tsv \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --threads 32
 
-<a name="NotesOnOrthoPhyl"></a>
+# With genome downloading for novel taxa
+python orthophyl_pipeline_wrapper.v2.py \
+    --input assemblies.tsv \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --gather-script utils/gather_filter_asms.sh \
+    --threads 32
 
-## More Notes on OrthoPhyl: 
-This software wraps many open source bioinformatic tools together with several custom programs. Genomes are annotated with Prodigal.  If a large number of genomes are to be analyzed, fastANI is used to estimate the pairwise genomic Average Nucleotide Identity (ANI) and then an OrthoPhyl function subsets the genomes to a minimal number which represent the diversity of the full set. Protein sequences from this subset (or full set for small numbers of genomes) are used as input for OrthoFinder to identify orthologous gene families. For the subset method, a HMM search, HMMER, is used to generalize the resulting orthogroup to the full data set. From there, orthogroup proteins are realigned with MAFFT, and these aignments are used to "codon" align the transcript sequences (generated by earlier annotation). These orthogroup transcript alignments are then trimmed (with TRIMAL) and filtered for strict single copy orthologs (SCO_strict) or SCOs found in at least X% of the input genomes (with X being tunable). Next, transcript alignmants are concatenated to generate super-maticies and used as input for species tree generation with either RAxML or fastTREE. Aditionally, gene trees are generated from the individual transcript alignments, which are used in gene tree to species tree estimation with ASTRAL.  
+# Initial setup (create databases from scratch)
+python orthophyl_pipeline_wrapper.v2.py \
+    --input assemblies.tsv \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --orthophyl-runs orthophyl_runs.tsv \
+    --threads 32
+```
 
-### Cleaning input genomes
-The script OrthoPhyl/utils/gather_filter_asms.XX.sh was writen to streamiline aquiring all available assemblies for a specific taxon. It takes NCBI's taxID as and input (BrucellaTaxID=234). After the genomes are DL'd there are several simple genome filtering steps: length,N50,GC, etc. There are also a few more soficticated filtering methods: CheckM is used to assess completeness and contamination, while dedupe from BBmap is used to reduce duplicated contigs. 
-It is absolutely imparative to clean up assemblies to get the best results from OrthoPhyl. For instance, when looking at the output for all Brucella accessions, checkM output shows many assemblies have duplicated "marker genes", if these are from falsely duplicated contigs in the asm, they will lead to removal of the ortholog group from both the strict SCO and relaxed SCO gene sets within the OrthoPhylo workflow. Furthermore, dedupe.sh (from bbmap) identifies many Duplicated or Contained contigs, some of them >100kb long. Again, if any of the duplicated contigs contain what would otherwise be SCOs, the SCOs will be removed. In essence, having duplicates poisons the analysis by severely reducing the number of Orthologs for downstream analysis. This problem is exacerbated by including 1) less curated assemblies (GenBank) and 2) the total number of assemblies fed to the analysis pipeline.
+### Input File Format
 
-### What this software does not do: 
-Generate trees that are ready for publication without parameter tuning or manual inspection. Reconstructing trees from whole genomes (gene tree reconciliation) requires many many steps, all of which have parameters that will differ based on the input sequences. Some importent outputs too look at: input genomes quality (checkM output), assembly subset used for Ortholog model generation (assembly shortlist), number of strict/relaxed single copy orthologs (drops quickly with additional assemblies), phylogenetic signal for transcript alignments, missing data in alignments (per gene and concatenated alignments)...to name a few. #### This pipeline also does not robunstly compute SCOs (like BUSCOs). It grabs all the SCOs it can from a dataset, but does not do any modeling to ensure species tree-like behavior of the individual genes and also does not deal with paralogs at all.
+**assemblies.tsv** (tab-separated):
+```
+/path/to/genome1.fnad__Bacteria;p__Actinomycetota;c__Thermoleophilia;o__Gaiellales;f__Gaiellaceae;g__VAXT01;s__genome1_id
+/path/to/genome2.fnad__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia;s__Escherichia_coligenome2_id
+```
 
-<a name="KnownErrors"></a>
-## Known Errors:
-#### If you have special characters in you fasta file names:
-Filenames with special characters will likely make this workflow fail. As I encountered these characters, i will add fixes accordingly in Orthophyl.XX.sh, function SET_UP_DIR_STRUCTURE.
-#### If the combination of fasta file name and contigs within are very long: 
-Mafft will truncate the sequence names generated by prodigal. This will make the PAL2NAL module fail on many orthogroups. It manifests as a lot of cat commands failing during trimming because they cant find the transcript file PAL2NAL is suposed to spit out. This can be seen in the log file (in slurm_out). It's normally caused by very redundant sequence identifiers in the contig names. Can be fixed with something like this:
-```
-sed -i 's/REDUNDANT_STUFF/_/g' < SEQUENCE.fasta
-```
-#### If genomes are less than ~75% identity... 
-FastANI doesnt calculate an ANI value for very divergent genomes. In this case my script ANI_picking.py assigns an ANI of 50 (hard coded) for these comparisons. This should not pose a problem if the number of clades with ~75% divergence internally are ~= ANI_shortlist number. The goal of the ANI stuff is to find representetives of the evolutionaly breadth of the dataset, so missing representatives from some clades will likelly not affect the final result (there is a lot of filtering later on in the workflow).
-I will implement a more robust ANI estimator soooon... 
-#### If you get an error like: 
-``` 
-/cm/local/apps/slurm/var/spool/job49381/slurm_script: line 511: J % percent: division by 0 (error token is "percent") 
-```
-It means that an upstream process failed and the directory used to enumerate a loop is empty
+Columns:
+1. **assembly_path**: Full path to genome FASTA file
+2. **taxonomy**: GTDB-format taxonomy string
+3. **assembly_id** (optional): Identifier (defaults to filename stem)
 
-I will attempt to make errors easier to track...
+---
 
-#### Errors during OrthoFinder step
-I sometimes get a series of errors like this: 
-```
-$HOME/mambaforge/envs/orthophyl/bin/scripts_of/newick.py:54: SyntaxWarning: invalid escape sequence '\['
-  _ILEGAL_NEWICK_CHARS = ":;(),\[\]\t\n\r="
-$HOME/mambaforge/envs/orthophyl/bin/scripts_of/newick.py:57: SyntaxWarning: invalid escape sequence '\['
-  _NHX_RE = "\[&&NHX:[^\]]*\]"
-```
-This doesnt seem to mess with OP running successfully. OrthoFinder appears to generate the orthogroups as expected, so the issue is likely somewhere downstream. I will eventually track this down and figure out what is happening, or incorporate a newer version of OF that might have fixed the issue.
+## Common Usage Examples
 
-#### I have gotten an error with gather_filter_genomes when pulling extra genomes via wget:
-```
-dyld: Symbol not found: _libiconv_open
-```
-This appeared to be a problem with wget, which was resolved by updating through conda/mamba.
-#### Segmentation fault during Trimming/backtranslating
-If trimming during backtranslating removes all sites you will get a segmentation fault:
-```
-gits/OrthoPhyl/script_lib/functions.sh: line 973: 3034614 Segmentation fault      (core dumped) trimal -in $i $trimal_parameter -ignorestopcodon -backtrans $SequencesCDS/${base}.CDS.fa -out $CDS_codon_alignment/${base}.codon_aln.fa >> $wd/logs/trimal.TRIMAL_backtrans 2>&1
-```
-This just results in there being a missing alignment. Since later steps are enumerated on what alignments are present, this doesnt cause a further error. Since the missing alignment is garbage, it will not be missed.
-#### SyntaxWarning during OrthoFinder run
-Due to a python version update, ETE3 throws and error about escape characters during the OrthoFinder run:
-```
-/panfs/biopan03/home/earlm/mambaforge/envs/orthophyl5/bin/scripts_of/tree.py:1422: SyntaxWarning: invalid escape sequence '\-'
-  """
-/panfs/biopan03/home/earlm/mambaforge/envs/orthophyl5/bin/scripts_of/newick.py:54: SyntaxWarning: invalid escape sequence '\['
-  _ILEGAL_NEWICK_CHARS = ":;(),\[\]\t\n\r="
-```
-etc...
-This DOES NOT affect the results. In future python versions this warning will upgrade to an error and kill ete3.  I will see if there is an update that 
+### Example 1: Standard Run with Existing Databases
 
-<a name="FutureCapabilities"></a>
-## Future Capabilities:
-+ DONE: add assembly filtering, now very incomplete assemblies will be used, so the number of strict single copy orthologs could be drastically reduced (maybe to zero). Filtering done with gather_filter_asm
-+ DONE: Quantify phylogenetic info per gene (https://github.com/dportik/Alignment_Assessment.git)
-+ Check genome assembly file not empty at start of Main pipeline....will crash pipe at Orthofinder run. This happened because of a file transfer mishap for me :( 
-+ DONE: Allow users to submit pre-annotated assemblies. This will open up OrthoPhyl to all taxa (after making sure all software is compatable with alternative codon tables)
-+ Test evolutionary models of genes with ete3. Then test GO enrichment, AMR, Virulence genes
-+ Look at tree wide paralog numbers. Do GO analysis...
-+ Identify HGT from Transcript alignments. HGTs specific to any group?
-+ allow "protected assemblies" when filtering. Perhaps your favorite assembly is crap, but you really want it in the tree. A couple of bad assemblies shouldnt reduce the number of SCOs that much
-+ allow usage of precomputed Orthogroup HMMs, build new models from hits, then grab novel orthogroups from the remaining protiens
-+ DONE!!!: Related to above: allow adding assemblies to pre-run pipeline. i.e. use precomputed hmms to identify orthologs, and add them to alignemnts and regenerate trees
-+ DONE: allow users to pick which dataset to use for tree building (currently strict and relaxed are used). This would greatly reduce pipeline run time.
-+ change how the list of OGs for HMM  searching is inumerated. Currently tries with OG that have be filtered out because of paralogs, then gets mad because there is no multifasta to align (doesnt change outcome, just messy)
-+ Depending on the step, keyboard interupt just hangs. Need to figure this out. Should be simple in the loops. Why it hangs in IQTREE, I don't know. 
+```bash
+python orthophyl_pipeline_wrapper.v2.py \
+    --input my_assemblies.tsv \
+    --database-dir /data/phylo_databases/ \
+    --output-dir /results/my_project/ \
+    --threads 32
+```
 
+**Use case**: You have pre-built databases and want to place new assemblies
 
-<a name="OrthoPhylCitation"></a>
-## OrthoPhyl Citation:
-Earl A Middlebrook, Robab Katani, Jeanne M Fair, OrthoPhyl—streamlining large-scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales, G3 Genes|Genomes|Genetics, Volume 14, Issue 8, August 2024, jkae119, https://doi.org/10.1093/g3journal/jkae119
-## Citations for dependencies
-### If there are nested dependencies that I am missing citations for, please let me know
-### [Coming soon]
-+ prodigal 
-+ orthofinder 
-+ bbmap
-+ fastTree*
-+ hmmer
-+ mafft
-+ prodigal 
-+ ete3
-+ IQTree*
-+ raxml*
-+ trimal
-+ parallel
-+ catfasta2phyml
-+ ASTRAL
-+ fastANI
-+ R
-+ Alignment_Assessment
-+ blast
-+ scipy
-+ numpy
-+ muscle
-+ mmseq2
-+ mcl
-+ fastme
-+ diamond
+### Example 2: Enable Genome Downloading for Novel Taxa
 
+```bash
+python orthophyl_pipeline_wrapper.v2.py \
+    --input assemblies.tsv \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --gather-script utils/gather_filter_asms.sh \
+    --threads 32
+```
+
+**Use case**: Assemblies may include novel taxa requiring NCBI genome downloads
+
+### Example 3: Resume from Checkpoint
+
+```bash
+python orthophyl_pipeline_wrapper.v2.py \
+    --input assemblies.tsv \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --resume \
+    --threads 32
+```
+
+**Use case**: Pipeline was interrupted; resume from last checkpoint
+
+### Example 4: Low-Memory Mode
+
+```bash
+python orthophyl_pipeline_wrapper.v2.py \
+    --input assemblies.tsv \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --gather-script utils/gather_filter_asms.sh \
+    --gather-args "--reduced_tree --use-bbmap" \
+    --threads 16
+```
+
+**Use case**: Running on systems with limited RAM (<64 GB)
+
+**📝 For 8 more detailed examples, see [Usage Examples Documentation](readmes/README_USAGE_EXAMPLES.md)**
+
+---
+
+## Essential Configuration
+
+### Core Arguments
+
+| Argument | Required | Description | Default |
+|----------|----------|-------------|---------|
+| `--input` | ✅ | Path to assemblies.tsv | - |
+| `--database-dir` | ✅ | Directory containing taxonomy databases | - |
+| `--output-dir` | ✅ | Output directory for results | - |
+| `--threads` | ❌ | Number of CPU threads | 1 |
+| `--resume` | ❌ | Resume from checkpoint | False |
+
+### Pipeline Control
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--gather-script` | Path to genome download script | None |
+| `--gather-args` | Additional args for gather script | "" |
+| `--orthophyl-runs` | TSV for initial database creation | None |
+| `--skip-releaf` | Skip ReLeaf route | False |
+| `--skip-orthophyl` | Skip OrthoPhyl route | False |
+
+### Tree Configuration
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--tree-method` | Tree inference method (iqtree/fasttree) | iqtree |
+| `--tree-data` | Data type (CDS/protein) | CDS |
+
+**🔧 For complete configuration reference, see [Technical Reference](readmes/README_TECHNICAL_REFERENCE.md#configuration-options)**
+
+---
+
+## Common Issues & Solutions
+
+### 1. "No databases found" Error
+
+**Problem**: Pipeline cannot find any database directories
+
+**Solution**:
+```bash
+# Check database directory structure
+ls -la databases/
+# Should contain *_db directories with database_config.json files
+
+# If empty, initialize with orthophyl_runs.tsv
+python orthophyl_pipeline_wrapper.v2.py \
+    --input assemblies.tsv \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --orthophyl-runs orthophyl_runs.tsv
+```
+
+### 2. Checkpoint Resume Not Working
+
+**Problem**: `--resume` flag doesn't skip completed phases
+
+**Solution**:
+```bash
+# Check for checkpoint files
+ls results/checkpoints/
+
+# If missing, checkpoints may have been deleted
+# Re-run without --resume to start fresh
+```
+
+### 3. Out of Memory During CheckM
+
+**Problem**: CheckM fails with memory errors
+
+**Solution**:
+```bash
+# Use reduced tree mode and bbmap instead
+python orthophyl_pipeline_wrapper.v2.py \
+    --gather-args "--reduced_tree --use-bbmap" \
+    --threads 16  # Reduce threads
+```
+
+### 4. NCBI Download Failures
+
+**Problem**: Genome downloads timeout or fail
+
+**Solution**:
+- Check internet connection
+- NCBI servers may be temporarily down
+- Use `--resume` to retry failed downloads
+- Consider downloading genomes manually
+
+### 5. ReLeaf Fails with "HMM profiles not found"
+
+**Problem**: Database missing HMM profiles
+
+**Solution**:
+```bash
+# Check database structure
+ls databases/MyDatabase_db/orthophyl_run/OG_alignmentsToHMM/hmms_final/
+
+# If missing, database may be incomplete
+# Rebuild database from OrthoPhyl output
+```
+
+**🔍 For comprehensive troubleshooting, see [Troubleshooting Guide](readmes/README_TROUBLESHOOTING.md)**
+
+---
+
+## Performance Considerations
+
+### Resource Requirements
+
+**Minimum**:
+- 16 GB RAM
+- 8 CPU cores
+- 100 GB disk space
+
+**Recommended**:
+- 64 GB RAM
+- 32 CPU cores
+- 500 GB disk space (for large datasets)
+
+### Optimization Tips
+
+1. **Thread Allocation**:
+   ```bash
+   # Use 80% of available cores
+   --threads 32  # on 40-core system
+   ```
+
+2. **Low-Memory Systems**:
+   ```bash
+   --gather-args "--reduced_tree --use-bbmap"
+   ```
+
+3. **Large Datasets** (>100 assemblies):
+   - Split input into batches
+   - Process sequentially
+   - Merge results manually
+
+4. **Network Optimization**:
+   - Run downloads during off-peak hours
+   - Use local genome cache if available
+
+### Runtime Estimates
+
+| Dataset Size | ReLeaf Route | OrthoPhyl Route (with download) |
+|--------------|--------------|----------------------------------|
+| 1-10 assemblies | 1-3 hours | 6-12 hours |
+| 10-50 assemblies | 3-8 hours | 12-24 hours |
+| 50-100 assemblies | 8-16 hours | 24-48 hours |
+
+*Estimates based on 32-core system with 64 GB RAM*
+
+---
+
+## Detailed Documentation
+
+### 🧬 Core Pipelines (OrthoPhyl & ReLeaf)
+
+- **[OrthoPhyl & ReLeaf Guide](README_OrthoPhyl_ReLeaf.md)** - Full documentation for the underlying pipelines the wrapper orchestrates
+  - Installation (Singularity & manual/conda)
+  - Running OrthoPhyl and ReLeaf directly
+  - Command-line reference and examples
+  - Notes, known errors, and citation
+
+### 📖 Understanding the Pipeline
+
+- **[Pipeline Phases](readmes/README_PIPELINE_PHASES.md)** - Detailed walkthrough of all 4 pipeline phases
+  - Phase 1: Initialization
+  - Phase 2: Assembly Routing
+  - Phase 3a: ReLeaf Route (Matched Databases)
+  - Phase 3b: OrthoPhyl Route (Novel Taxa)
+  - Phase 4: Results Aggregation
+
+- **[Technical Reference](readmes/README_TECHNICAL_REFERENCE.md)** - Comprehensive technical documentation
+  - Architecture & Component Interaction
+  - Script Dependencies
+  - Input/Output Specifications
+  - Configuration Options
+  - Checkpoint System
+  - File Format Specifications
+
+### 🚀 Running & Configuring
+
+- **[Extended Usage Examples](readmes/README_USAGE_EXAMPLES.md)** - 8 detailed usage scenarios
+  - Standard runs
+  - Initial setup
+  - Resume operations
+  - Low-memory configurations
+  - Custom tree methods
+  - Batch processing
+  - Integration with existing workflows
+
+- **[Advanced Features](readmes/README_ADVANCED_FEATURES.md)** - Power user features
+  - Custom routing logic
+  - Database versioning
+  - Parallel batch processing
+  - Custom quality filters
+  - Integration with HPC schedulers
+  - Performance tuning
+  - Debugging modes
+
+- **[Taxon Mode Guide](readmes/TAXON_MODE_GUIDE.md)** - Direct taxon-based analysis
+  - Create databases from taxon names
+  - Update existing databases
+  - Batch taxon processing
+
+### 🐳 Containers & Testing
+
+- **[Singularity Containers](readmes/README_SINGULARITY.md)** - Container usage guide
+  - Pulling from Sylabs Cloud
+  - Building custom containers
+  - Mounting directories
+  - Running in containers
+  - HPC integration
+
+- **[Container Testing](tests/CONTAINER_TESTING.md)** - Testing framework
+  - Unit tests
+  - Integration tests
+  - Container-specific tests
+  - CI/CD integration
+
+### 🔍 Reference & Recovery
+
+- **[Troubleshooting Guide](readmes/README_TROUBLESHOOTING.md)** - Comprehensive problem-solving
+  - Common errors and solutions
+  - Database issues
+  - Memory problems
+  - Network failures
+  - Checkpoint recovery
+  - Log file analysis
+  - Debug mode usage
+
+---
+
+## Citation & Support
+
+### Citation
+
+If you use OrthoPhyl in your research, please cite:
+
+> Earl A Middlebrook, Robab Katani, Jeanne M Fair, OrthoPhyl—streamlining large-scale, orthology-based phylogenomic studies of bacteria at broad evolutionary scales, *G3 Genes|Genomes|Genetics*, Volume 14, Issue 8, August 2024, jkae119, https://doi.org/10.1093/g3journal/jkae119
+
+### Support
+
+- **Issues**: Report bugs via GitHub Issues
+- **Questions**: Contact the development team
+- **Documentation**: See detailed guides in `readmes/` directory
+
+### License
+
+OrthoPhyl is distributed under the GNU General Public License v3.0. See [GPLv3.pdf](GPLv3.pdf) for details.
+
+---
+
+**📚 [Back to Top](#orthophyl-pipeline-wrapper-v2)** | **🚀 [Quick Start](#quick-start)** | **📖 [Detailed Documentation](#detailed-documentation)**

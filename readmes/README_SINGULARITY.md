@@ -1,6 +1,6 @@
 # Singularity Containers - OrthoPhyl Wrapper v2
 
-[← Back to Main README](../README.v2.md)
+[← Back to Main README](../README.md)
 
 ---
 
@@ -571,4 +571,4 @@ pytest tests/unit/ -v
 
 ---
 
-[← Back to Main README](../README.v2.md)
+[← Back to Main README](../README.md)

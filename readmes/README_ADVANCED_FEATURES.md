@@ -1,6 +1,6 @@
 # Advanced Features - OrthoPhyl Wrapper v2
 
-[← Back to Main README](../README.v2.md)
+[← Back to Main README](../README.md)
 
 ---
 
@@ -385,4 +385,4 @@ python orthophyl_pipeline_wrapper.v2.py \
 
 ---
 
-[← Back to Main README](../README.v2.md)
+[← Back to Main README](../README.md)

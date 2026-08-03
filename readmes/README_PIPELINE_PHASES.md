@@ -1,6 +1,6 @@
 # Pipeline Phases - OrthoPhyl Wrapper v2
 
-[← Back to Main README](../README.v2.md)
+[← Back to Main README](../README.md)
 
 ---
 
@@ -453,4 +453,4 @@ for assembly in query_assemblies:
 
 ---
 
-[← Back to Main README](../README.v2.md)
+[← Back to Main README](../README.md)

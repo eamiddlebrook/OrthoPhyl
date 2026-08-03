@@ -1,6 +1,6 @@
 # Troubleshooting Guide - OrthoPhyl Wrapper v2
 
-[← Back to Main README](../README.v2.md)
+[← Back to Main README](../README.md)
 
 ---
 
@@ -224,4 +224,4 @@ All logs are in `output_dir/logs/`:
 
 ---
 
-[← Back to Main README](../README.v2.md)
+[← Back to Main README](../README.md)

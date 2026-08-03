@@ -1,0 +1,1 @@
+singularity exec --bind ~/Projects/OP_DBs:/databases OrthoPhyl.v3.0.0.sif python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.v2.py --input /opt/gits/OrthoPhyl/TESTER/router_testing/assemblies.Meth.tsv --database-dir /databases
