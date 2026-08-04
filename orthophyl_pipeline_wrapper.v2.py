@@ -784,7 +784,34 @@ class PipelineWrapper:
         
         if result.returncode != 0:
             raise RuntimeError(f"Genome download failed for {taxon_name}. Check log: {log_file}")
-        
+
+        # Defense-in-depth: verify the QC stats table was actually populated.
+        # If CheckM crashes (e.g. OOM), gather_filter_asms.sh can leave
+        # assemblies_all.stats.txt as a header-only file, which causes the stats
+        # filter to match nothing and pass EVERY raw assembly through unfiltered.
+        # The bash script now aborts in that case, but we double-check here so a
+        # regression can never silently feed unfiltered genomes into OrthoPhyl.
+        if not self.use_bbmap:
+            stats_file = output_dir / "assemblies_all.stats.txt"
+            if not stats_file.exists():
+                raise RuntimeError(
+                    f"QC stats file not found after download: {stats_file}\n"
+                    f"CheckM may have failed (possibly out of memory).\n"
+                    f"Check log: {log_file}"
+                )
+            with open(stats_file) as sf:
+                n_stats_rows = sum(1 for _ in sf) - 1  # subtract header
+            if n_stats_rows <= 0:
+                raise RuntimeError(
+                    f"QC stats file contains no per-assembly rows: {stats_file}\n"
+                    f"This usually means CheckM crashed (e.g. out of memory) and no\n"
+                    f"quality filtering was applied. Refusing to proceed with unfiltered\n"
+                    f"assemblies.\n"
+                    f"Fix: re-run with --low-ram (CheckM --reduced_tree) or --use-bbmap,\n"
+                    f"or allocate more memory.\n"
+                    f"Check log: {log_file}"
+                )
+
         # Verify download success
         genomes_to_keep = output_dir / "genomes_to_keep"
         if not genomes_to_keep.exists():

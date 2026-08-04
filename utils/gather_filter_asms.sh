@@ -471,6 +471,30 @@ get_stats_with_checkM () {
                 out=$checkM_dir/${checkM_type}_${J}_out
                 echo "  Running CheckM batch $J of $K with args: ${checkM_args}"
                 checkm lineage_wf ${checkM_args} $in $out
+                checkm_rc=$?
+                # CheckM can be OOM-killed (often SIGKILL -> exit 137) or otherwise
+                # fail silently. If we do not abort here, aggregation below produces a
+                # header-only stats file, the stats filter matches nothing, and EVERY
+                # raw assembly is passed downstream unfiltered. Fail loudly instead.
+                if [ $checkm_rc -ne 0 ]
+                then
+                        echo "ERROR: CheckM batch $J of $K exited with code $checkm_rc." >&2
+                        echo "       This is frequently caused by CheckM running out of RAM." >&2
+                        echo "       Re-run with --reduced_tree (low RAM mode) or --use-bbmap," >&2
+                        echo "       or allocate more memory. Aborting so unfiltered assemblies" >&2
+                        echo "       are NOT passed to OrthoPhyl." >&2
+                        exit 1
+                fi
+                # Even on a 0 exit code, verify CheckM actually wrote its stats table.
+                batch_stats="${out}/storage/bin_stats_ext.tsv"
+                if [ ! -s "$batch_stats" ]
+                then
+                        echo "ERROR: CheckM batch $J of $K produced no stats output:" >&2
+                        echo "       missing or empty $batch_stats" >&2
+                        echo "       CheckM likely crashed (possibly OOM). Aborting so unfiltered" >&2
+                        echo "       assemblies are NOT passed to OrthoPhyl." >&2
+                        exit 1
+                fi
                 J=$((J+1))
         done
 
@@ -481,6 +505,27 @@ get_stats_with_checkM () {
 		sed 's/{,//g;s/,//g' | \
 		awk '{print $1,$4,$10,$14,$16,$18,$20,$22,$24,$26,($26*5+$24*4+$22*3+$20*2)/$10,$28,$30,$32,$35,$38,$45,$57}' \
 		>> $wd/assemblies_all.stats.txt
+
+	# Sanity check: every input assembly must have a stats row. A mismatch means
+	# CheckM silently dropped genomes (partial crash) -- abort rather than let the
+	# stats filter under-report and pass unfiltered assemblies downstream.
+	n_input=$(ls $checkM_input/*.$suffix 2>/dev/null | wc -l)
+	n_stats=$(tail -n +2 $wd/assemblies_all.stats.txt | wc -l)
+	echo "  CheckM stats: $n_stats rows for $n_input input assemblies"
+	if [ "$n_stats" -eq 0 ]
+	then
+		echo "ERROR: CheckM produced no per-assembly stats ($wd/assemblies_all.stats.txt" >&2
+		echo "       contains only a header). Aborting so unfiltered assemblies are NOT" >&2
+		echo "       passed to OrthoPhyl." >&2
+		exit 1
+	fi
+	if [ "$n_stats" -ne "$n_input" ]
+	then
+		echo "ERROR: CheckM stats row count ($n_stats) does not match the number of" >&2
+		echo "       input assemblies ($n_input). CheckM likely crashed on some genomes." >&2
+		echo "       Aborting so partially-filtered assemblies are NOT passed to OrthoPhyl." >&2
+		exit 1
+	fi
 }
 
 get_asm_stats () {
