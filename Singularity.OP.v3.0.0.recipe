@@ -65,7 +65,7 @@ AUTHOR earlm@lanl.gov
     export PATH="/opt/conda/bin/:/opt/conda/envs/gather_genomes/bin:/opt/gits/OrthoPhyl/:/opt/gits/OrthoPhyl/utils:/opt/gits/OrthoPhyl/assembly_router:/opt/miniconda3/bin/:$PATH"
     export Path_to_gits="/opt/gits"
     export OrthoPhyl="bash /opt/gits/OrthoPhyl/OrthoPhyl.sh"
-    export assembly_router="python /opt/gits/OrthoPhyl/assembly_router/assembly_router_multi.cmd_out3.py"
+    export assembly_router="python /opt/gits/OrthoPhyl/assembly_router/assembly_router.py"
     export ASTRAL_cmd="$Path_to_gits/ASTRAL/Astral/astral.5.7.8.jar"
     export catfasta2phyml_cmd="$Path_to_gits/catfasta2phyml/catfasta2phyml.pl"
     export Alignment_Assessment="$Path_to_gits/Alignment_Assessment/Alignment_Assessment_v2.py"

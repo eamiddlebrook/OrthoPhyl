@@ -22,7 +22,7 @@
 
 ## Overview
 
-The **OrthoPhyl Pipeline Wrapper v2** (`orthophyl_pipeline_wrapper.v2.py`) is an automated orchestration system that intelligently routes genome assemblies to the appropriate phylogenetic placement pipeline. It seamlessly integrates two complementary approaches:
+The **OrthoPhyl Pipeline Wrapper v2** (`orthophyl_pipeline_wrapper.py`) is an automated orchestration system that intelligently routes genome assemblies to the appropriate phylogenetic placement pipeline. It seamlessly integrates two complementary approaches:
 
 - **ReLeaf Route**: For assemblies matching existing databases (fast, adds to pre-computed phylogenies)
 - **OrthoPhyl Route**: For novel taxa requiring new phylogenetic analyses (comprehensive, creates new databases)
@@ -60,7 +60,7 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │   └─ Load/create databases
   │
   ├─► PHASE 2: ASSEMBLY ROUTING
-  │   └─ assembly_router_multi.cmd_out3.py
+  │   └─ assembly_router.py
   │       ├─ Query all databases
   │       ├─ Find best taxonomic match
   │       └─ Generate routing decisions
@@ -87,7 +87,7 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │       │   ├─ Run OrthoFinder
   │       │   ├─ Build alignments
   │       │   └─ Infer phylogeny
-  │       └─ create_hierarchical_database_v2.py
+  │       └─ create_hierarchical_database.py
   │           └─ Create new database entry
   │
   └─► PHASE 4: RESULTS AGGREGATION
@@ -118,14 +118,14 @@ OUTPUT: results/03_results/
 
 ```bash
 # Simple run with existing databases
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
     --threads 32
 
 # With genome downloading for novel taxa
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -133,7 +133,7 @@ python orthophyl_pipeline_wrapper.v2.py \
     --threads 32
 
 # Initial setup (create databases from scratch)
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -161,7 +161,7 @@ Columns:
 ### Example 1: Standard Run with Existing Databases
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input my_assemblies.tsv \
     --database-dir /data/phylo_databases/ \
     --output-dir /results/my_project/ \
@@ -173,7 +173,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 ### Example 2: Enable Genome Downloading for Novel Taxa
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -186,7 +186,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 ### Example 3: Resume from Checkpoint
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -199,7 +199,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 ### Example 4: Low-Memory Mode
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -260,7 +260,7 @@ ls -la databases/
 # Should contain *_db directories with database_config.json files
 
 # If empty, initialize with orthophyl_runs.tsv
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -287,7 +287,7 @@ ls results/checkpoints/
 **Solution**:
 ```bash
 # Use reduced tree mode and bbmap instead
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --gather-args "--reduced_tree --use-bbmap" \
     --threads 16  # Reduce threads
 ```

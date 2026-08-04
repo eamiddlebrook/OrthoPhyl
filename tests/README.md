@@ -46,22 +46,23 @@ pytest tests/ --cov=. --cov-report=term-missing
 
 ```
 tests/
-├── conftest.py                 # module loader (dotted filenames) + shared fixtures
+├── conftest.py                 # module loader (by path) + shared fixtures
 ├── requirements-test.txt
 ├── unit/
 │   ├── test_gtdb_taxonomy.py   # §1  GTDBTaxonomy (both copies, parametrized)
 │   ├── test_router.py          # §2  MultiDatabaseRouter routing decisions
-│   ├── test_db_creator.py      # §3  create_hierarchical_database_v2
+│   ├── test_db_creator.py      # §3  create_hierarchical_database
 │   └── test_wrapper_batch.py   # §4  wrapper orchestration (subprocess mocked)
 └── fixtures/                   # static fixture data (added as suites grow)
 ```
 
-## How dotted module names are imported
+## How target modules are imported
 
-`assembly_router_multi.cmd_out3.py` and `orthophyl_pipeline_wrapper.v2.py` are not legal
-Python module identifiers, so they cannot be `import`ed normally. `conftest.py` provides
-a `load_module(path)` helper (via `importlib`) and exposes each target as a
-session-scoped fixture (`router_module`, `wrapper_module`, `db_creator_module`, …).
+The target scripts (`assembly_router.py`, `orthophyl_pipeline_wrapper.py`,
+`create_hierarchical_database.py`) live at the repo root and in `assembly_router/`,
+which are not import packages. `conftest.py` provides a `load_module(path)` helper
+(via `importlib`) and exposes each target as a session-scoped fixture
+(`router_module`, `wrapper_module`, `db_creator_module`, …).
 
 ## Regression tests for fixed bugs (B1–B4)
 

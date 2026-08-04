@@ -1,4 +1,4 @@
-"""Tests for create_hierarchical_database_v2.py (plan section 3)."""
+"""Tests for create_hierarchical_database.py (plan section 3)."""
 
 import json
 from pathlib import Path

@@ -17,6 +17,8 @@ TESTER/TEST_gene_tree_method*/
 TESTER/adding_test*/
 TESTER/router_testing/
 TESTER/test/
+TESTER/singularity_test*/
+TESTER/test_methylorubrum/
 
 # Build artifacts
 *.sif
@@ -29,5 +31,10 @@ timing.tmp.out/
 gen_files/
 gene_tree_tmp/
 routing_output/
+assembly_router/routing_output/
 ncbi_stats*/
 TEST_backtrans
+nohup.out*
+TMP.*
+ncbi_dataset.zip
+*.esearch

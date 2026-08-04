@@ -36,7 +36,7 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │   └─ Load/create databases
   │
   ├─► PHASE 2: ASSEMBLY ROUTING
-  │   └─ assembly_router_multi.cmd_out3.py
+  │   └─ assembly_router.py
   │       ├─ Query all databases
   │       ├─ Find best taxonomic match
   │       └─ Generate routing decisions
@@ -63,7 +63,7 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │       │   ├─ Run OrthoFinder
   │       │   ├─ Build alignments
   │       │   └─ Infer phylogeny
-  │       └─ create_hierarchical_database_v2.py
+  │       └─ create_hierarchical_database.py
   │           └─ Create new database entry
   │
   └─► PHASE 4: RESULTS AGGREGATION
@@ -81,9 +81,9 @@ OUTPUT: results/03_results/
 ### Component Interaction
 
 ```
-orthophyl_pipeline_wrapper.v2.py (Main Orchestrator)
+orthophyl_pipeline_wrapper.py (Main Orchestrator)
     │
-    ├─► assembly_router_multi.cmd_out3.py
+    ├─► assembly_router.py
     │   └─ Queries: database_dir/*_db/database_config.json
     │
     ├─► ReLeaf.sh
@@ -95,7 +95,7 @@ orthophyl_pipeline_wrapper.v2.py (Main Orchestrator)
     ├─► OrthoPhyl.sh
     │   └─ Runs: OrthoFinder, MAFFT, trimAl, IQ-TREE
     │
-    ├─► create_hierarchical_database_v2.py
+    ├─► create_hierarchical_database.py
     │   └─ Creates: database_dir/*_db/
     │
     └─► add_releaf_version.py
@@ -108,7 +108,7 @@ orthophyl_pipeline_wrapper.v2.py (Main Orchestrator)
 
 ## Script Dependencies
 
-### 1. assembly_router_multi.cmd_out3.py
+### 1. assembly_router.py
 
 **Purpose**: Multi-database assembly router with automatic best-match selection
 
@@ -161,7 +161,7 @@ def route_assembly(assembly, taxonomy):
 
 ---
 
-### 2. create_hierarchical_database_v2.py
+### 2. create_hierarchical_database.py
 
 **Purpose**: Create/update hierarchical taxonomy databases from OrthoPhyl runs
 
@@ -579,7 +579,7 @@ database_dir/
 ### Command-Line Arguments
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py [OPTIONS]
+python orthophyl_pipeline_wrapper.py [OPTIONS]
 ```
 
 #### Required Arguments

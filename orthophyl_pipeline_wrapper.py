@@ -98,8 +98,8 @@ class PipelineWrapper:
         
         # Script paths (relative to this wrapper)
         self.script_dir = Path(__file__).parent
-        self.assembly_router = self.script_dir / "assembly_router" / "assembly_router_multi.cmd_out3.py"
-        self.database_creator = self.script_dir / "assembly_router" / "create_hierarchical_database_v2.py"
+        self.assembly_router = self.script_dir / "assembly_router" / "assembly_router.py"
+        self.database_creator = self.script_dir / "assembly_router" / "create_hierarchical_database.py"
         self.releaf_versioner = self.script_dir / "assembly_router" / "add_releaf_version.py"
         self.orthophyl_script = self.script_dir / "OrthoPhyl.sh"
         self.releaf_script = self.script_dir / "ReLeaf.sh"

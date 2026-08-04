@@ -33,8 +33,8 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
    ```
 
 2. Validates required scripts:
-   - `assembly_router/assembly_router_multi.cmd_out3.py`
-   - `assembly_router/create_hierarchical_database_v2.py`
+   - `assembly_router/assembly_router.py`
+   - `assembly_router/create_hierarchical_database.py`
    - `assembly_router/add_releaf_version.py`
    - `OrthoPhyl.sh`
    - `ReLeaf.sh`
@@ -53,7 +53,7 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
 
 **Purpose**: Determine the appropriate pipeline for each assembly
 
-**Script**: `assembly_router_multi.cmd_out3.py`
+**Script**: `assembly_router.py`
 
 **Process**:
 
@@ -341,7 +341,7 @@ for assembly in query_assemblies:
 
 ### Stage 4: Create Database Entry
 
-**Script**: `create_hierarchical_database_v2.py`
+**Script**: `create_hierarchical_database.py`
 
 **Purpose**: Make OrthoPhyl output queryable for future runs
 
@@ -354,7 +354,7 @@ for assembly in query_assemblies:
 
 2. **Run Database Creator**
    ```bash
-   python create_hierarchical_database_v2.py \
+   python create_hierarchical_database.py \
        --input orthophyl_runs.tsv \
        --output-dir {database_dir} \
        --update

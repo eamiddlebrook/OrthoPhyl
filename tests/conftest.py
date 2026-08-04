@@ -1,9 +1,9 @@
 """Shared fixtures and helpers for the OrthoPhyl wrapper/router test suite.
 
-Several target modules have dotted filenames (e.g. ``assembly_router_multi.cmd_out3.py``,
-``orthophyl_pipeline_wrapper.v2.py``) which cannot be imported with a normal ``import``
-statement. We load them by path with :mod:`importlib` and expose the resulting module
-objects as fixtures.
+The target scripts (e.g. ``assembly_router.py``, ``orthophyl_pipeline_wrapper.py``)
+live at the repo root and in ``assembly_router/``, which are not import packages, so
+they cannot be pulled in with a normal ``import`` statement. We load them by path with
+:mod:`importlib` and expose the resulting module objects as fixtures.
 """
 
 import importlib.util
@@ -88,7 +88,7 @@ def repo_root():
 @pytest.fixture(scope="session")
 def router_module():
     return load_module(
-        REPO_ROOT / "assembly_router" / "assembly_router_multi.cmd_out3.py",
+        REPO_ROOT / "assembly_router" / "assembly_router.py",
         name="router_cmd_out3",
     )
 
@@ -96,7 +96,7 @@ def router_module():
 @pytest.fixture(scope="session")
 def db_creator_module():
     return load_module(
-        REPO_ROOT / "assembly_router" / "create_hierarchical_database_v2.py",
+        REPO_ROOT / "assembly_router" / "create_hierarchical_database.py",
         name="create_hierarchical_database_v2",
     )
 
@@ -104,7 +104,7 @@ def db_creator_module():
 @pytest.fixture(scope="session")
 def wrapper_module():
     return load_module(
-        REPO_ROOT / "orthophyl_pipeline_wrapper.v2.py",
+        REPO_ROOT / "orthophyl_pipeline_wrapper.py",
         name="orthophyl_pipeline_wrapper_v2",
     )
 

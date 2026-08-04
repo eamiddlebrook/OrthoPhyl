@@ -1,4 +1,4 @@
-"""Tests for orthophyl_pipeline_wrapper.v2.py taxon-mode orchestration (plan section 4.12).
+"""Tests for orthophyl_pipeline_wrapper.py taxon-mode orchestration (plan section 4.12).
 
 Taxon mode allows creating/updating databases by querying NCBI for assemblies matching
 a specified taxon (e.g., "Methylorubrum"). This suite tests the wrapper's orchestration

@@ -7,7 +7,7 @@ to the best matching database (ReLeaf) or suggests creating a new OrthoPhyl run
 for novel taxa with commands using gather_filter_asms.sh.
 
 Usage:
-    python assembly_router_multi.py \
+    python assembly_router.py \
         --assembly genome.fna \
         --taxonomy "d__Bacteria;p__Actinomycetota;c__Thermoleophilia;o__Gaiellales;f__Gaiellaceae;g__VAXT01;s__" \
         --database-dir /path/to/databases/ \
@@ -406,7 +406,7 @@ class MultiDatabaseRouter:
             f"{download_value}\t{self.output_dir / 'orthophyl_output'}\t{tax_string_for_download}\n"
             f"\n"
             f"# Then rebuild the database index:\n"
-            f"python create_hierarchical_database_v2.py \\\n"
+            f"python create_hierarchical_database.py \\\n"
             f"    --input orthophyl_runs.tsv \\\n"
             f"    --output-dir {self.database_dir} \\\n"
             f"    --update"
@@ -571,14 +571,14 @@ def main():
         epilog="""
 Examples:
   # Route single assembly (queries all databases)
-  python assembly_router_multi.py \\
+  python assembly_router.py \\
       --assembly genome.fna \\
       --taxonomy "d__Bacteria;p__Actinomycetota;c__Thermoleophilia;o__Gaiellales;f__Gaiellaceae;g__VAXT01;s__" \\
       --database-dir /path/to/databases/ \\
       --output-dir results/
   
   # With gather_filter_asms.sh for downloading genomes
-  python assembly_router_multi.py \\
+  python assembly_router.py \\
       --assembly genome.fna \\
       --taxonomy "d__Bacteria;..." \\
       --database-dir /path/to/databases/ \\
@@ -586,7 +586,7 @@ Examples:
       --output-dir results/
   
   # Batch mode
-  python assembly_router_multi.py \\
+  python assembly_router.py \\
       --batch assemblies.tsv \\
       --database-dir /path/to/databases/ \\
       --gather-filter-script utils/gather_filter_asms.sh \\

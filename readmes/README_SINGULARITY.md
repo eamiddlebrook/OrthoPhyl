@@ -48,7 +48,7 @@ The container includes:
 singularity exec \
     --bind /path/to/databases:/databases \
     OrthoPhyl.v3.0.0.sif \
-    python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.v2.py \
+    python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
         --input assemblies.tsv \
         --database-dir /databases \
         --output-dir results/ \
@@ -56,7 +56,7 @@ singularity exec \
 
 # Wrong: Database directory not mounted (will fail!)
 singularity exec OrthoPhyl.v3.0.0.sif \
-    python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.v2.py \
+    python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
         --database-dir /path/to/databases \  # Not accessible!
         ...
 ```
@@ -77,7 +77,7 @@ singularity exec \
     --bind /data:/data \
     --bind /scratch:/scratch \
     OrthoPhyl.v3.0.0.sif \
-    python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.v2.py \
+    python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
         --input /data/assemblies.tsv \
         --database-dir /data/databases \
         --output-dir /scratch/results \
@@ -95,7 +95,7 @@ singularity exec \
     bash -c "
         source /opt/conda/etc/profile.d/conda.sh && \
         conda activate gather_genomes && \
-        python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.v2.py \
+        python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
             --taxon 'Methylorubrum' \
             --taxon-rank genus \
             --database-dir /data/databases \
@@ -118,7 +118,7 @@ singularity shell \
 
 # Inside container:
 Singularity> cd /data/my_project
-Singularity> python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.v2.py --help
+Singularity> python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py --help
 Singularity> # Run your analysis...
 ```
 
@@ -164,7 +164,7 @@ singularity exec \
     --bind $SCRATCH:$SCRATCH \
     --bind $(dirname $INPUT):$(dirname $INPUT) \
     $CONTAINER \
-    python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.v2.py \
+    python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
         --input $INPUT \
         --database-dir $DATABASES \
         --output-dir $SCRATCH/results \
@@ -186,7 +186,7 @@ The container sets these environment variables:
 PATH=/opt/conda/bin:/opt/gits/OrthoPhyl:/opt/gits/OrthoPhyl/utils:/opt/gits/OrthoPhyl/assembly_router:$PATH
 Path_to_gits=/opt/gits
 OrthoPhyl=bash /opt/gits/OrthoPhyl/OrthoPhyl.sh
-assembly_router=python /opt/gits/OrthoPhyl/assembly_router/assembly_router_multi.cmd_out3.py
+assembly_router=python /opt/gits/OrthoPhyl/assembly_router/assembly_router.py
 ASTRAL_cmd=/opt/gits/ASTRAL/Astral/astral.5.7.8.jar
 ```
 
@@ -279,7 +279,7 @@ singularity exec --bind /scratch:/scratch ...
 **Solution**:
 ```bash
 # Use absolute paths to scripts
-python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.v2.py
+python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py
 
 # Or for taxon mode, activate gather_genomes environment
 bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate gather_genomes && ..."
@@ -295,7 +295,7 @@ singularity exec OrthoPhyl.v3.0.0.sif \
     bash -c "
         source /opt/conda/etc/profile.d/conda.sh && \
         conda activate gather_genomes && \
-        python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.v2.py --taxon ...
+        python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py --taxon ...
     "
 ```
 

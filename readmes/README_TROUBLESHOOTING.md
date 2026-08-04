@@ -14,14 +14,14 @@
 **Solutions**:
 ```bash
 # Option A: Provide orthophyl_runs.tsv for initial creation
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
     --orthophyl-runs orthophyl_runs.tsv
 
 # Option B: Manually create databases first
-python assembly_router/create_hierarchical_database_v2.py \
+python assembly_router/create_hierarchical_database.py \
     --input orthophyl_runs.tsv \
     --output-dir databases/
 ```
@@ -30,7 +30,7 @@ python assembly_router/create_hierarchical_database_v2.py \
 
 #### 2. "Routing failed. Check log: routing.log"
 
-**Cause**: assembly_router_multi.cmd_out3.py encountered an error
+**Cause**: assembly_router.py encountered an error
 
 **Debug**:
 ```bash
@@ -43,7 +43,7 @@ cat output_dir/logs/routing.log
 # - Corrupted database configs
 
 # Test routing manually
-python assembly_router/assembly_router_multi.cmd_out3.py \
+python assembly_router/assembly_router.py \
     --assembly test.fna \
     --taxonomy "d__Bacteria;p__Pseudomonadota;..." \
     --database-dir databases/ \
@@ -71,7 +71,7 @@ utils/gather_filter_asms.sh "Escherichia" test_download/ 8
 mkdir -p output_dir/02_orthophyl_novel/downloads/{taxon}/genomes_to_keep/
 cp /path/to/genomes/*.fna output_dir/02_orthophyl_novel/downloads/{taxon}/genomes_to_keep/
 
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir output_dir/ \
@@ -142,7 +142,7 @@ ls -R databases/{database}_db/current/orthophyl_run/
 **Solutions**:
 ```bash
 # Option A: Use low RAM mode
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -150,7 +150,7 @@ python orthophyl_pipeline_wrapper.v2.py \
     --low-ram
 
 # Option B: Skip CheckM entirely (faster, less stringent)
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -175,7 +175,7 @@ cat output_dir/logs/database_{taxon}.log
 ls output_dir/02_orthophyl_novel/orthophyl_runs/{taxon}/FINAL_SPECIES_TREES/
 
 # Test database creation manually
-python assembly_router/create_hierarchical_database_v2.py \
+python assembly_router/create_hierarchical_database.py \
     --input test_runs.tsv \
     --output-dir databases/ \
     --update

@@ -13,7 +13,7 @@ The **Taxon Mode** feature enables automatic assembly gathering and database man
 ### Create New Database from Taxon
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Methylorubrum" \
     --taxon-rank genus \
     --database-dir databases/ \
@@ -33,7 +33,7 @@ This will:
 ### Update Existing Database
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Methylorubrum" \
     --update-existing \
     --database-dir databases/ \
@@ -53,8 +53,8 @@ This will:
 ### Components
 
 1. **`utils/taxon_assembly_gatherer.py`** - NCBI query and assembly management
-2. **`assembly_router/create_hierarchical_database_v3.py`** - Enhanced database creation with metadata
-3. **`orthophyl_pipeline_wrapper.v2.py`** - Integrated workflow orchestration
+2. **`assembly_router/create_hierarchical_database.py`** - Enhanced database creation with metadata
+3. **`orthophyl_pipeline_wrapper.py`** - Integrated workflow orchestration
 
 ### Database Metadata Structure
 
@@ -212,7 +212,7 @@ taxonomy = gatherer.get_taxonomy_string()
 
 ```bash
 # Create Methylorubrum database
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Methylorubrum" \
     --taxon-rank genus \
     --database-dir /data/databases/ \
@@ -230,7 +230,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 
 ```bash
 # Check for new Methylorubrum assemblies (6 months later)
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Methylorubrum" \
     --update-existing \
     --database-dir /data/databases/ \
@@ -247,7 +247,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 
 ```bash
 # Preview what would happen
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Escherichia" \
     --taxon-rank genus \
     --database-dir databases/ \
@@ -264,7 +264,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 
 ```bash
 # Create database for specific species
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Escherichia coli" \
     --taxon-rank species \
     --database-dir databases/ \
@@ -356,7 +356,7 @@ Failed to import TaxonAssemblyGatherer
 Still fully supported:
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -368,7 +368,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 Alternative workflow:
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Methylorubrum" \
     --database-dir databases/ \
     --output-dir results/ \
@@ -394,7 +394,7 @@ Potential improvements for future versions:
 
 ```bash
 # Use a small genus for testing (~10-20 assemblies)
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Methylorubrum" \
     --database-dir test_db/ \
     --output-dir test_run/ \
@@ -406,7 +406,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 
 ```bash
 # After Test 1, simulate update
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Methylorubrum" \
     --update-existing \
     --database-dir test_db/ \

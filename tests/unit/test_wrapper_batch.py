@@ -1,4 +1,4 @@
-"""Tests for orthophyl_pipeline_wrapper.v2.py batch-mode orchestration (plan section 4).
+"""Tests for orthophyl_pipeline_wrapper.py batch-mode orchestration (plan section 4).
 
 All external process execution is mocked -- no real ReLeaf/OrthoPhyl/gather/NCBI is ever
 invoked. Several tests here assert the *intended* behavior and therefore FAIL against the
@@ -65,7 +65,7 @@ class TestConstruction:
     def test_script_paths_relative_to_wrapper(self, Wrapper, tmp_path, repo_root):
         w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
         assert w.script_dir == repo_root
-        assert w.assembly_router.name == "assembly_router_multi.cmd_out3.py"
+        assert w.assembly_router.name == "assembly_router.py"
         assert w.orthophyl_script == repo_root / "OrthoPhyl.sh"
 
     def test_taxon_mode_flag(self, Wrapper, tmp_path):

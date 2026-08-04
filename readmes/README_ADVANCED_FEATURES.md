@@ -11,7 +11,7 @@
 
 **Usage**:
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -46,7 +46,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 
 **Level 0** (default):
 ```bash
-python orthophyl_pipeline_wrapper.v2.py --input assemblies.tsv ...
+python orthophyl_pipeline_wrapper.py --input assemblies.tsv ...
 ```
 - Minimal console output
 - All details in log files
@@ -54,7 +54,7 @@ python orthophyl_pipeline_wrapper.v2.py --input assemblies.tsv ...
 
 **Level 1** (`-v`):
 ```bash
-python orthophyl_pipeline_wrapper.v2.py --input assemblies.tsv ... -v
+python orthophyl_pipeline_wrapper.py --input assemblies.tsv ... -v
 ```
 - Shows stdout from subprocesses
 - stderr still goes to log files
@@ -62,7 +62,7 @@ python orthophyl_pipeline_wrapper.v2.py --input assemblies.tsv ... -v
 
 **Level 2** (`-vv`):
 ```bash
-python orthophyl_pipeline_wrapper.v2.py --input assemblies.tsv ... -vv
+python orthophyl_pipeline_wrapper.py --input assemblies.tsv ... -vv
 ```
 - Shows stdout and stderr
 - Maximum verbosity
@@ -88,7 +88,7 @@ python orthophyl_pipeline_wrapper.v2.py --input assemblies.tsv ... -vv
 
 3. **Run with --skip-download**:
    ```bash
-   python orthophyl_pipeline_wrapper.v2.py \
+   python orthophyl_pipeline_wrapper.py \
        --input assemblies.tsv \
        --database-dir databases/ \
        --output-dir results/ \
@@ -112,7 +112,7 @@ python orthophyl_pipeline_wrapper.v2.py --input assemblies.tsv ... -vv
 **Example: Only run routing**:
 ```bash
 # Run full pipeline
-python orthophyl_pipeline_wrapper.v2.py --input assemblies.tsv ...
+python orthophyl_pipeline_wrapper.py --input assemblies.tsv ...
 
 # Examine routing results
 cat output_dir/00_routing/batch_routing_summary.txt
@@ -127,7 +127,7 @@ cat output_dir/00_routing/batch_routing_summary.txt
 touch output_dir/checkpoints/routing.flag
 
 # Run with --resume
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir output_dir/ \
@@ -152,13 +152,13 @@ Split input file and run multiple instances:
 split -l 10 assemblies.tsv batch_
 
 # Run in parallel (different output dirs)
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input batch_aa \
     --database-dir databases/ \
     --output-dir results_batch1/ \
     --threads 16 &
 
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input batch_ab \
     --database-dir databases/ \
     --output-dir results_batch2/ \
@@ -261,7 +261,7 @@ module load conda
 conda activate orthophyl
 
 # Run wrapper
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir /scratch/databases/ \
     --output-dir /scratch/results_${SLURM_JOB_ID}/ \
@@ -288,7 +288,7 @@ cd $PBS_O_WORKDIR
 
 conda activate orthophyl
 
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -306,7 +306,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 **Create Mode** (new database from taxon):
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Methylorubrum" \
     --taxon-rank genus \
     --database-dir databases/ \
@@ -338,7 +338,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 **Update Mode** (add new assemblies to existing database):
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Methylorubrum" \
     --update-existing \
     --database-dir databases/ \
@@ -358,7 +358,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 
 ```bash
 # Year 1: Create initial database
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Escherichia" \
     --taxon-rank genus \
     --database-dir /data/databases/ \
@@ -369,7 +369,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 # Result: /data/databases/Escherichia_db/ created with 500 genomes
 
 # Year 2: Update with new assemblies
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --taxon "Escherichia" \
     --update-existing \
     --database-dir /data/databases/ \

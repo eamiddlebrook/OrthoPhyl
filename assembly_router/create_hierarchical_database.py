@@ -14,18 +14,18 @@ Input Format (TSV):
 
 Usage:
     # Initial creation
-    python create_hierarchical_database_v2.py \
+    python create_hierarchical_database.py \
         --input orthophyl_runs.tsv \
         --output-dir taxonomy_databases/
     
     # Update with new entries (skips existing)
-    python create_hierarchical_database_v2.py \
+    python create_hierarchical_database.py \
         --input orthophyl_runs.tsv \
         --output-dir taxonomy_databases/ \
         --update
     
     # Force rebuild all
-    python create_hierarchical_database_v2.py \
+    python create_hierarchical_database.py \
         --input orthophyl_runs.tsv \
         --output-dir taxonomy_databases/ \
         --force
@@ -506,8 +506,8 @@ def create_database_for_run(
         f.write("Source OrthoPhyl Run:\n")
         f.write(f"  {orthophyl_dir}\n\n")
         
-        f.write("Use with assembly_router_hierarchical.py:\n")
-        f.write(f"  python assembly_router_hierarchical.py \\\n")
+        f.write("Use with assembly_router.py:\n")
+        f.write(f"  python assembly_router.py \\\n")
         f.write(f"      --assembly genome.fna \\\n")
         f.write(f"      --taxonomy \"d__...; ...\" \\\n")
         f.write(f"      --database-dir {db_dir}\n\n")
@@ -602,7 +602,7 @@ def create_master_index(databases: List[Dict], output_dir: Path):
         f.write("=" * 70 + "\n\n")
         
         f.write("Route an assembly:\n\n")
-        f.write("  python assembly_router_hierarchical.py \\\n")
+        f.write("  python assembly_router.py \\\n")
         f.write("      --assembly genome.fna \\\n")
         f.write("      --taxonomy \"d__Bacteria;p__...; ...\" \\\n")
         f.write("      --database-dir [one of the databases above]\n")
@@ -654,18 +654,18 @@ def main():
         epilog="""
 Examples:
   # Initial creation
-  python create_hierarchical_database_v2.py \\
+  python create_hierarchical_database.py \\
       --input orthophyl_runs.tsv \\
       --output-dir taxonomy_databases/
   
   # Add new entries (skip existing)
-  python create_hierarchical_database_v2.py \\
+  python create_hierarchical_database.py \\
       --input orthophyl_runs.tsv \\
       --output-dir taxonomy_databases/ \\
       --update
   
   # Force rebuild all
-  python create_hierarchical_database_v2.py \\
+  python create_hierarchical_database.py \\
       --input orthophyl_runs.tsv \\
       --output-dir taxonomy_databases/ \\
       --force

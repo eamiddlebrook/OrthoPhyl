@@ -8,7 +8,7 @@
 ### Example 1: Basic Run with Existing Databases
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input my_assemblies.tsv \
     --database-dir /data/taxonomy_databases/ \
     --output-dir /results/run_2025-01-15/ \
@@ -27,7 +27,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 ### Example 2: Complete Run with Genome Downloading
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -57,7 +57,7 @@ Enterobacteriaceae	/data/orthophyl_runs/enterobacteriaceae	d__Bacteria;p__Pseudo
 EOF
 
 # Step 2: Run wrapper
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -76,7 +76,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 ### Example 4: Resume After Interruption
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -97,7 +97,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 ### Example 5: Dry Run (Preview Mode)
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -120,7 +120,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 ### Example 6: Low RAM Mode
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -141,7 +141,7 @@ python orthophyl_pipeline_wrapper.v2.py \
 ### Example 7: Fast Mode (Skip CheckM)
 
 ```bash
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
@@ -168,7 +168,7 @@ mkdir -p results/02_orthophyl_novel/downloads/NovelGenus/genomes_to_keep/
 cp /data/genomes/*.fna results/02_orthophyl_novel/downloads/NovelGenus/genomes_to_keep/
 
 # Run wrapper
-python orthophyl_pipeline_wrapper.v2.py \
+python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
     --output-dir results/ \
