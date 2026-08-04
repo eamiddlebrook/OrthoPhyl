@@ -17,6 +17,16 @@ export taxon="$1"
 # deal with WD below
 threads=$3
 
+# NCBI Entrez query term used by the esearch metadata steps below.
+#   The "txid" prefix is only valid for a numeric taxID; a taxon *name*
+#   must be used bare (e.g. "Gloeotrichia[organism]"). The wrapper may pass
+#   either form, so pick the right one here instead of hardcoding "txid".
+if [[ "$taxon" =~ ^[0-9]+$ ]]; then
+	export entrez_query="txid${taxon}[organism]"
+else
+	export entrez_query="${taxon}[organism]"
+fi
+
 # Check for --reduced_tree flag (low RAM mode for CheckM)
 reduced_tree_flag=""
 use_bbmap=false
@@ -223,13 +233,47 @@ echo "
 	#while read -r I ; do cp ncbi_dataset/data/${I}/unplace* ./assemblies_datasets_uniq/$I.fna.gz ; done
 }
 
+# Run `esearch -db DB -query QUERY | esummary > OUT` with bounded retries.
+#   NCBI's eutils endpoint drops connections intermittently (e.g.
+#   "curl (56) SSL_ERROR_SYSCALL"), and edirect does not always recover on its
+#   own. Retry a few times and verify the result actually contains records.
+#   Returns 0 on success (OUT has >=1 DocumentSummary), 1 on persistent failure.
+run_esearch_with_retry () {
+	local db="$1"
+	local query="$2"
+	local out="$3"
+	local max_retries=3
+	local attempt=1
+
+	while [ $attempt -le $max_retries ]; do
+		echo "esearch attempt $attempt of $max_retries (db=$db, query=$query)..."
+		if esearch -db "$db" -query "$query" | esummary > "$out" 2>/dev/null \
+			&& grep -q "<DocumentSummary" "$out"; then
+			echo "✓ esearch on $db returned records"
+			return 0
+		fi
+		echo "WARNING: esearch on $db failed or returned no records (attempt $attempt)"
+		attempt=$((attempt + 1))
+	done
+
+	echo "ERROR: esearch on $db failed after $max_retries attempts (query=$query)"
+	return 1
+}
+
 # need to fix the problem with "Sub_value" having multiple values screwing up the column numbers
 get_asm_metadata () {
         echo "################################################"
         echo "##### mapping biosample to GB accesstions ######"
         echo "################################################"
-	esearch -db assembly -query "txid${taxon}[organism]" | esummary \
-		> All-$taxon-info.assembly.xml
+	if ! run_esearch_with_retry assembly "$entrez_query" All-$taxon-info.assembly.xml; then
+		# datasets (get_NCBI_genomes) already fetched the bulk assemblies;
+		# this metadata only drives supplementary (non-datasets) downloads.
+		# Degrade gracefully with an empty table so the downstream grep -vf
+		# in get_non_datasets_assemblies has something to read.
+		echo "WARNING: proceeding without assembly metadata; supplementary (non-datasets) assemblies will be skipped."
+		:> All-$taxon.assembly.BS_to_meta
+		return 0
+	fi
 	cat All-$taxon-info.assembly.xml \
 		| xtract -pattern DocumentSummary \
 			-def "NA" -element BioSampleAccn RefSeq Genbank SpeciesName Sub_value FtpPath_GenBank FtpPath_RefSeq Taxid taxonomy-check-status ExclFromRefSeq | \
@@ -314,8 +358,13 @@ get_biosample_GEOdata () {
 	echo "###########   or Isolation country   ###########"
         echo "################################################"
 	# grab XML file with all brucalla info from BioSample DB
-	esearch -db biosample -query "txid${taxon}[organism]" | esummary \
-                > All-$taxon-info.biosample.xml
+	if ! run_esearch_with_retry biosample "$entrez_query" All-$taxon-info.biosample.xml; then
+		# Geolocation is decorative metadata; degrade gracefully to an empty
+		# table so merge_metadata_geoloc still has a file to join against.
+		echo "WARNING: proceeding without biosample geolocation metadata."
+		:> All-$taxon.biosample.BS_to_Geoloc
+		return 0
+	fi
 	#Tried to capture most cases of unknown value with sed. Super messy and dumb
 	#   Rewrote to use the ATTR@subATTR syntax
 	#   The "if" statement stuff is really dumb, cant figure out how to use "def" value
