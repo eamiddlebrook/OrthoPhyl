@@ -1239,8 +1239,10 @@ class PipelineWrapper:
         except ImportError as e:
             raise ImportError(f"Failed to import TaxonAssemblyGatherer: {e}")
         
-        # Query NCBI for assemblies
-        logger.info(f"\nQuerying NCBI for {self.taxon} assemblies...")
+        # Resolve taxon identity (taxid/rank/lineage) for database metadata.
+        # This constructor does NOT download the assembly_summary tables; those
+        # are only fetched by query_ncbi(), which create mode no longer calls.
+        logger.info(f"\nResolving taxonomy for {self.taxon}...")
         gatherer = TaxonAssemblyGatherer(
             taxon=self.taxon,
             rank=self.taxon_rank,
@@ -1248,22 +1250,23 @@ class PipelineWrapper:
         )
 
         if self.dry_run:
-            logger.info("  [DRY RUN] Would query NCBI and download assemblies")
+            logger.info("  [DRY RUN] Would download and QC-filter assemblies")
             logger.info("=" * 70)
             logger.info("PIPELINE COMPLETE (DRY RUN)!")
             logger.info("=" * 70)
             self._save_final_status()
             return 0
         
-        # Get assemblies
-        assemblies = gatherer.query_ncbi()
-        
-        if not assemblies:
-            logger.error(f"✗ No assemblies found for taxon '{self.taxon}'")
-            return 1
-        
-        logger.info(f"  ✓ Found {len(assemblies)} assemblies")
-        
+        # NOTE: We intentionally do NOT call gatherer.query_ncbi() here. In create
+        # mode the genomes are downloaded and QC-filtered entirely by
+        # gather_filter_asms.sh (below); query_ncbi() would re-download the full
+        # assembly_summary tables just to build a metadata accession list. We
+        # instead derive that list from the QC-filtered genomes_to_keep/ output,
+        # which is both cheaper and more accurate (post-QC, not pre-QC candidates).
+        # The gatherer object is still used for taxonomy metadata (taxid, rank,
+        # lineage) resolved in its constructor. Empty-taxon detection is handled
+        # by the genomes_to_keep QC check below.
+
         # Verify gather script is available (required for create mode)
         if not self.gather_script or not self.gather_script.exists():
             logger.error(f"\n❌ ERROR: Genome download script is required for taxon create mode")
@@ -1271,7 +1274,7 @@ class PipelineWrapper:
             return 1
         
         # Download assemblies using gather_filter_asms.sh (with QC filtering)
-        logger.info(f"\nDownloading and QC-filtering {len(assemblies)} assemblies...")
+        logger.info(f"\nDownloading and QC-filtering {self.taxon} assemblies...")
         logger.info(f"  Using: {self.gather_script}")
         download_dir = self.output_dir / "downloaded_assemblies"
         
@@ -1302,20 +1305,22 @@ class PipelineWrapper:
             assemblies=[]  # No query assemblies in create mode
         )
         
-        # Create database with metadata
+        # Create database with metadata. Accession metadata is derived from the
+        # QC-filtered genomes_to_keep/ dir (post-QC survivors), not a pre-QC
+        # NCBI query.
         logger.info(f"\nCreating database for {self.taxon}...")
         self._create_taxon_database(
             taxon_name=self.taxon,
             orthophyl_output=orthophyl_output,
             gatherer=gatherer,
-            assemblies=assemblies
+            genomes_to_keep=genomes_to_keep
         )
-        
+
         logger.info("=" * 70)
         logger.info("TAXON MODE COMPLETE!")
         logger.info("=" * 70)
         logger.info(f"  Database created: {self.taxon}_db")
-        logger.info(f"  Assemblies: {len(assemblies)}")
+        logger.info(f"  Assemblies: {genome_count}")
         
         self._save_final_status()
         return 0
@@ -1428,9 +1433,15 @@ class PipelineWrapper:
         taxon_name: str,
         orthophyl_output: Path,
         gatherer,
-        assemblies: List[Dict]
+        genomes_to_keep: Path
     ):
-        """Create database with taxon metadata."""
+        """Create database with taxon metadata.
+
+        Accession metadata is derived from the QC-filtered ``genomes_to_keep/``
+        directory produced by gather_filter_asms.sh (each ``.fna``/``.fasta``
+        filename is an assembly accession). This records exactly the genomes
+        that went into the tree, rather than the pre-QC NCBI candidate list.
+        """
         # Get taxonomy from gatherer
         taxonomy = gatherer.get_taxonomy_string()
         
@@ -1449,12 +1460,18 @@ class PipelineWrapper:
                 with open(config_file, 'r') as f:
                     config = json.load(f)
                 
+                # Derive the accession list from the QC-filtered genomes.
+                accessions = sorted(
+                    p.stem for p in
+                    list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta"))
+                )
+
                 # Add taxon metadata
                 config['source_taxon_name'] = taxon_name
                 config['source_taxid'] = gatherer.taxid
                 config['source_rank'] = gatherer.taxon_rank
-                config['assembly_accessions'] = [a['accession'] for a in assemblies]
-                config['n_assemblies_at_creation'] = len(assemblies)
+                config['assembly_accessions'] = accessions
+                config['n_assemblies_at_creation'] = len(accessions)
                 config['last_updated'] = datetime.now().isoformat()
                 
                 # Save updated config

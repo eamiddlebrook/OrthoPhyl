@@ -241,18 +241,74 @@ class TestTaxonCreateMode:
             fake_orthophyl_output(w)
         monkeypatch.setattr(w, "_run_orthophyl", patched_run_op)
         
+        # Record whether query_ncbi() gets called: create mode must NOT call it
+        # (genomes come from the gather script; accession metadata is derived
+        # from genomes_to_keep/, not a redundant assembly_summary download).
+        import sys as _sys
+        query_calls = []
+        fake_cls = _sys.modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer
+        monkeypatch.setattr(
+            fake_cls, "query_ncbi",
+            lambda self: query_calls.append(1) or [],
+        )
+
         result = w.run()
-        
+
         # Should have queried and downloaded
         assert len(fake_gatherer_class) > 0
-        
+
+        # query_ncbi() must not have run in create mode (redundant NCBI download)
+        assert query_calls == [], "query_ncbi() should not be called in create mode"
+
         # Should have called _run_orthophyl
         assert len(orthophyl_called) > 0, "_run_orthophyl was not called"
-        
+
         # Should have called database creator
         db_creator_calls = [c for c in recording_run if "create_hierarchical_database" in str(c['cmd'])]
         assert len(db_creator_calls) > 0, "Database creator was not invoked"
     
+    def test_create_db_metadata_derived_from_genomes_to_keep(
+        self, Wrapper, tmp_path, fake_gatherer_class, recording_run
+    ):
+        """_create_taxon_database records the post-QC genomes_to_keep accessions.
+
+        Guards the redundancy fix: assembly_accessions / n_assemblies_at_creation
+        must come from genomes_to_keep/*.fna (post-QC), not a query_ncbi() list.
+        """
+        db_dir = tmp_path / "databases"
+        db_dir.mkdir()
+        w = _make_taxon_wrapper(Wrapper, tmp_path, db_dir, dry_run=False)
+
+        # Pre-create the database dir + config the way _create_database_entry would,
+        # so _create_taxon_database's metadata-update branch runs.
+        taxon_db = w.database_dir / "Methylorubrum_db"
+        taxon_db.mkdir(parents=True, exist_ok=True)
+        (taxon_db / "database_config.json").write_text(json.dumps({"clade_name": "Methylorubrum"}))
+
+        # A genomes_to_keep dir with two post-QC survivors.
+        genomes_to_keep = tmp_path / "gtk"
+        genomes_to_keep.mkdir()
+        (genomes_to_keep / "GCF_000009.1.fna").write_text(">a\nATCG\n")
+        (genomes_to_keep / "GCF_000008.2.fasta").write_text(">b\nATCG\n")
+
+        gatherer = fake_gatherer_class[0] if fake_gatherer_class else \
+            __import__('sys').modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer(
+                taxon="Methylorubrum", output_dir=tmp_path / "tq")
+
+        # Skip the (mocked) database-creator subprocess; we only exercise metadata.
+        w._create_database_entry = lambda **kwargs: None
+
+        w._create_taxon_database(
+            taxon_name="Methylorubrum",
+            orthophyl_output=tmp_path / "op",
+            gatherer=gatherer,
+            genomes_to_keep=genomes_to_keep,
+        )
+
+        config = json.loads((taxon_db / "database_config.json").read_text())
+        assert config["assembly_accessions"] == ["GCF_000008.2", "GCF_000009.1"]
+        assert config["n_assemblies_at_creation"] == 2
+
     def test_dry_run_short_circuits_create_mode(
         self, Wrapper, tmp_path, fake_gatherer_class, recording_run
     ):
