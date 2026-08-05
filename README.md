@@ -111,8 +111,45 @@ OUTPUT: results/03_results/
 ### Prerequisites
 
 - Python 3.7+
-- OrthoPhyl conda environment
-- Access to taxonomy databases (or orthophyl_runs.tsv for initial setup)
+- The OrthoPhyl toolchain, either via the **Singularity image** or a **conda/mamba environment** (see [Installation](#installation) below)
+- Access to taxonomy databases (or `orthophyl_runs.tsv` for initial setup)
+
+### Installation
+
+The wrapper orchestrates `OrthoPhyl.sh` and `ReLeaf.sh`, so it needs the full OrthoPhyl toolchain (OrthoFinder, IQ-TREE, MAFFT, HMMER, Prodigal, trimal, etc.). You have two options. The full walkthrough — including per-tool versions, ASTRAL/catfasta2phyml/Alignment_Assessment setup, and `control_file.paths` editing — lives in the [OrthoPhyl & ReLeaf Guide](README_OrthoPhyl_ReLeaf.md#GettingStarted).
+
+**Option A — Singularity (recommended, avoids dependency management)**
+
+Grab the prebuilt container (~1.7 GB):
+
+```bash
+singularity_images=~/singularity_images/
+mkdir -p ${singularity_images}
+cd ${singularity_images}
+singularity pull library://earlyevol/default/orthophyl
+mv orthophyl_latest.sif OrthoPhyl_v2.2.1.sif
+```
+
+Verify the image runs (writes 12 trees under `FINAL_SPECIES_TREES/`; `-s` output dir is **required** in a container):
+
+```bash
+singularity run ${singularity_images}/OrthoPhyl_v2.2.1.sif -T TESTER_fasttest -s ./tester_fasttest_output -t 4
+```
+
+**Option B — conda/mamba environment**
+
+Clone the repo (this pulls large test files, so it takes a minute) and create the `orthophyl` environment from the versioned spec file (replace `XXX` with the current version present in the repo, e.g. `orthophyl_env.2.2.1.yml`):
+
+```bash
+git clone https://github.com/eamiddlebrook/OrthoPhyl.git
+cd OrthoPhyl
+
+# mamba recommended; conda works with identical commands
+mamba env create -n orthophyl -f orthophyl_env.XXX.yml
+mamba activate orthophyl
+```
+
+A few external tools (ASTRAL, catfasta2phyml, Alignment_Assessment) are installed separately and pointed to via `control_file.paths` — see the [Manual Install section](README_OrthoPhyl_ReLeaf.md#ManualInstall) for those steps and troubleshooting (R, GNU parallel, `libnsl`, conda init).
 
 ### Basic Usage
 
