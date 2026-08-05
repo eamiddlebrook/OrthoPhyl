@@ -588,12 +588,12 @@ python orthophyl_pipeline_wrapper.py [OPTIONS]
 |----------|-------------|
 | `--input FILE` | Input TSV file with assemblies and taxonomies |
 | `--database-dir DIR` | Directory containing taxonomy databases |
-| `--output-dir DIR` | Output directory for all results |
 
 #### Optional Arguments
 
 | Argument | Default | Description |
 |----------|---------|-------------|
+| `--output-dir DIR` | `<database-dir>/.pipeline_runs/<taxon>_<timestamp>` | Output directory for all results. `<taxon>` is the `--taxon` name, `TaxID<num>` for a numeric TaxID, or `run` in batch mode |
 | `--threads N` | 8 | Number of CPU threads to use |
 | `--gather-script PATH` | None | Path to gather_filter_asms.sh for genome downloading |
 | `--orthophyl-runs FILE` | None | TSV for initial database creation |

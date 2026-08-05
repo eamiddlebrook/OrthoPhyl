@@ -99,7 +99,7 @@ Enhanced `database_config.json` now includes:
 #### Standard Arguments
 
 - `--database-dir DIR` - Directory containing `*_db` databases
-- `--output-dir DIR` - Output directory for this run
+- `--output-dir DIR` - Output directory for this run (default: `<database-dir>/.pipeline_runs/<taxon>_<timestamp>`, where `<taxon>` is the `--taxon` name or `TaxID<num>` for a numeric TaxID)
 - `--threads N` - Number of CPU threads (default: 8)
 - `--dry-run` - Preview what would happen without executing
 - `--resume` - Resume from last checkpoint

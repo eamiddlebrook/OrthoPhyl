@@ -222,7 +222,7 @@ python orthophyl_pipeline_wrapper.py \
 |----------|----------|-------------|---------|
 | `--input` | ✅ | Path to assemblies.tsv | - |
 | `--database-dir` | ✅ | Directory containing taxonomy databases | - |
-| `--output-dir` | ✅ | Output directory for results | - |
+| `--output-dir` | ❌ | Output directory for results | `<database-dir>/.pipeline_runs/<taxon>_<timestamp>` |
 | `--threads` | ❌ | Number of CPU threads | 1 |
 | `--resume` | ❌ | Resume from checkpoint | False |
 

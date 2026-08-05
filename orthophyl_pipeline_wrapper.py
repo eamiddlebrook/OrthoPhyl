@@ -23,6 +23,7 @@ Date: 2025
 """
 
 import os
+import re
 import sys
 import json
 import argparse
@@ -72,12 +73,13 @@ class PipelineWrapper:
         self.input_file = Path(input_file) if input_file else None
         self.database_dir = Path(database_dir) if database_dir else None
         
-        # Default output_dir to database_dir/.pipeline_runs/<timestamp> if not provided
+        # Default output_dir to database_dir/.pipeline_runs/<name>_<timestamp> if not provided
         if output_dir:
             self.output_dir = Path(output_dir)
         else:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self.output_dir = self.database_dir / '.pipeline_runs' / timestamp
+            run_name = self._default_run_name(taxon)
+            self.output_dir = self.database_dir / '.pipeline_runs' / f'{run_name}_{timestamp}'
             logger.info(f"No --output-dir provided, using: {self.output_dir}")
         
         self.threads = threads
@@ -122,7 +124,24 @@ class PipelineWrapper:
             'successes': [],
             'failures': []
         }
-    
+
+    @staticmethod
+    def _default_run_name(taxon: Optional[str]) -> str:
+        """Build a filesystem-safe run name from the taxon.
+
+        Numeric taxa (NCBI TaxIDs) become ``TaxID<num>``; named taxa are
+        sanitized to alphanumerics/underscores. Batch mode (no taxon) falls
+        back to ``run``.
+        """
+        if not taxon:
+            return 'run'
+        taxon = taxon.strip()
+        if taxon.isdigit():
+            return f'TaxID{taxon}'
+        # Sanitize the name for use as a directory component
+        safe = re.sub(r'[^A-Za-z0-9._-]+', '_', taxon).strip('_')
+        return safe or 'run'
+
     def run(self):
         """Main execution pipeline."""
         try:
@@ -1579,7 +1598,8 @@ Examples:
     )
     parser.add_argument(
         '--output-dir',
-        help='Output directory for all results (default: <database-dir>/.pipeline_runs/<timestamp>)'
+        help='Output directory for all results (default: <database-dir>/.pipeline_runs/<taxon>_<timestamp>, '
+             'where <taxon> is the --taxon name, "TaxID<num>" for a numeric TaxID, or "run" for batch mode)'
     )
     parser.add_argument(
         '--threads',

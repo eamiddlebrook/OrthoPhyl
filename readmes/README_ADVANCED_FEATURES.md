@@ -318,10 +318,10 @@ python orthophyl_pipeline_wrapper.py \
 **Required Arguments for Taxon Create Mode**:
 - `--taxon`: Taxon name (e.g., "Methylorubrum", "Escherichia coli")
 - `--database-dir`: Where to create the new database
-- `--output-dir`: Working directory for this run
 - `--gather-script`: **REQUIRED** - Path to genome download script (e.g., `utils/gather_filter_asms.sh`)
 
 **Optional Arguments**:
+- `--output-dir`: Working directory for this run (default: `<database-dir>/.pipeline_runs/<taxon>_<timestamp>`, where `<taxon>` is the `--taxon` name or `TaxID<num>` for a numeric TaxID)
 - `--taxon-rank`: Taxonomic rank (species, genus, family, etc.) - auto-detected if not provided
 - `--threads`: Number of CPU threads
 - `--low-ram`: Use CheckM reduced tree mode
