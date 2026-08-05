@@ -26,7 +26,7 @@ cd ~/singularity_images
 singularity pull library://earlyevol/default/orthophyl
 
 # Rename to version-specific name
-mv orthophyl_latest.sif OrthoPhyl.v3.0.0.sif
+mv orthophyl_latest.sif OrthoPhyl.v3.1.0.sif
 ```
 
 **Note**: The container is ~2.7 GB and includes all dependencies. No building or admin privileges required!
@@ -47,7 +47,7 @@ The container includes:
 # Correct: Bind mount the database directory
 singularity exec \
     --bind /path/to/databases:/databases \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
         --input assemblies.tsv \
         --database-dir /databases \
@@ -55,7 +55,7 @@ singularity exec \
         --threads 32
 
 # Wrong: Database directory not mounted (will fail!)
-singularity exec OrthoPhyl.v3.0.0.sif \
+singularity exec OrthoPhyl.v3.1.0.sif \
     python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
         --database-dir /path/to/databases \  # Not accessible!
         ...
@@ -76,7 +76,7 @@ EOF
 singularity exec \
     --bind /data:/data \
     --bind /scratch:/scratch \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
         --input /data/assemblies.tsv \
         --database-dir /data/databases \
@@ -91,7 +91,7 @@ singularity exec \
 singularity exec \
     --bind /data:/data \
     --bind /scratch:/scratch \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     bash -c "
         source /opt/conda/etc/profile.d/conda.sh && \
         conda activate gather_genomes && \
@@ -114,7 +114,7 @@ singularity exec \
 singularity shell \
     --bind /data:/data \
     --bind /scratch:/scratch \
-    OrthoPhyl.v3.0.0.sif
+    OrthoPhyl.v3.1.0.sif
 
 # Inside container:
 Singularity> cd /data/my_project
@@ -128,7 +128,7 @@ Singularity> # Run your analysis...
 # Run OrthoPhyl directly (not via wrapper)
 singularity exec \
     --bind /data:/data \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     bash /opt/gits/OrthoPhyl/OrthoPhyl.sh \
         -g /data/genomes/ \
         -s /data/output/ \
@@ -150,7 +150,7 @@ singularity exec \
 #SBATCH --output=orthophyl_%j.log
 
 # Set up paths
-CONTAINER=/shared/containers/OrthoPhyl.v3.0.0.sif
+CONTAINER=/shared/containers/OrthoPhyl.v3.1.0.sif
 DATABASES=/shared/databases
 SCRATCH=/scratch/$SLURM_JOB_ID
 INPUT=/home/user/assemblies.tsv
@@ -194,8 +194,8 @@ You can use these shortcuts:
 
 ```bash
 # Use environment variable shortcuts
-singularity exec OrthoPhyl.v3.0.0.sif $OrthoPhyl -h
-singularity exec OrthoPhyl.v3.0.0.sif $assembly_router --help
+singularity exec OrthoPhyl.v3.1.0.sif $OrthoPhyl -h
+singularity exec OrthoPhyl.v3.1.0.sif $assembly_router --help
 ```
 
 ### Bind Mount Best Practices
@@ -223,7 +223,7 @@ singularity exec OrthoPhyl.v3.0.0.sif $assembly_router --help
 
 5. **Verify mounts** before long runs:
    ```bash
-   singularity exec --bind /data:/data OrthoPhyl.v3.0.0.sif ls /data
+   singularity exec --bind /data:/data OrthoPhyl.v3.1.0.sif ls /data
    ```
 
 ### Running Tests in Container
@@ -236,7 +236,7 @@ See the dedicated section below for comprehensive testing documentation.
 # Unit tests (fast)
 singularity exec \
     --pwd /opt/gits/OrthoPhyl \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     pytest tests/unit/ -v
 
 # Integration tests (requires setup)
@@ -245,7 +245,7 @@ singularity exec \
     --pwd /opt/gits/OrthoPhyl \
     --env TMPDIR=/scratch/pytest_tmp \
     --env ORTHOPHYL_RUN_INTEGRATION=1 \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     pytest -m integration -v
 ```
 
@@ -291,7 +291,7 @@ bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate gather_genom
 
 **Solution**:
 ```bash
-singularity exec OrthoPhyl.v3.0.0.sif \
+singularity exec OrthoPhyl.v3.1.0.sif \
     bash -c "
         source /opt/conda/etc/profile.d/conda.sh && \
         conda activate gather_genomes && \
@@ -313,7 +313,7 @@ OrthoPhyl includes a comprehensive test suite that can be run inside Singularity
 # Unit tests (fast, ~2 minutes)
 singularity exec \
     --pwd /opt/gits/OrthoPhyl \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     pytest tests/unit/ -v
 
 # Integration tests (slow, ~30 minutes, requires setup)
@@ -322,7 +322,7 @@ singularity exec \
     --pwd /opt/gits/OrthoPhyl \
     --env TMPDIR=/scratch/pytest_tmp \
     --env ORTHOPHYL_RUN_INTEGRATION=1 \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     pytest -m integration -v
 ```
 
@@ -361,7 +361,7 @@ mkdir -p /scratch/pytest_tmp
 singularity exec \
     --bind /scratch:/scratch \
     --env TMPDIR=/scratch/pytest_tmp \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     pytest tests/unit/
 ```
 
@@ -371,10 +371,10 @@ Tests expect to run from the OrthoPhyl repository root:
 
 ```bash
 # Correct: Set working directory
-singularity exec --pwd /opt/gits/OrthoPhyl OrthoPhyl.v3.0.0.sif pytest
+singularity exec --pwd /opt/gits/OrthoPhyl OrthoPhyl.v3.1.0.sif pytest
 
 # Wrong: Run from different directory
-singularity exec OrthoPhyl.v3.0.0.sif pytest  # May fail!
+singularity exec OrthoPhyl.v3.1.0.sif pytest  # May fail!
 ```
 
 #### 3. Test Data Access
@@ -386,7 +386,7 @@ Test data is in `TESTER/` directory. Ensure it's accessible:
 singularity exec \
     --bind /home/user/OrthoPhyl:/work \
     --pwd /work \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     pytest tests/unit/
 ```
 
@@ -397,7 +397,7 @@ singularity exec \
 ```bash
 singularity exec \
     --pwd /opt/gits/OrthoPhyl \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     pytest tests/unit/ -v --tb=short
 ```
 
@@ -413,7 +413,7 @@ singularity exec \
     --pwd /opt/gits/OrthoPhyl \
     --env TMPDIR=/scratch/$USER/pytest_tmp \
     --env ORTHOPHYL_RUN_INTEGRATION=1 \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     pytest -m integration -v
 
 # Cleanup
@@ -425,7 +425,7 @@ rm -rf /scratch/$USER/pytest_tmp
 ```bash
 singularity exec \
     --pwd /opt/gits/OrthoPhyl \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     pytest tests/unit/test_wrapper_batch.py -v
 ```
 
@@ -440,7 +440,7 @@ singularity exec \
 #SBATCH --output=test_%j.log
 
 # Setup
-CONTAINER=/shared/containers/OrthoPhyl.v3.0.0.sif
+CONTAINER=/shared/containers/OrthoPhyl.v3.1.0.sif
 TMPDIR=/scratch/$SLURM_JOB_ID/pytest_tmp
 mkdir -p $TMPDIR
 
@@ -465,7 +465,7 @@ rm -rf /scratch/$SLURM_JOB_ID
 
 singularity exec \
     --pwd /opt/gits/OrthoPhyl \
-    OrthoPhyl.v3.0.0.sif \
+    OrthoPhyl.v3.1.0.sif \
     pytest tests/unit/ -n 4 -v  # 4 parallel workers
 ```
 

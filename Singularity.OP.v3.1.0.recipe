@@ -30,7 +30,7 @@ AUTHOR earlm@lanl.gov
     export PATH="/opt/conda/bin/:/opt/gits/OrthoPhyl/:/opt/miniconda3/bin/:$PATH"
     mkdir $Path_to_gits
     cd $Path_to_gits/
-    
+
     # get ASTRAL
     git clone https://github.com/smirarab/ASTRAL.git
     cd ASTRAL
@@ -39,12 +39,12 @@ AUTHOR earlm@lanl.gov
     # get catfasta2phyml
     cd $Path_to_gits/
     git clone https://github.com/nylander/catfasta2phyml.git
-    
+
     # get Alignemnt assessment and convert to python3
     git clone https://github.com/dportik/Alignment_Assessment.git
     cd Alignment_Assessment/
     # convert script to python3
-    #/opt/conda/bin/2to3 -w Alignment_Assessment_v2.py 
+    #/opt/conda/bin/2to3 -w Alignment_Assessment_v2.py
 
 
     # finally get OrthoPhyl
@@ -65,6 +65,7 @@ AUTHOR earlm@lanl.gov
     export PATH="/opt/conda/bin/:/opt/conda/envs/gather_genomes/bin:/opt/gits/OrthoPhyl/:/opt/gits/OrthoPhyl/utils:/opt/gits/OrthoPhyl/assembly_router:/opt/miniconda3/bin/:$PATH"
     export Path_to_gits="/opt/gits"
     export OrthoPhyl="bash /opt/gits/OrthoPhyl/OrthoPhyl.sh"
+    export orthophyl_pipeline_wrapper="python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py"
     export assembly_router="python /opt/gits/OrthoPhyl/assembly_router/assembly_router.py"
     export ASTRAL_cmd="$Path_to_gits/ASTRAL/Astral/astral.5.7.8.jar"
     export catfasta2phyml_cmd="$Path_to_gits/catfasta2phyml/catfasta2phyml.pl"
@@ -75,15 +76,47 @@ AUTHOR earlm@lanl.gov
 
 
 %runscript
+    # Drop into an interactive shell by default. All OrthoPhyl entrypoints
+    # (OrthoPhyl.sh, ReLeaf.sh, orthophyl_pipeline_wrapper.py) are on PATH,
+    # so the container is used as an environment rather than a single command.
     echo "Container was created $NOW"
-    #echo "Arguments received: $*"
+    echo "OrthoPhyl container -- entrypoints on PATH: OrthoPhyl.sh, ReLeaf.sh, orthophyl_pipeline_wrapper.py"
+    echo "Starting interactive shell. Run 'singularity run OP.sif -h' style commands from inside, or exec directly (see %help)."
     exec /bin/bash
 
 %help
     This container holds OrthoPhyl and all of its dependencies.
-    A test run can be performed with:
-        "singularity run OrthoPhyl.0.X.X.sif -T TESTER_chloroplast -s ./test_sing_chlorophyl3 -t 10"    
-    To see a help message:
-	"singularity run OrthoPhyl.0.X.X.sif -h"
-    For a custom OrthoPhyl run:
-	"singularity run OrthoPhyl.0.X.X.sif -g Path/to/assembly_files/ -s path/to/store/output/ -t #_threads"
+    The default runscript drops you into an interactive /bin/bash shell with
+    every entrypoint already on PATH. You can either work interactively or
+    exec a specific command via `singularity exec`.
+
+    -- Python wrapper (recommended top-level entrypoint) --
+    The orchestrator routes each assembly to ReLeaf (existing DB) or OrthoPhyl
+    (novel taxon), managing databases and checkpoint/resume:
+
+        singularity exec OrthoPhyl.3.1.0.sif \
+            python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
+                --input assemblies.tsv \
+                --database-dir databases/ \
+                --output-dir results/ \
+                --threads 32
+
+    -- Core OrthoPhyl pipeline --
+    Run directly on a directory of genome FASTAs:
+
+        singularity exec OrthoPhyl.3.1.0.sif \
+            bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -g path/to/assemblies/ -s path/to/output/ -t 10
+
+    Built-in test dataset:
+
+        singularity exec OrthoPhyl.3.1.0.sif \
+            bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -s ./test_sing_chloroplast -t 10
+
+    Help for the core pipeline:
+
+        singularity exec OrthoPhyl.3.1.0.sif bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -h
+
+    -- Interactive session --
+    To explore or run commands by hand:
+
+        singularity run OrthoPhyl.3.1.0.sif        # drops into /bin/bash
