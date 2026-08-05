@@ -14,15 +14,22 @@
 #   └── metadata/             # Assembly metadata (optional)
 #       └── All-*-info.assembly.xml
 
-source ~/.bash_profile
-
-echo "To create conda env use
+# Inside a Singularity/Docker container the gather_genomes env is already on
+#   PATH (see the container %environment section), and $HOME maps to the host
+#   home -- sourcing the host .bash_profile and running `conda activate` there
+#   would (wrongly) put the *host* checkm on PATH, which cannot execute inside
+#   the container ("required file not found"). So only activate the env when
+#   NOT in a container, matching the guard in OrthoPhyl.sh.
+if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]]
+then
+	source ~/.bash_profile
+	echo "To create conda env use
 conda create -n gather_genomes \\
 -c bioconda -c conda-forge \\
-checkm-genome bbmap entrez-direct ncbi-datasets-cli 
+checkm-genome bbmap entrez-direct ncbi-datasets-cli
 "
-
-conda activate gather_genomes || exit
+	conda activate gather_genomes || exit
+fi
 
 export taxon="$1"
 export local_db_dir="$2"
@@ -76,6 +83,16 @@ fi
 # Create output directory
 mkdir -p "$wd"
 cd "$wd" || exit
+
+# Under Singularity/Docker the host /tmp is frequently read-only, which breaks
+#   edirect's nquire/mktemp ("mktemp: ... Read-only file system") and the
+#   curl -D header dump it feeds, as well as CheckM's scratch files. Point all
+#   temp-dir vars at a writable directory inside the working dir so every tool
+#   that honors TMPDIR/TMP/TEMP stays self-contained.
+export TMPDIR="$wd/tmp"
+export TMP="$TMPDIR"
+export TEMP="$TMPDIR"
+mkdir -p "$TMPDIR"
 
 echo "Searching for $taxon genomes in local database..."
 
