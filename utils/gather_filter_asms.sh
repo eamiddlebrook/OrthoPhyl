@@ -88,15 +88,31 @@ cd $wd || (echo $wd "doesnt exist...exiting" ; exit)
 mkdir ./assemblies_datasets_uniq
 echo "Output will be in $wd"
 
-# Under Singularity/Docker the host /tmp is frequently read-only, which breaks
-#   edirect's nquire/mktemp ("mktemp: ... Read-only file system") and the
-#   curl -D header dump it feeds, as well as CheckM's scratch files. Point all
-#   temp-dir vars at a writable directory inside the working dir so every tool
-#   that honors TMPDIR/TMP/TEMP stays self-contained.
-export TMPDIR="$wd/tmp"
+# Pick a temp dir that is BOTH writable AND short, then point every temp-dir
+#   var at it. Two container constraints collide here:
+#     * Singularity's image /tmp is read-only, which breaks edirect's
+#       nquire/mktemp ("mktemp: ... Read-only file system") -> needs writable.
+#     * CheckM's multiprocessing.Manager binds an AF_UNIX socket under $TMPDIR,
+#       and the socket path has a hard 108-char kernel limit. A temp dir deep
+#       under $wd overflows it ("OSError: AF_UNIX path too long") -> needs short.
+#   /dev/shm is writable (tmpfs) and short in a container; fall back through
+#   /tmp, $HOME, and finally $wd for non-container / unusual setups.
+op_tmp=""
+for base in /dev/shm /tmp "$HOME" "$wd"; do
+	if [ -d "$base" ] && [ -w "$base" ]; then
+		op_tmp=$(mktemp -d "$base/op_tmp.XXXXXX" 2>/dev/null) && break
+	fi
+done
+if [ -z "$op_tmp" ]; then
+	echo "ERROR: could not create a writable temp dir (tried /dev/shm /tmp \$HOME \$wd)" >&2
+	exit 1
+fi
+export TMPDIR="$op_tmp"
 export TMP="$TMPDIR"
 export TEMP="$TMPDIR"
-mkdir -p "$TMPDIR"
+# clean up the scratch dir when the script exits (any reason)
+trap 'rm -rf "$op_tmp"' EXIT
+echo "Using temp dir (writable + short for CheckM AF_UNIX sockets): $TMPDIR"
 
 #######################################################
 #### Declare main function for gather genomes pipe ####

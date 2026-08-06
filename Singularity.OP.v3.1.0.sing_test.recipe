@@ -18,7 +18,11 @@ AUTHOR earlm@lanl.gov
 %post
     # instal conda and conda packages
     micromamba install --yes --name base --channel bioconda --channel conda-forge prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer mash prodigal ete3 raxml trimal r-essentials scipy iqtree pytest
-    micromamba create --yes -n gather_genomes -c bioconda -c conda-forge checkm-genome bbmap entrez-direct ncbi-datasets-cli pytest
+    # CheckM is legacy and breaks on modern Python: solver was pulling
+    #   python 3.14 (free-threaded), where setuptools>=82 no longer ships
+    #   pkg_resources -> "ModuleNotFoundError: No module named 'pkg_resources'".
+    #   Pin python 3.10 and setuptools<82 so CheckM imports cleanly.
+    micromamba create --yes -n gather_genomes -c bioconda -c conda-forge "python=3.10" "setuptools<82" checkm-genome bbmap entrez-direct ncbi-datasets-cli pytest
     micromamba clean --all --yes
     chmod --recursive a+rw /opt/conda/bin/*
     chmod --recursive a+rw /opt/conda/envs/gather_genomes/bin
@@ -33,6 +37,20 @@ AUTHOR earlm@lanl.gov
     tar -xzf checkm_data_2015_01_16.tar.gz
     rm checkm_data_2015_01_16.tar.gz
     chmod --recursive a+rw /opt/checkm_data
+
+%post
+    # edirect's `nquire` hardcodes `mktemp /tmp/NQUIRE_*.XXXX`, ignoring TMPDIR.
+    #   Under Singularity the host /tmp is often read-only, so esearch fails with
+    #   "mktemp: ... Read-only file system" then "curl: option -D: blank argument".
+    #   Patch nquire to write scratch to $TMPDIR, falling back to $PWD (NOT /tmp):
+    #   the image /tmp is read-only at runtime, but gather_filter_asms.sh always
+    #   runs esearch with its CWD set to the (writable) output dir $wd, so $PWD is
+    #   a guaranteed-writable fallback even if TMPDIR does not propagate.
+    nquire_bin=/opt/conda/envs/gather_genomes/bin/nquire
+    sed -i 's#mktemp /tmp/NQUIRE_#mktemp "${TMPDIR:-$PWD}"/NQUIRE_#g' "$nquire_bin"
+    grep -qF 'mktemp "${TMPDIR:-$PWD}"/NQUIRE_' "$nquire_bin" \
+        && echo "patched nquire to avoid read-only /tmp" \
+        || echo "WARNING: nquire /tmp patch did not match -- check nquire version"
 
 %post
     # make path to gits (duh)
