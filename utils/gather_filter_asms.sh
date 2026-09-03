@@ -37,13 +37,20 @@ fi
 
 # Check for --reduced_tree flag (low RAM mode for CheckM)
 reduced_tree_flag=""
+# CheckM's pplacer step loads a FULL copy of the reference package into RAM per
+#   thread ("memory usage increases linearly with additional threads"). By
+#   default pplacer_threads follows -t (e.g. 8), so pplacer OOM-kills even with
+#   --reduced_tree. In low-RAM mode also pin pplacer to a single thread; this is
+#   the real OOM lever and is orthogonal to the smaller --reduced_tree package.
+low_ram_pplacer_args=""
 use_bbmap=false
 
 # Parse optional flags
 for arg in "$@"; do
     if [[ "$arg" == "--reduced_tree" ]]; then
         reduced_tree_flag="--reduced_tree"
-        echo "Low RAM mode enabled: Using CheckM --reduced_tree option"
+        low_ram_pplacer_args="--pplacer_threads 1"
+        echo "Low RAM mode enabled: Using CheckM --reduced_tree --pplacer_threads 1"
     elif [[ "$arg" == "--use-bbmap" ]]; then
         use_bbmap=true
         echo "Using bbmap statswrapper instead of CheckM for genome statistics"
@@ -514,17 +521,17 @@ get_stats_with_checkM () {
 	# Add reduced_tree flag if set (passed from wrapper)
 	if [[ $checkM_type == "protien" ]]
 	then
-		checkM_args="-t $threads -g -x $suffix $reduced_tree_flag"
+		checkM_args="-t $threads -g -x $suffix $reduced_tree_flag $low_ram_pplacer_args"
 	elif [[ $checkM_type == "genome" ]]
 	then
-		checkM_args="-t $threads -x $suffix $reduced_tree_flag"
+		checkM_args="-t $threads -x $suffix $reduced_tree_flag $low_ram_pplacer_args"
 	else
 		echo "Unknown checkM input type" && exit
 	fi
-	
+
 	# Log CheckM settings
 	if [[ -n "$reduced_tree_flag" ]]; then
-		echo "  Using --reduced_tree option (low RAM mode)"
+		echo "  Using --reduced_tree --pplacer_threads 1 (low RAM mode)"
 	fi
 	mkdir $checkM_dir
 	cd $checkM_dir || exit
