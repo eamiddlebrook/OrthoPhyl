@@ -61,6 +61,8 @@ class PipelineWrapper:
         verbose: int = 0,
         low_ram: bool = False,
         use_bbmap: bool = False,
+        must_keep: Optional[str] = None,
+        keep_failing_query: bool = False,
         # NEW: Taxon mode parameters
         taxon: Optional[str] = None,
         taxon_rank: Optional[str] = None,
@@ -91,7 +93,14 @@ class PipelineWrapper:
         self.verbose = verbose
         self.low_ram = low_ram
         self.use_bbmap = use_bbmap
-        
+        # Genome-retention controls, passed through to gather_filter_asms.sh.
+        #   must_keep : comma-sep accession list OR path to a file (one per line);
+        #               these must survive QC or the download aborts.
+        #   keep_failing_query : let query genomes that fail QC through with a
+        #               warning instead of aborting.
+        self.must_keep = must_keep
+        self.keep_failing_query = keep_failing_query
+
         # NEW: Taxon mode
         self.taxon = taxon
         self.taxon_rank = taxon_rank
@@ -682,7 +691,8 @@ class PipelineWrapper:
                 genome_files = list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta"))
                 logger.info(f"    Found {len(genome_files)} genomes")
             elif not self.skip_download:
-                self._download_genomes(taxon_name, download_dir)
+                # Pass the query genomes so they are QC'd alongside the downloads.
+                self._download_genomes(taxon_name, download_dir, query_assemblies=assemblies)
                 self._write_checkpoint(f"download_{taxon_name}")
             else:
                 logger.info(f"  Skipping download (--skip-download)")
@@ -696,19 +706,28 @@ class PipelineWrapper:
                         f"  2. Manually place genomes in {genomes_to_keep}/"
                     )
             
-            # Stage 2: Add query genomes
+            # Stage 2: Ensure query genomes are present (fallback only).
+            # On a normal download run the query genomes were already QC-filtered
+            # by gather_filter_asms.sh (--query-genomes) and, if they passed (or
+            # were rescued via --keep-failing-query), copied into genomes_to_keep/
+            # as <stem>.fna. This loop only needs to add them when QC did not run
+            # at all (e.g. --skip-download). It is careful NOT to re-add a genome
+            # that QC already placed under its normalized <stem>.fna name, which
+            # would create a QC-bypassing duplicate.
             genomes_to_keep = download_dir / "genomes_to_keep"
             if not genomes_to_keep.exists():
                 genomes_to_keep.mkdir(parents=True, exist_ok=True)
-            
-            logger.info(f"\n  Adding {len(assemblies)} query genomes to input set...")
+
+            logger.info(f"\n  Ensuring {len(assemblies)} query genomes are in the input set...")
             for asm in assemblies:
                 src = Path(asm['assembly_path'])
+                normalized = genomes_to_keep / (src.stem + ".fna")
                 dst = genomes_to_keep / src.name
-                if not dst.exists():
-                    shutil.copy(src, dst)
-                    logger.info(f"    Added: {asm['assembly_id']}")
-            
+                if normalized.exists() or dst.exists():
+                    continue  # already present (QC'd copy or prior fallback)
+                shutil.copy(src, normalized)
+                logger.info(f"    Added (no QC): {asm['assembly_id']}")
+
             # Count total genomes
             total_genomes = len(list(genomes_to_keep.glob("*.fna")))
             logger.info(f"  Total genomes for OrthoPhyl: {total_genomes}")
@@ -747,22 +766,27 @@ class PipelineWrapper:
             'taxa_processed': len(orthophyl_batch)
         }
     
-    def _download_genomes(self, taxon_name: str, output_dir: Path):
-        """Download genomes using gather_filter_asms.sh."""
+    def _download_genomes(self, taxon_name: str, output_dir: Path, query_assemblies: Optional[List[Dict]] = None):
+        """Download genomes using gather_filter_asms.sh.
+
+        query_assemblies, if given, are the user's input assemblies; their FASTA
+        paths are passed via --query-genomes so they are QC-filtered alongside the
+        downloads instead of bypassing QC.
+        """
         if not self.gather_script:
             logger.warning(f"  No gather script provided, skipping download for {taxon_name}")
             logger.warning(f"  Please manually download genomes to: {output_dir}/genomes_to_keep/")
             return
-        
+
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         cmd = [
             str(self.gather_script),
             taxon_name,
             str(output_dir),
             str(self.threads)
         ]
-        
+
         # Add optional flags
         if self.use_bbmap:
             cmd.append('--use-bbmap')
@@ -770,7 +794,20 @@ class PipelineWrapper:
         elif self.low_ram:
             cmd.append('--lowmem')
             logger.info(f"  Using CheckM2 --lowmem option (low RAM mode)")
-        
+
+        # Genome-retention controls. Pass the raw --must-keep value straight
+        #   through -- the gather script resolves list-vs-file itself.
+        if self.must_keep:
+            cmd.extend(['--must-keep', self.must_keep])
+            logger.info(f"  Enforcing must-keep genomes: {self.must_keep}")
+        if query_assemblies:
+            query_paths = ','.join(str(Path(a['assembly_path'])) for a in query_assemblies)
+            cmd.extend(['--query-genomes', query_paths])
+            logger.info(f"  Running {len(query_assemblies)} query genome(s) through QC")
+        if self.keep_failing_query:
+            cmd.append('--keep-failing-query')
+            logger.info(f"  Query genomes failing QC will be kept with a warning")
+
         logger.info(f"  Downloading genomes for {taxon_name}...")
         if self.verbose:
             logger.info(f"    Command: {' '.join(cmd)}")
@@ -1646,7 +1683,19 @@ Examples:
         action='store_true',
         help='Use bbmap statswrapper instead of CheckM2 for genome statistics (faster, less RAM, but no completeness/contamination filtering)'
     )
-    
+    parser.add_argument(
+        '--must-keep',
+        help='Accessions that MUST survive QC or the run aborts with a clear per-metric '
+             'report. Supply either a comma-separated list (e.g. GCF_000...,GCF_001...) '
+             'or a path to a file with one accession per line.'
+    )
+    parser.add_argument(
+        '--keep-failing-query',
+        action='store_true',
+        help='Let query/input genomes that fail QC through with a loud warning instead '
+             'of aborting (default: a query genome failing QC aborts the run).'
+    )
+
     # Taxon mode arguments (--taxon is in mutually_exclusive_group above)
     parser.add_argument(
         '--taxon-rank',
@@ -1684,6 +1733,8 @@ Examples:
         verbose=args.verbose,
         low_ram=args.low_ram,
         use_bbmap=args.use_bbmap,
+        must_keep=args.must_keep,
+        keep_failing_query=args.keep_failing_query,
         taxon=args.taxon,
         taxon_rank=args.taxon_rank,
         update_existing=args.update_existing

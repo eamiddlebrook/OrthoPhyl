@@ -326,6 +326,11 @@ python orthophyl_pipeline_wrapper.py \
 - `--threads`: Number of CPU threads
 - `--low-ram`: Pass CheckM2 `--lowmem` (halves DIAMOND RAM)
 - `--use-bbmap`: Skip CheckM2, use bbmap for faster QC
+- `--must-keep`: Accessions that MUST survive QC or the run aborts with a per-metric
+  report. Supply either a comma-separated list (`GCF_000...,GCF_001...`) or a path to a
+  file with one accession per line.
+- `--keep-failing-query`: Let query/input genomes that fail QC through with a loud
+  warning instead of aborting (default: a query genome failing QC aborts the run).
 
 **What Happens**:
 1. Queries NCBI for all assemblies matching the taxon

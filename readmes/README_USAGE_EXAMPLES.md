@@ -185,6 +185,35 @@ python orthophyl_pipeline_wrapper.py \
 
 ---
 
+### Example 9: Require Specific Genomes to Pass QC
+
+```bash
+# Comma-separated list...
+python orthophyl_pipeline_wrapper.py \
+    --input assemblies.tsv \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --gather-script utils/gather_filter_asms.sh \
+    --threads 32 \
+    --must-keep GCF_000001.1,GCF_000002.1
+
+# ...or a file with one accession per line
+python orthophyl_pipeline_wrapper.py \
+    ... \
+    --must-keep required_accessions.txt
+```
+
+**Scenario**: Downstream steps depend on particular reference accessions being present.
+
+**What happens**:
+- Query/input genomes are run **through the same QC filter** as the downloads.
+- If a **query genome fails QC**, the run **aborts** by default with a clear report
+  naming the genome and the failed metric (e.g. `completeness=82.0 < MIN_completeness=95`).
+  Add `--keep-failing-query` to downgrade this to a warning and force the query in.
+- If any `--must-keep` accession is dropped by QC, the run **always aborts** (not
+  overridable) — those genomes are required downstream.
+- Per-genome failure reasons are written to `qc_removal_reasons.txt` in the download dir.
+
 ---
 
 [← Back to Main README](../README.md)

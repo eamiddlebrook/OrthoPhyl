@@ -46,16 +46,63 @@ fi
 lowmem_flag=""
 use_bbmap=false
 
-# Parse optional flags
+# Genome-retention controls (see stage_query_genomes / enforce_must_keep below).
+#   query_genomes_arg : comma-separated local FASTA paths supplied by the wrapper
+#                       that are QC'd alongside the downloads.
+#   must_keep_arg     : comma-separated accessions OR a path to a file with one
+#                       accession per line; these MUST survive QC or the run aborts.
+#   keep_failing_query: if true, a query genome that fails QC is kept with a loud
+#                       warning instead of aborting.
+query_genomes_arg=""
+must_keep_arg=""
+keep_failing_query=false
+
+# Parse optional flags. --query-genomes and --must-keep take a value, given either
+#   as the next token ("--must-keep GCF_x,GCF_y") or inline ("--must-keep=GCF_x,...").
+prev_flag=""
 for arg in "$@"; do
-    if [[ "$arg" == "--lowmem" || "$arg" == "--reduced_tree" ]]; then
-        lowmem_flag="--lowmem"
-        echo "Low RAM mode enabled: passing --lowmem to CheckM2"
-    elif [[ "$arg" == "--use-bbmap" ]]; then
-        use_bbmap=true
-        echo "Using bbmap statswrapper instead of CheckM2 for genome statistics"
-    fi
+    case "$prev_flag" in
+        --query-genomes) query_genomes_arg="$arg"; prev_flag=""; continue ;;
+        --must-keep)     must_keep_arg="$arg";     prev_flag=""; continue ;;
+    esac
+    case "$arg" in
+        --lowmem|--reduced_tree)
+            lowmem_flag="--lowmem"
+            echo "Low RAM mode enabled: passing --lowmem to CheckM2" ;;
+        --use-bbmap)
+            use_bbmap=true
+            echo "Using bbmap statswrapper instead of CheckM2 for genome statistics" ;;
+        --keep-failing-query)
+            keep_failing_query=true
+            echo "Query genomes that fail QC will be kept with a warning (not aborted)" ;;
+        --query-genomes=*) query_genomes_arg="${arg#*=}" ;;
+        --must-keep=*)     must_keep_arg="${arg#*=}" ;;
+        --query-genomes|--must-keep) prev_flag="$arg" ;;
+    esac
 done
+
+# Resolve the genome-retention inputs while still in the caller's CWD (the paths
+#   may be relative). must_keep_set / query_paths are newline-delimited.
+#   must_keep accepts either a file (one accession per line) or a comma-sep list.
+must_keep_set=""
+if [ -n "$must_keep_arg" ]; then
+    if [ -f "$must_keep_arg" ]; then
+        must_keep_set=$(grep -v '^[[:space:]]*$' "$must_keep_arg" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    else
+        must_keep_set=$(echo "$must_keep_arg" | tr ',' '\n' | grep -v '^[[:space:]]*$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    fi
+fi
+# Absolutize each query genome path so it survives the upcoming `cd $wd`.
+query_paths=""
+if [ -n "$query_genomes_arg" ]; then
+    while IFS= read -r qp; do
+        [ -z "$qp" ] && continue
+        if [ "${qp:0:1}" != "/" ]; then
+            qp="$(cd "$(dirname "$qp")" 2>/dev/null && pwd)/$(basename "$qp")"
+        fi
+        query_paths+="${qp}"$'\n'
+    done <<< "$(echo "$query_genomes_arg" | tr ',' '\n')"
+fi
 
 ## Convert wd to absolute path (handles relative paths, ~, and absolute paths)
 if [[ "$2" = ~* ]]; then
@@ -136,8 +183,11 @@ main () {
 	merge_metadata_geoloc
 	all_sample_metadata
 	aggregate_assemblies "$wd"/assemblies_all.TMP
+	# Add user-supplied query genomes to the input set so they are QC'd
+	#   alongside the downloads (rather than bypassing the filter).
+	stage_query_genomes
 	#filter_asm_by_taxCheck
-	
+
 	# Choose stats method based on flag
 	if [ "$use_bbmap" = true ]; then
 		get_asm_stats "$wd"/assemblies_all.TMP/
@@ -146,7 +196,41 @@ main () {
 	fi
 	filter_asm_by_stats $MIN_LEN $MAX_LEN $MIN_N50 $MIN_GC $MAX_GC $MAX_dup $MIN_completeness $MAX_contam
 	get_all_asms_to_remove
+	# Abort (or, for queries, warn) if any required genome failed QC.
+	enforce_must_keep
 	filter_for_redundancy
+}
+
+stage_query_genomes () {
+	# Copy any --query-genomes FASTAs into the download set (assemblies_all.TMP)
+	#   as <stem>.fna so they flow through stats -> threshold filter -> removal
+	#   -> redundancy exactly like the downloaded assemblies. Records each staged
+	#   stem in $wd/query_genome_names for enforce_must_keep to cross-check.
+	#   query_set (this global) holds the same list, newline-delimited.
+	query_set=""
+	:> "$wd"/query_genome_names
+	[ -z "$query_paths" ] && return 0
+	echo ""
+	echo "#######################################"
+	echo "####### Stage query genomes ###########"
+	echo "#######  for QC filtering  ############"
+	echo "#######################################"
+	echo ""
+	mkdir -p "$wd"/assemblies_all.TMP
+	while IFS= read -r qp; do
+		[ -z "$qp" ] && continue
+		if [ ! -f "$qp" ]; then
+			echo "ERROR: --query-genomes path not found: $qp" >&2
+			exit 1
+		fi
+		base=$(basename "$qp")
+		# normalize .fasta/.fa/.fna -> stem, then write as <stem>.fna
+		stem="${base%.*}"
+		cp "$qp" "$wd"/assemblies_all.TMP/"$stem".fna
+		query_set+="${stem}"$'\n'
+		echo "$stem" >> "$wd"/query_genome_names
+		echo "  Staged query genome: $stem (from $base)"
+	done <<< "$query_paths"
 }
 
 get_NCBI_genomes () {
@@ -746,24 +830,32 @@ filter_asm_by_stats () {
         echo "MIN_completeness=$MIN_completeness"
         echo "MAX_contam=$MAX_contam"
 	echo "Paths to assemblies being filtered out are found in assemblies_to_remove.stats"
-	# Emply output file
+	echo "Per-metric failure reasons are recorded in qc_removal_reasons.txt"
+	# Empty output files.
+	#   assemblies_to_remove.stats : plain accession list, consumed by the
+	#     assemblies_to_remove.* glob in get_all_asms_to_remove (keep as-is).
+	#   qc_removal_reasons.txt     : acc<TAB>human-readable reason(s). MUST NOT
+	#     match assemblies_to_remove.* or it would pollute final_assemblies_to_remove.
 	:> assemblies_to_remove.stats
+	:> qc_removal_reasons.txt
 	cat assemblies_all.stats.txt |\
 	tail -n +2 |\
 	awk '{print $1,$16,$18,$14,$11,$12,$13}' |\
 	while read acc scaf_bp ctg_N50 gc_avg dup complete contam
 	do
-		if (( $(echo "$scaf_bp < $MIN_LEN" |bc -l) )) || \
-                   (( $(echo "$scaf_bp > $MAX_LEN" |bc -l) )) || \
-                   (( $(echo "$ctg_N50 < $MIN_N50" |bc -l) )) || \
-                   (( $(echo "$gc_avg < $MIN_GC" |bc -l) )) || \
-                   (( $(echo "$gc_avg > $MAX_GC" |bc -l) )) || \
-		   (( $(echo "$dup > $MAX_dup" |bc -l) ))  || \
-		   (( $(echo "$complete < $MIN_completeness" |bc -l) )) || \
-		   (( $(echo "$contam > $MAX_contam" |bc -l) ))
+		reasons=""
+		(( $(echo "$scaf_bp < $MIN_LEN" |bc -l) )) && reasons="${reasons}length=${scaf_bp} < MIN_LEN=${MIN_LEN}; "
+		(( $(echo "$scaf_bp > $MAX_LEN" |bc -l) )) && reasons="${reasons}length=${scaf_bp} > MAX_LEN=${MAX_LEN}; "
+		(( $(echo "$ctg_N50 < $MIN_N50" |bc -l) )) && reasons="${reasons}N50=${ctg_N50} < MIN_N50=${MIN_N50}; "
+		(( $(echo "$gc_avg < $MIN_GC" |bc -l) ))   && reasons="${reasons}GC=${gc_avg} < MIN_GC=${MIN_GC}; "
+		(( $(echo "$gc_avg > $MAX_GC" |bc -l) ))   && reasons="${reasons}GC=${gc_avg} > MAX_GC=${MAX_GC}; "
+		(( $(echo "$dup > $MAX_dup" |bc -l) ))     && reasons="${reasons}duplication=${dup} > MAX_dup=${MAX_dup}; "
+		(( $(echo "$complete < $MIN_completeness" |bc -l) )) && reasons="${reasons}completeness=${complete} < MIN_completeness=${MIN_completeness}; "
+		(( $(echo "$contam > $MAX_contam" |bc -l) ))         && reasons="${reasons}contamination=${contam} > MAX_contam=${MAX_contam}; "
+		if [ -n "$reasons" ]
 		then
-			#echo "$scaf_bp $ctg_N50 $gc_avg $dup $complete $contam"
 			echo ${acc} >> assemblies_to_remove.stats
+			printf '%s\t%s\n' "${acc}" "${reasons%; }" >> qc_removal_reasons.txt
 		fi
 	done
 }
@@ -777,6 +869,72 @@ get_all_asms_to_remove () {
 	echo ""
 	cd $wd || exit
 	cat assemblies_to_remove.* | sort | uniq > final_assemblies_to_remove
+}
+
+enforce_must_keep () {
+	# Cross-check the required-genome sets against the finalized QC removal list.
+	#   - query genomes (query_set): abort by default, or warn+rescue if
+	#     --keep-failing-query was given.
+	#   - must-keep accessions (must_keep_set): always a hard abort.
+	# Runs after get_all_asms_to_remove and before filter_for_redundancy so a
+	#   rescued query can be pulled out of final_assemblies_to_remove in time.
+	cd "$wd" || exit
+	local abort=false
+	local reasons_file="$wd/qc_removal_reasons.txt"
+
+	# Helper: print the recorded reason for an accession (matched by stem or as a
+	#   substring, so a user's "GCF_x" matches a removed "GCF_x.1").
+	_reason_for () {
+		local key="$1"
+		if [ -f "$reasons_file" ]; then
+			awk -F'\t' -v k="$key" 'index($1,k){print $2; found=1} END{if(!found) print "(failed a QC threshold; see qc_removal_reasons.txt)"}' "$reasons_file" | head -n 1
+		else
+			echo "(failed a QC threshold)"
+		fi
+	}
+
+	# --- query genomes ---
+	if [ -n "$query_set" ]; then
+		while IFS= read -r q; do
+			[ -z "$q" ] && continue
+			if grep -qxF "$q" final_assemblies_to_remove; then
+				reason=$(_reason_for "$q")
+				if [ "$keep_failing_query" = true ]; then
+					echo "WARNING: query genome '$q' FAILED QC ($reason) -- kept anyway (--keep-failing-query)." >&2
+					# rescue it: drop from the removal list so it survives to genomes_to_keep/
+					grep -vxF "$q" final_assemblies_to_remove > final_assemblies_to_remove.tmp \
+						&& mv final_assemblies_to_remove.tmp final_assemblies_to_remove
+				else
+					echo "REQUIRED query genome '$q' FAILED QC: $reason" >&2
+					abort=true
+				fi
+			fi
+		done <<< "$query_set"
+	fi
+
+	# --- must-keep accessions ---
+	if [ -n "$must_keep_set" ]; then
+		while IFS= read -r mk; do
+			[ -z "$mk" ] && continue
+			if grep -qF "$mk" final_assemblies_to_remove; then
+				reason=$(_reason_for "$mk")
+				echo "REQUIRED must-keep genome '$mk' FAILED QC: $reason" >&2
+				abort=true
+			fi
+		done <<< "$must_keep_set"
+	fi
+
+	if [ "$abort" = true ]; then
+		echo "" >&2
+		echo "########################################################################" >&2
+		echo "## ABORTING: one or more REQUIRED genomes failed quality control.      ##" >&2
+		echo "## They must pass QC to be present in downstream steps.                ##" >&2
+		echo "## See the per-genome reasons above and qc_removal_reasons.txt.        ##" >&2
+		echo "## Options: relax QC thresholds, supply a better assembly, or (for a   ##" >&2
+		echo "##   query genome) re-run with --keep-failing-query to force it in.    ##" >&2
+		echo "########################################################################" >&2
+		exit 1
+	fi
 }
 
 filter_for_redundancy () {

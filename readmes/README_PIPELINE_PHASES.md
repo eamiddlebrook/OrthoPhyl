@@ -209,8 +209,11 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
        {taxon_name} \
        {output_dir} \
        {threads} \
-       [--lowmem]        # Low RAM mode (halves DIAMOND RAM)
-       [--use-bbmap]     # Skip CheckM2
+       [--lowmem]                        # Low RAM mode (halves DIAMOND RAM)
+       [--use-bbmap]                     # Skip CheckM2
+       [--query-genomes q1.fna,q2.fna]   # QC the query genomes too (see Stage 2)
+       [--must-keep GCF_x,GCF_y|file]    # These MUST pass QC or the run aborts
+       [--keep-failing-query]            # Warn (don't abort) when a query fails QC
    ```
 
 2. **NCBI Datasets API**
@@ -262,17 +265,27 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
 
 **Checkpoint**: `download_{taxon_name}.flag`
 
-### Stage 2: Add Query Genomes
+### Stage 2: Query Genomes Through QC
 
-**Purpose**: Combine downloaded genomes with query assemblies
+**Purpose**: QC the query/input assemblies *alongside* the downloads, rather than
+appending them to the filtered set unchecked.
 
-```python
-# Copy query genomes to filtered set
-for assembly in query_assemblies:
-    shutil.copy(assembly, genomes_to_keep/)
-```
+The wrapper passes the query FASTA paths to the gather script via `--query-genomes`.
+They are staged into the download set (`assemblies_all.TMP/`), run through the same
+CheckM2 stats + threshold filter, and — if they pass — land in `genomes_to_keep/`.
 
-**Result**: Complete genome set for phylogenetic analysis
+**Failure handling** (elegant + explicit):
+- A **query genome that fails QC aborts the run** by default, reporting which genome
+  failed and on which metric (e.g. `completeness=82.0 < MIN_completeness=95`). Pass
+  `--keep-failing-query` to downgrade this to a loud warning and force the query in.
+- Accessions listed in `--must-keep` (comma-separated, or a file with one per line)
+  **always** abort the run if QC drops them — they are required downstream and this is
+  not overridable.
+
+Per-genome failure reasons are recorded in `qc_removal_reasons.txt` in the download dir.
+
+**Result**: Complete, QC-verified genome set for phylogenetic analysis. The wrapper
+keeps a fallback copy step for the `--skip-download` path (no QC runs there).
 
 ### Stage 3: Run OrthoPhyl
 

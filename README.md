@@ -79,9 +79,9 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │   └─ For each taxon:
   │       ├─ gather_filter_asms.sh
   │       │   ├─ Download genomes from NCBI
-  │       │   ├─ Run CheckM2/bbmap QC
-  │       │   └─ Filter by quality metrics
-  │       ├─ Add query genomes
+  │       │   ├─ Stage query genomes into the input set
+  │       │   ├─ Run CheckM2/bbmap QC (downloads + queries)
+  │       │   └─ Filter by quality; abort if a required genome fails
   │       ├─ OrthoPhyl.sh
   │       │   ├─ Annotate genomes
   │       │   ├─ Run OrthoFinder
