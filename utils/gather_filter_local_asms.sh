@@ -17,7 +17,7 @@
 # Inside a Singularity/Docker container the gather_genomes env is already on
 #   PATH (see the container %environment section), and $HOME maps to the host
 #   home -- sourcing the host .bash_profile and running `conda activate` there
-#   would (wrongly) put the *host* checkm on PATH, which cannot execute inside
+#   would (wrongly) put the *host* checkm2 on PATH, which cannot execute inside
 #   the container ("required file not found"). So only activate the env when
 #   NOT in a container, matching the guard in OrthoPhyl.sh.
 if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]]
@@ -26,7 +26,9 @@ then
 	echo "To create conda env use
 conda create -n gather_genomes \\
 -c bioconda -c conda-forge \\
-checkm-genome bbmap entrez-direct ncbi-datasets-cli
+checkm2 bbmap entrez-direct ncbi-datasets-cli
+then download the CheckM2 DIAMOND database once with:
+checkm2 database --download
 "
 	conda activate gather_genomes || exit
 fi
@@ -379,63 +381,73 @@ aggregate_assemblies () {
 
 get_stats_with_checkM () {
     echo "############################################################"
-    echo "###### Run CheckM to get completeness, contamination  ######"
+    echo "###### Run CheckM2 to get completeness, contamination ######"
     echo "####### and general assembly  metrics for filtering  #######"
-    echo "############################################################" 
-    
-    max_genomes=200
+    echo "############################################################"
+    # CheckM2 (DIAMOND + pretrained ML models) replaces legacy CheckM1's
+    #   pplacer/reference-tree placement, which OOM-killed even with
+    #   --reduced_tree. No per-genome memory blow-up, so run the whole folder in
+    #   a single `checkm2 predict` call. Kept in sync with
+    #   utils/gather_filter_asms.sh:get_stats_with_checkM.
     threads=$threads
     checkM_input=$1
     checkM_dir=$2
     checkM_type=$3
     suffix=$4
-    
+
+    # $lowmem_flag may be unset in this script (no flag parser); default empty.
+    lowmem_flag="${lowmem_flag:-}"
+    # --force lets a re-run overwrite a non-empty output dir (CheckM2 aborts
+    #   otherwise); the dir is recreated fresh each QC run anyway.
     if [[ $checkM_type == "protien" ]]
     then
-        checkM_args="-t $threads -g -x $suffix"
+        checkM_args="--threads $threads --genes -x $suffix --force $lowmem_flag"
     elif [[ $checkM_type == "genome" ]]
     then
-        checkM_args="-t $threads -x $suffix"
+        checkM_args="--threads $threads -x $suffix --force $lowmem_flag"
     else
         echo "Unknown checkM input type" && exit
     fi
-    
+
     mkdir $checkM_dir
     cd $checkM_dir || exit
-    
-    # split assemblies into different directories
-    J=0
-    K=0
-    for I in $(ls $checkM_input/*.$suffix)
-    do
-        if [ $((J % max_genomes)) -eq 0 ]
-        then
-            K=$((K+1))
-            mkdir $checkM_dir/${checkM_type}_${K}
-            mkdir $checkM_dir/${checkM_type}_${K}_out
-            cd $checkM_dir/${checkM_type}_${K}
-        fi
-        ln -s $I ./
-        J=$((J+1))
-    done
 
-    # run checkM on each subset
-    cd $checkM_dir
-    J=1
-    while [ $J -le $K ]
-    do
-        in=$checkM_dir/${checkM_type}_${J}
-        out=$checkM_dir/${checkM_type}_${J}_out
-        checkm lineage_wf ${checkM_args} $in $out
-        J=$((J+1))
-    done
+    echo "  Running CheckM2 predict with args: ${checkM_args}"
+    checkm2 predict ${checkM_args} --input "$checkM_input" --output-directory "$checkM_dir"
+    checkm_rc=$?
+    if [ $checkm_rc -ne 0 ]
+    then
+        echo "ERROR: CheckM2 predict exited with code $checkm_rc." >&2
+        echo "       If this is an out-of-memory kill, allocate more memory or" >&2
+        echo "       add --lowmem. Aborting so unfiltered assemblies are NOT" >&2
+        echo "       passed to OrthoPhyl." >&2
+        exit 1
+    fi
+    quality_report="${checkM_dir}/quality_report.tsv"
+    if [ ! -s "$quality_report" ]
+    then
+        echo "ERROR: CheckM2 produced no report output: missing/empty $quality_report" >&2
+        echo "       CheckM2 likely crashed (possibly OOM). Aborting." >&2
+        exit 1
+    fi
 
-    # Aggregate checkM output
+    # Aggregate CheckM2 output into the legacy 18-column stats layout that
+    #   filter_asm_by_stats consumes. duplication_ratio has no CheckM2 analogue
+    #   (placeholder 0.00). Columns matched by HEADER NAME (order is not stable).
     echo "acc lineage #markerGenes #genomes_based_on missing 1copy 2copy 3copy 4copy 5+copy duplication_ratio completeness contamination GC GC_std Genome-size #scaffs scaff_N50" \
         > $wd/assemblies_all.stats.txt
-    cat $checkM_dir/${checkM_type}_*_out/storage/bin_stats_ext.tsv | \
-        sed 's/{,//g;s/,//g' | \
-        awk '{print $1,$4,$10,$14,$16,$18,$20,$22,$24,$26,($26*5+$24*4+$22*3+$20*2)/$10,$28,$30,$32,$35,$38,$45,$57}' \
+    awk -F'\t' '
+        NR==1 {
+            for (i=1; i<=NF; i++) col[$i]=i
+            next
+        }
+        {
+            name=$(col["Name"]); comp=$(col["Completeness"]); cont=$(col["Contamination"])
+            gc=$(col["GC_Content"]); size=$(col["Genome_Size"]); n50=$(col["Contig_N50"])
+            nctg=(col["Total_Contigs"] ? $(col["Total_Contigs"]) : "NA")
+            print name,"checkm2","NA","NA","NA","NA","NA","NA","NA","NA","0.00",comp,cont,gc,"NA",size,nctg,n50
+        }
+    ' "$quality_report" \
         >> $wd/assemblies_all.stats.txt
 }
 

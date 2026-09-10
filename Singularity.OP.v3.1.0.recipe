@@ -18,10 +18,19 @@ AUTHOR earlm@lanl.gov
 %post
     # instal conda and conda packages
     micromamba install --yes --name base --channel bioconda --channel conda-forge prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer mash prodigal ete3 raxml trimal r-essentials scipy iqtree pytest
-    micromamba create --yes -n gather_genomes -c bioconda -c conda-forge checkm-genome bbmap entrez-direct ncbi-datasets-cli pytest
+    # CheckM2 (DIAMOND + ML) replaces legacy CheckM1: no pplacer/reference-tree,
+    #   so no python/setuptools pins and no ~40 GB RAM blow-up on placement.
+    micromamba create --yes -n gather_genomes -c bioconda -c conda-forge checkm2 bbmap entrez-direct ncbi-datasets-cli pytest
     micromamba clean --all --yes
     chmod --recursive a+rw /opt/conda/bin/*
     chmod --recursive a+rw /opt/conda/envs/gather_genomes/bin
+
+%post
+    # CheckM2 DIAMOND reference database, baked in so no runtime download is
+    #   required. CHECKM2DB is exported in %environment below.
+    mkdir -p /opt/checkm2_db
+    /opt/conda/envs/gather_genomes/bin/checkm2 database --download --path /opt/checkm2_db
+    chmod --recursive a+rw /opt/checkm2_db
 
 %post
     # make path to gits (duh)
@@ -67,6 +76,9 @@ AUTHOR earlm@lanl.gov
     export OrthoPhyl="bash /opt/gits/OrthoPhyl/OrthoPhyl.sh"
     export orthophyl_pipeline_wrapper="python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py"
     export assembly_router="python /opt/gits/OrthoPhyl/assembly_router/assembly_router.py"
+    # CheckM2 DIAMOND DB (downloaded to /opt/checkm2_db in %post). CHECKM2DB
+    #   must point at the .dmnd file itself.
+    export CHECKM2DB="/opt/checkm2_db/CheckM2_database/uniref100.KO.1.dmnd"
     export ASTRAL_cmd="$Path_to_gits/ASTRAL/Astral/astral.5.7.8.jar"
     export catfasta2phyml_cmd="$Path_to_gits/catfasta2phyml/catfasta2phyml.pl"
     export Alignment_Assessment="$Path_to_gits/Alignment_Assessment/Alignment_Assessment_v2.py"

@@ -26,7 +26,7 @@ python orthophyl_pipeline_wrapper.py \
 
 This will:
 1. Query NCBI for all *Methylorubrum* assemblies
-2. Download assemblies via `gather_filter_asms.sh` (with CheckM/bbmap QC filtering)
+2. Download assemblies via `gather_filter_asms.sh` (with CheckM2/bbmap QC filtering)
 3. Run OrthoPhyl to build phylogeny
 4. Create `Methylorubrum_db` with full metadata
 
@@ -117,7 +117,7 @@ Enhanced `database_config.json` now includes:
 
 2. Download Assemblies
    ├─ Download genome files
-   ├─ Calculate statistics (CheckM or bbmap)
+   ├─ Calculate statistics (CheckM2 or bbmap)
    └─ Filter by quality thresholds
 
 3. Run OrthoPhyl

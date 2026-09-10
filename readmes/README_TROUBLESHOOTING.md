@@ -135,13 +135,15 @@ ls -R databases/{database}_db/current/orthophyl_run/
 
 ---
 
-#### 6. "CheckM failed" or "Out of memory"
+#### 6. "CheckM2 failed" or "Out of memory"
 
-**Cause**: CheckM requires significant RAM (~40 GB)
+**Cause**: CheckM2 (`checkm2 predict`) uses DIAMOND + pretrained ML models, so it
+needs far less RAM than the legacy CheckM1 (which ran pplacer against a large
+reference tree). Memory pressure is usually driven by DIAMOND on large batches.
 
 **Solutions**:
 ```bash
-# Option A: Use low RAM mode
+# Option A: Use low RAM mode (passes CheckM2 --lowmem, halving DIAMOND RAM)
 python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \
@@ -149,7 +151,7 @@ python orthophyl_pipeline_wrapper.py \
     --gather-script utils/gather_filter_asms.sh \
     --low-ram
 
-# Option B: Skip CheckM entirely (faster, less stringent)
+# Option B: Skip CheckM2 entirely (fastest, lowest RAM, less stringent)
 python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir databases/ \

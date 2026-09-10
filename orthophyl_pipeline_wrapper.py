@@ -766,10 +766,10 @@ class PipelineWrapper:
         # Add optional flags
         if self.use_bbmap:
             cmd.append('--use-bbmap')
-            logger.info(f"  Using bbmap statswrapper instead of CheckM")
+            logger.info(f"  Using bbmap statswrapper instead of CheckM2")
         elif self.low_ram:
-            cmd.append('--reduced_tree')
-            logger.info(f"  Using CheckM --reduced_tree option (low RAM mode)")
+            cmd.append('--lowmem')
+            logger.info(f"  Using CheckM2 --lowmem option (low RAM mode)")
         
         logger.info(f"  Downloading genomes for {taxon_name}...")
         if self.verbose:
@@ -805,7 +805,7 @@ class PipelineWrapper:
             raise RuntimeError(f"Genome download failed for {taxon_name}. Check log: {log_file}")
 
         # Defense-in-depth: verify the QC stats table was actually populated.
-        # If CheckM crashes (e.g. OOM), gather_filter_asms.sh can leave
+        # If CheckM2 crashes (e.g. OOM), gather_filter_asms.sh can leave
         # assemblies_all.stats.txt as a header-only file, which causes the stats
         # filter to match nothing and pass EVERY raw assembly through unfiltered.
         # The bash script now aborts in that case, but we double-check here so a
@@ -815,7 +815,7 @@ class PipelineWrapper:
             if not stats_file.exists():
                 raise RuntimeError(
                     f"QC stats file not found after download: {stats_file}\n"
-                    f"CheckM may have failed (possibly out of memory).\n"
+                    f"CheckM2 may have failed (possibly out of memory).\n"
                     f"Check log: {log_file}"
                 )
             with open(stats_file) as sf:
@@ -823,10 +823,10 @@ class PipelineWrapper:
             if n_stats_rows <= 0:
                 raise RuntimeError(
                     f"QC stats file contains no per-assembly rows: {stats_file}\n"
-                    f"This usually means CheckM crashed (e.g. out of memory) and no\n"
+                    f"This usually means CheckM2 crashed (e.g. out of memory) and no\n"
                     f"quality filtering was applied. Refusing to proceed with unfiltered\n"
                     f"assemblies.\n"
-                    f"Fix: re-run with --low-ram (CheckM --reduced_tree) or --use-bbmap,\n"
+                    f"Fix: re-run with --low-ram (CheckM2 --lowmem) or --use-bbmap,\n"
                     f"or allocate more memory.\n"
                     f"Check log: {log_file}"
                 )
@@ -1639,12 +1639,12 @@ Examples:
     parser.add_argument(
         '--low-ram',
         action='store_true',
-        help='Use reduced memory mode for CheckM (passes --reduced_tree to gather_filter_asms.sh)'
+        help='Use reduced memory mode for CheckM2 (passes --lowmem to gather_filter_asms.sh)'
     )
     parser.add_argument(
         '--use-bbmap',
         action='store_true',
-        help='Use bbmap statswrapper instead of CheckM for genome statistics (faster, less RAM, but no completeness/contamination filtering)'
+        help='Use bbmap statswrapper instead of CheckM2 for genome statistics (faster, less RAM, but no completeness/contamination filtering)'
     )
     
     # Taxon mode arguments (--taxon is in mutually_exclusive_group above)

@@ -209,8 +209,8 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
        {taxon_name} \
        {output_dir} \
        {threads} \
-       [--reduced_tree]  # Low RAM mode
-       [--use-bbmap]     # Skip CheckM
+       [--lowmem]        # Low RAM mode (halves DIAMOND RAM)
+       [--use-bbmap]     # Skip CheckM2
    ```
 
 2. **NCBI Datasets API**
@@ -218,21 +218,22 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
    - Handles RefSeq and GenBank assemblies
    - Retry logic for server failures
 
-3. **Quality Control** (CheckM or bbmap):
+3. **Quality Control** (CheckM2 or bbmap):
    
-   **Option A: CheckM** (default, more stringent):
+   **Option A: CheckM2** (default, more stringent):
    ```bash
-   checkm lineage_wf \
-       --reduced_tree \  # Optional: low RAM
+   checkm2 predict \
+       --lowmem \  # Optional: halves DIAMOND RAM
        -t {threads} \
-       assemblies/ checkM_out/
+       --input assemblies/ --output-directory checkM_out/
    ```
-   - Assesses completeness and contamination
-   - Uses marker genes
+   - Assesses completeness and contamination via DIAMOND + pretrained ML models
+     (no reference tree or pplacer)
    - Default filters:
      - Completeness ≥ 95%
      - Contamination ≤ 1.0%
-     - Duplication ≤ 2%
+     - Duplication ≤ 2% (placeholder under CheckM2 — no marker-copy metric, so
+       this column is 0.00 and the filter is a no-op)
 
    **Option B: bbmap statswrapper** (faster, less RAM):
    ```bash

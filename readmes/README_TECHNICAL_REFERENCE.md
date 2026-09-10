@@ -55,7 +55,7 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │   └─ For each taxon:
   │       ├─ gather_filter_asms.sh
   │       │   ├─ Download genomes from NCBI
-  │       │   ├─ Run CheckM/bbmap QC
+  │       │   ├─ Run CheckM2/bbmap QC
   │       │   └─ Filter by quality metrics
   │       ├─ Add query genomes
   │       ├─ OrthoPhyl.sh
@@ -397,11 +397,13 @@ Escherichia	/data/ecoli_run	d__Bacteria;...;g__Escherichia
 
 - **get_stats_with_checkM()**
   ```bash
-  checkm lineage_wf \
-      --reduced_tree \
+  checkm2 predict \
+      --lowmem \
       -t {threads} \
-      assemblies/ checkM_out/
+      --input assemblies/ --output-directory checkM_out/
   ```
+  (`--lowmem` halves DIAMOND RAM; it is optional. CheckM2 uses DIAMOND + pretrained
+  ML models, so there is no reference tree or pplacer step.)
 
 - **get_asm_stats()** (bbmap alternative)
   ```bash
@@ -417,9 +419,10 @@ Escherichia	/data/ecoli_run	d__Bacteria;...;g__Escherichia
   - Keeps representative genomes
 
 **Quality Filters**:
-- Completeness ≥ 95% (CheckM only)
-- Contamination ≤ 1.0% (CheckM only)
-- Duplication ≤ 2% (CheckM only)
+- Completeness ≥ 95% (CheckM2 only)
+- Contamination ≤ 1.0% (CheckM2 only)
+- Duplication ≤ 2% (placeholder under CheckM2 — CheckM2 has no marker-copy
+  duplication metric, so this column is filled with 0.00 and the filter is a no-op)
 - N50, length, GC within 3 SD of mean
 
 **Output**: `genomes_to_keep/` with high-quality, non-redundant genomes
@@ -601,8 +604,8 @@ python orthophyl_pipeline_wrapper.py [OPTIONS]
 | `--skip-download` | False | Skip genome downloading (use existing) |
 | `--dry-run` | False | Show commands without executing |
 | `-v, --verbose` | 0 | Verbose output (use -v or -vv) |
-| `--low-ram` | False | Use CheckM --reduced_tree (low RAM mode) |
-| `--use-bbmap` | False | Use bbmap instead of CheckM (faster, less stringent) |
+| `--low-ram` | False | Pass CheckM2 `--lowmem` (halves DIAMOND RAM) |
+| `--use-bbmap` | False | Use bbmap instead of CheckM2 (faster, less stringent) |
 
 ### Verbosity Levels
 
@@ -613,17 +616,16 @@ python orthophyl_pipeline_wrapper.py [OPTIONS]
 ### Memory Options
 
 **Standard Mode** (default):
-- CheckM with full reference tree
-- ~40 GB RAM required
+- CheckM2 `predict` (DIAMOND + pretrained ML models, no reference tree or pplacer)
+- Far lower RAM than legacy CheckM1
 
 **Low RAM Mode** (`--low-ram`):
-- CheckM with reduced tree
-- ~16 GB RAM required
-- Slightly less accurate
+- CheckM2 with `--lowmem` (halves DIAMOND RAM)
+- Slightly slower
 
 **Fast Mode** (`--use-bbmap`):
-- bbmap statswrapper instead of CheckM
-- ~4 GB RAM required
+- bbmap statswrapper instead of CheckM2
+- Lowest RAM
 - No completeness/contamination filtering
 - Much faster
 

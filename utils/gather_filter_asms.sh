@@ -2,11 +2,11 @@
 # USAGE:
 # utils/gather_genomes.X.sh taxID_# PATH_TO/output_dir_name
 
-#checkM and R are incompatable in conda, so this script needs its own conda ENV
+#checkM2 needs its own conda ENV (DIAMOND/lightgbm deps conflict with the base)
 # Inside a Singularity/Docker container the gather_genomes env is already on
 #   PATH (see the container %environment section), and $HOME maps to the host
 #   home -- sourcing the host .bash_profile and running `conda activate` there
-#   would (wrongly) put the *host* checkm on PATH, which cannot execute inside
+#   would (wrongly) put the *host* checkm2 on PATH, which cannot execute inside
 #   the container ("required file not found"). So only activate the env when
 #   NOT in a container, matching the guard in OrthoPhyl.sh.
 if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]]
@@ -15,7 +15,9 @@ then
 	echo "To create conda env use
 conda create -n gather_genomes \
 -c bioconda -c conda-forge \
-checkm-genome bbmap entrez-direct ncbi-datasets-cli
+checkm2 bbmap entrez-direct ncbi-datasets-cli
+then download the CheckM2 DIAMOND database once with:
+checkm2 database --download
 "
 	conda activate gather_genomes || exit
 fi
@@ -35,25 +37,23 @@ else
 	export entrez_query="${taxon}[organism]"
 fi
 
-# Check for --reduced_tree flag (low RAM mode for CheckM)
-reduced_tree_flag=""
-# CheckM's pplacer step loads a FULL copy of the reference package into RAM per
-#   thread ("memory usage increases linearly with additional threads"). By
-#   default pplacer_threads follows -t (e.g. 8), so pplacer OOM-kills even with
-#   --reduced_tree. In low-RAM mode also pin pplacer to a single thread; this is
-#   the real OOM lever and is orthogonal to the smaller --reduced_tree package.
-low_ram_pplacer_args=""
+# Low-memory / stats-engine flags.
+#   CheckM2 replaces the old CheckM1 pplacer/reference-tree design (which
+#   OOM-killed even with --reduced_tree) with DIAMOND + pretrained ML models.
+#   Its --lowmem flag halves DIAMOND's RAM use at the cost of runtime. The
+#   legacy --reduced_tree flag is accepted as an alias for --lowmem so old
+#   invocations (and the wrapper) keep working.
+lowmem_flag=""
 use_bbmap=false
 
 # Parse optional flags
 for arg in "$@"; do
-    if [[ "$arg" == "--reduced_tree" ]]; then
-        reduced_tree_flag="--reduced_tree"
-        low_ram_pplacer_args="--pplacer_threads 1"
-        echo "Low RAM mode enabled: Using CheckM --reduced_tree --pplacer_threads 1"
+    if [[ "$arg" == "--lowmem" || "$arg" == "--reduced_tree" ]]; then
+        lowmem_flag="--lowmem"
+        echo "Low RAM mode enabled: passing --lowmem to CheckM2"
     elif [[ "$arg" == "--use-bbmap" ]]; then
         use_bbmap=true
-        echo "Using bbmap statswrapper instead of CheckM for genome statistics"
+        echo "Using bbmap statswrapper instead of CheckM2 for genome statistics"
     fi
 done
 
@@ -99,9 +99,10 @@ echo "Output will be in $wd"
 #   var at it. Two container constraints collide here:
 #     * Singularity's image /tmp is read-only, which breaks edirect's
 #       nquire/mktemp ("mktemp: ... Read-only file system") -> needs writable.
-#     * CheckM's multiprocessing.Manager binds an AF_UNIX socket under $TMPDIR,
-#       and the socket path has a hard 108-char kernel limit. A temp dir deep
-#       under $wd overflows it ("OSError: AF_UNIX path too long") -> needs short.
+#     * Tools that bind an AF_UNIX socket under $TMPDIR (edirect helpers, and
+#       any multiprocessing.Manager) hit a hard 108-char kernel path limit. A
+#       temp dir deep under $wd overflows it ("OSError: AF_UNIX path too long")
+#       -> needs short.
 #   /dev/shm is writable (tmpfs) and short in a container; fall back through
 #   /tmp, $HOME, and finally $wd for non-container / unusual setups.
 op_tmp=""
@@ -505,114 +506,106 @@ filter_asm_by_taxCheck () {
 
 get_stats_with_checkM () {
 	echo "############################################################"
-        echo "###### Run CheckM to get completeness, contamination  ######"
+        echo "###### Run CheckM2 to get completeness, contamination ######"
         echo "####### and general assembly  metrics for filtering  #######"
-        echo "############################################################" 
-	# checkM has the option to write stdout to file...
-	#   dont know if this would make aggregating its output
-	#   stdout is really messy
-	max_genomes=200
+        echo "############################################################"
+	# CheckM2 (DIAMOND + pretrained ML models) replaces legacy CheckM1's
+	#   pplacer/reference-tree placement, which OOM-killed even with
+	#   --reduced_tree. There is no per-genome memory blow-up, so we run the
+	#   whole assembly folder in a single `checkm2 predict` call instead of
+	#   splitting into 200-genome pplacer batches.
 	threads=$threads
 	checkM_input=$1
     checkM_dir=$2
 	checkM_type=$3
 	suffix=$4
-	
-	# Add reduced_tree flag if set (passed from wrapper)
+
+	# CheckM2 takes a folder + extension. Predicted-protein input uses --genes
+	#   (the gather scripts only ever pass "genome", but keep the branch).
+	# --force lets a re-run overwrite a non-empty output dir (CheckM2 aborts
+	#   otherwise); the dir is recreated fresh each QC run anyway.
 	if [[ $checkM_type == "protien" ]]
 	then
-		checkM_args="-t $threads -g -x $suffix $reduced_tree_flag $low_ram_pplacer_args"
+		checkM_args="--threads $threads --genes -x $suffix --force $lowmem_flag"
 	elif [[ $checkM_type == "genome" ]]
 	then
-		checkM_args="-t $threads -x $suffix $reduced_tree_flag $low_ram_pplacer_args"
+		checkM_args="--threads $threads -x $suffix --force $lowmem_flag"
 	else
 		echo "Unknown checkM input type" && exit
 	fi
 
-	# Log CheckM settings
-	if [[ -n "$reduced_tree_flag" ]]; then
-		echo "  Using --reduced_tree --pplacer_threads 1 (low RAM mode)"
+	if [[ -n "$lowmem_flag" ]]; then
+		echo "  Using CheckM2 --lowmem (low RAM mode)"
 	fi
 	mkdir $checkM_dir
 	cd $checkM_dir || exit
-	# split assemblies into different directories
-	J=0
-	K=0
-	for I in $(ls $checkM_input/*.$suffix)
-        do
-          	if [ $((J % max_genomes)) -eq 0 ]
-			then
-					K=$((K+1))
-					mkdir $checkM_dir/${checkM_type}_${K}
-					mkdir $checkM_dir/${checkM_type}_${K}_out
-					cd $checkM_dir/${checkM_type}_${K}
-			fi
-			# make simlinks for assembly/proteome subsets
-			ln -s $I ./
-			J=$((J+1))
-        done
 
-        # run checkM on each proteome subset
-        cd $checkM_dir
-        J=1
-	while [ $J -le $K ]
-        do
-          	in=$checkM_dir/${checkM_type}_${J}
-                out=$checkM_dir/${checkM_type}_${J}_out
-                echo "  Running CheckM batch $J of $K with args: ${checkM_args}"
-                checkm lineage_wf ${checkM_args} $in $out
-                checkm_rc=$?
-                # CheckM can be OOM-killed (often SIGKILL -> exit 137) or otherwise
-                # fail silently. If we do not abort here, aggregation below produces a
-                # header-only stats file, the stats filter matches nothing, and EVERY
-                # raw assembly is passed downstream unfiltered. Fail loudly instead.
-                if [ $checkm_rc -ne 0 ]
-                then
-                        echo "ERROR: CheckM batch $J of $K exited with code $checkm_rc." >&2
-                        echo "       This is frequently caused by CheckM running out of RAM." >&2
-                        echo "       Re-run with --reduced_tree (low RAM mode) or --use-bbmap," >&2
-                        echo "       or allocate more memory. Aborting so unfiltered assemblies" >&2
-                        echo "       are NOT passed to OrthoPhyl." >&2
-                        exit 1
-                fi
-                # Even on a 0 exit code, verify CheckM actually wrote its stats table.
-                batch_stats="${out}/storage/bin_stats_ext.tsv"
-                if [ ! -s "$batch_stats" ]
-                then
-                        echo "ERROR: CheckM batch $J of $K produced no stats output:" >&2
-                        echo "       missing or empty $batch_stats" >&2
-                        echo "       CheckM likely crashed (possibly OOM). Aborting so unfiltered" >&2
-                        echo "       assemblies are NOT passed to OrthoPhyl." >&2
-                        exit 1
-                fi
-                J=$((J+1))
-        done
+	echo "  Running CheckM2 predict with args: ${checkM_args}"
+	checkm2 predict ${checkM_args} --input "$checkM_input" --output-directory "$checkM_dir"
+	checkm_rc=$?
+	# CheckM2 can still be OOM-killed (SIGKILL -> exit 137) or fail silently. If
+	# we do not abort here, aggregation below produces a header-only stats file,
+	# the stats filter matches nothing, and EVERY raw assembly is passed
+	# downstream unfiltered. Fail loudly instead.
+	if [ $checkm_rc -ne 0 ]
+	then
+		echo "ERROR: CheckM2 predict exited with code $checkm_rc." >&2
+		echo "       If this is an out-of-memory kill, re-run with --lowmem (low RAM" >&2
+		echo "       mode) or --use-bbmap, or allocate more memory. Aborting so" >&2
+		echo "       unfiltered assemblies are NOT passed to OrthoPhyl." >&2
+		exit 1
+	fi
+	# Even on a 0 exit code, verify CheckM2 actually wrote its report table.
+	quality_report="${checkM_dir}/quality_report.tsv"
+	if [ ! -s "$quality_report" ]
+	then
+		echo "ERROR: CheckM2 produced no report output:" >&2
+		echo "       missing or empty $quality_report" >&2
+		echo "       CheckM2 likely crashed (possibly OOM). Aborting so unfiltered" >&2
+		echo "       assemblies are NOT passed to OrthoPhyl." >&2
+		exit 1
+	fi
 
-        # Aggregate checkM output
+	# Aggregate CheckM2 output into the legacy 18-column stats layout that
+	#   filter_asm_by_stats consumes (it reads: acc[1], dup[11], completeness[12],
+	#   contamination[13], GC[14], Genome-size[16], scaff_N50[18]).
+	#   CheckM2 has no marker-copy duplication metric, so duplication_ratio is a
+	#   placeholder (0.00), exactly like the bbmap path. Columns are matched by
+	#   HEADER NAME because CheckM2's column order changes with mode/--genes.
 	echo "acc lineage #markerGenes #genomes_based_on missing 1copy 2copy 3copy 4copy 5+copy duplication_ratio completeness contamination GC GC_std Genome-size #scaffs scaff_N50" \
 		> $wd/assemblies_all.stats.txt
-	cat $checkM_dir/${checkM_type}_*_out/storage/bin_stats_ext.tsv | \
-		sed 's/{,//g;s/,//g' | \
-		awk '{print $1,$4,$10,$14,$16,$18,$20,$22,$24,$26,($26*5+$24*4+$22*3+$20*2)/$10,$28,$30,$32,$35,$38,$45,$57}' \
+	awk -F'\t' '
+		NR==1 {
+			for (i=1; i<=NF; i++) col[$i]=i
+			next
+		}
+		{
+			name=$(col["Name"]); comp=$(col["Completeness"]); cont=$(col["Contamination"])
+			gc=$(col["GC_Content"]); size=$(col["Genome_Size"]); n50=$(col["Contig_N50"])
+			nctg=(col["Total_Contigs"] ? $(col["Total_Contigs"]) : "NA")
+			# acc lineage mark genomes missing 1c 2c 3c 4c 5c dup comp contam GC GCstd size scaffs N50
+			print name,"checkm2","NA","NA","NA","NA","NA","NA","NA","NA","0.00",comp,cont,gc,"NA",size,nctg,n50
+		}
+	' "$quality_report" \
 		>> $wd/assemblies_all.stats.txt
 
 	# Sanity check: every input assembly must have a stats row. A mismatch means
-	# CheckM silently dropped genomes (partial crash) -- abort rather than let the
+	# CheckM2 silently dropped genomes (partial crash) -- abort rather than let the
 	# stats filter under-report and pass unfiltered assemblies downstream.
 	n_input=$(ls $checkM_input/*.$suffix 2>/dev/null | wc -l)
 	n_stats=$(tail -n +2 $wd/assemblies_all.stats.txt | wc -l)
-	echo "  CheckM stats: $n_stats rows for $n_input input assemblies"
+	echo "  CheckM2 stats: $n_stats rows for $n_input input assemblies"
 	if [ "$n_stats" -eq 0 ]
 	then
-		echo "ERROR: CheckM produced no per-assembly stats ($wd/assemblies_all.stats.txt" >&2
+		echo "ERROR: CheckM2 produced no per-assembly stats ($wd/assemblies_all.stats.txt" >&2
 		echo "       contains only a header). Aborting so unfiltered assemblies are NOT" >&2
 		echo "       passed to OrthoPhyl." >&2
 		exit 1
 	fi
 	if [ "$n_stats" -ne "$n_input" ]
 	then
-		echo "ERROR: CheckM stats row count ($n_stats) does not match the number of" >&2
-		echo "       input assemblies ($n_input). CheckM likely crashed on some genomes." >&2
+		echo "ERROR: CheckM2 stats row count ($n_stats) does not match the number of" >&2
+		echo "       input assemblies ($n_input). CheckM2 likely crashed on some genomes." >&2
 		echo "       Aborting so partially-filtered assemblies are NOT passed to OrthoPhyl." >&2
 		exit 1
 	fi

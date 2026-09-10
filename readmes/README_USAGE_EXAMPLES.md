@@ -132,13 +132,13 @@ python orthophyl_pipeline_wrapper.py \
 **Scenario**: Running on a machine with limited RAM
 
 **What happens**:
-- Uses CheckM --reduced_tree option
-- Reduces RAM from ~40 GB to ~16 GB
-- Slightly less accurate quality assessment
+- Passes CheckM2 `--lowmem` to the gather script
+- Halves DIAMOND RAM (CheckM2 already uses far less RAM than legacy CheckM1)
+- Slightly slower quality assessment
 
 ---
 
-### Example 7: Fast Mode (Skip CheckM)
+### Example 7: Fast Mode (Skip CheckM2)
 
 ```bash
 python orthophyl_pipeline_wrapper.py \
@@ -153,8 +153,8 @@ python orthophyl_pipeline_wrapper.py \
 **Scenario**: Need fast results, less concerned about genome quality
 
 **What happens**:
-- Uses bbmap statswrapper instead of CheckM
-- Much faster (no marker gene analysis)
+- Uses bbmap statswrapper instead of CheckM2
+- Much faster (no completeness/contamination modeling)
 - Only basic assembly statistics
 - No completeness/contamination filtering
 

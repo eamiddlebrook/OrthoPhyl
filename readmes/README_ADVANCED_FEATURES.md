@@ -324,13 +324,13 @@ python orthophyl_pipeline_wrapper.py \
 - `--output-dir`: Working directory for this run (default: `<database-dir>/.pipeline_runs/<taxon>_<timestamp>`, where `<taxon>` is the `--taxon` name or `TaxID<num>` for a numeric TaxID)
 - `--taxon-rank`: Taxonomic rank (species, genus, family, etc.) - auto-detected if not provided
 - `--threads`: Number of CPU threads
-- `--low-ram`: Use CheckM reduced tree mode
-- `--use-bbmap`: Skip CheckM, use bbmap for faster QC
+- `--low-ram`: Pass CheckM2 `--lowmem` (halves DIAMOND RAM)
+- `--use-bbmap`: Skip CheckM2, use bbmap for faster QC
 
 **What Happens**:
 1. Queries NCBI for all assemblies matching the taxon
 2. Downloads genomes using `gather_filter_asms.sh`
-3. Applies quality filters (CheckM: completeness ≥95%, contamination ≤1%)
+3. Applies quality filters (CheckM2: completeness ≥95%, contamination ≤1%)
 4. Runs full OrthoPhyl pipeline on filtered genomes
 5. Creates new database in `database_dir/{taxon}_db/`
 6. Database is immediately available for future ReLeaf runs

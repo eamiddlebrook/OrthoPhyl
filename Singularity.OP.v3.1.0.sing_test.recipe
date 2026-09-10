@@ -18,25 +18,21 @@ AUTHOR earlm@lanl.gov
 %post
     # instal conda and conda packages
     micromamba install --yes --name base --channel bioconda --channel conda-forge prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer mash prodigal ete3 raxml trimal r-essentials scipy iqtree pytest
-    # CheckM is legacy and breaks on modern Python: solver was pulling
-    #   python 3.14 (free-threaded), where setuptools>=82 no longer ships
-    #   pkg_resources -> "ModuleNotFoundError: No module named 'pkg_resources'".
-    #   Pin python 3.10 and setuptools<82 so CheckM imports cleanly.
-    micromamba create --yes -n gather_genomes -c bioconda -c conda-forge "python=3.10" "setuptools<82" checkm-genome bbmap entrez-direct ncbi-datasets-cli pytest
+    # CheckM2 (DIAMOND + ML) replaces legacy CheckM1: no pplacer/reference-tree,
+    #   so no python 3.10 / setuptools<82 pins are needed and there is no ~40 GB
+    #   RAM blow-up on placement.
+    micromamba create --yes -n gather_genomes -c bioconda -c conda-forge checkm2 bbmap entrez-direct ncbi-datasets-cli pytest
     micromamba clean --all --yes
     chmod --recursive a+rw /opt/conda/bin/*
     chmod --recursive a+rw /opt/conda/envs/gather_genomes/bin
 
 %post
-    # CheckM needs its reference marker/genome data unpacked to a fixed location.
-    #   Baked into the image so no runtime download / setRoot is required.
-    #   CHECKM_DATA_PATH is exported in %environment below.
-    mkdir -p /opt/checkm_data
-    cd /opt/checkm_data
-    wget https://data.ace.uq.edu.au/public/CheckM_databases/checkm_data_2015_01_16.tar.gz
-    tar -xzf checkm_data_2015_01_16.tar.gz
-    rm checkm_data_2015_01_16.tar.gz
-    chmod --recursive a+rw /opt/checkm_data
+    # CheckM2 needs its DIAMOND reference database unpacked to a fixed location.
+    #   Baked into the image so no runtime download is required.
+    #   CHECKM2DB is exported in %environment below.
+    mkdir -p /opt/checkm2_db
+    /opt/conda/envs/gather_genomes/bin/checkm2 database --download --path /opt/checkm2_db
+    chmod --recursive a+rw /opt/checkm2_db
 
 %post
     # edirect's `nquire` hardcodes `mktemp /tmp/NQUIRE_*.XXXX`, ignoring TMPDIR.
@@ -96,7 +92,9 @@ AUTHOR earlm@lanl.gov
     export OrthoPhyl="bash /opt/gits/OrthoPhyl/OrthoPhyl.sh"
     export orthophyl_pipeline_wrapper="python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py"
     export assembly_router="python /opt/gits/OrthoPhyl/assembly_router/assembly_router.py"
-    export CHECKM_DATA_PATH="/opt/checkm_data"
+    # CheckM2 DIAMOND DB (downloaded to /opt/checkm2_db in %post). CHECKM2DB
+    #   must point at the .dmnd file itself.
+    export CHECKM2DB="/opt/checkm2_db/CheckM2_database/uniref100.KO.1.dmnd"
     export ASTRAL_cmd="$Path_to_gits/ASTRAL/Astral/astral.5.7.8.jar"
     export catfasta2phyml_cmd="$Path_to_gits/catfasta2phyml/catfasta2phyml.pl"
     export Alignment_Assessment="$Path_to_gits/Alignment_Assessment/Alignment_Assessment_v2.py"

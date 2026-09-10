@@ -92,4 +92,4 @@ Use `control_file.user` for local overrides. ReLeaf uses `control_file.ReLeaf.de
 
 ## Containers
 
-Singularity recipes: `Singularity.OP.v3.1.0.recipe` (current) and the `OP2.2.1` variants; `Dockerfile.mamba` for Docker. Both use micromamba with a base env (orthofinder, iqtree, fasttree, hmmer, mash, prodigal, trimal, raxml, ete3, pytest) and a separate `gather_genomes` env (checkm-genome, entrez-direct, ncbi-datasets-cli). Conda env spec: `orthophyl_env.2.2.1.yml`.
+Singularity recipes: `Singularity.OP.v3.1.0.recipe` (current) and the `OP2.2.1` variants; `Dockerfile.mamba` for Docker. Both use micromamba with a base env (orthofinder, iqtree, fasttree, hmmer, mash, prodigal, trimal, raxml, ete3, pytest) and a separate `gather_genomes` env (checkm2, entrez-direct, ncbi-datasets-cli). Conda env spec: `orthophyl_env.2.2.1.yml`.

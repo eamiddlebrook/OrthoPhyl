@@ -35,7 +35,7 @@ mv orthophyl_latest.sif OrthoPhyl.v3.1.0.sif
 
 The container includes:
 - **Base environment**: OrthoPhyl, OrthoFinder, IQ-TREE, MAFFT, trimAl, FastTree, HMMER, etc.
-- **gather_genomes environment**: CheckM, bbmap, NCBI datasets CLI, entrez-direct
+- **gather_genomes environment**: CheckM2, bbmap, NCBI datasets CLI, entrez-direct (the CheckM2 DIAMOND database is baked in and `CHECKM2DB` is exported)
 - **Additional tools**: ASTRAL, catfasta2phyml, Alignment Assessment
 - **OrthoPhyl code**: Cloned from GitHub at `/opt/gits/OrthoPhyl/`
 

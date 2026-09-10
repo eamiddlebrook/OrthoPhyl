@@ -32,7 +32,7 @@ The **OrthoPhyl Pipeline Wrapper v2** (`orthophyl_pipeline_wrapper.py`) is an au
 ✅ **Intelligent Routing**: Automatically determines the best pipeline for each assembly  
 ✅ **Database Management**: Creates and versions hierarchical taxonomy databases  
 ✅ **Checkpoint/Resume**: Robust recovery from interruptions  
-✅ **Quality Control**: Integrated genome filtering with CheckM or bbmap  
+✅ **Quality Control**: Integrated genome filtering with CheckM2 or bbmap  
 ✅ **Batch Processing**: Handles multiple assemblies efficiently  
 ✅ **Flexible Configuration**: Supports various tree methods and data types  
 
@@ -79,7 +79,7 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │   └─ For each taxon:
   │       ├─ gather_filter_asms.sh
   │       │   ├─ Download genomes from NCBI
-  │       │   ├─ Run CheckM/bbmap QC
+  │       │   ├─ Run CheckM2/bbmap QC
   │       │   └─ Filter by quality metrics
   │       ├─ Add query genomes
   │       ├─ OrthoPhyl.sh
@@ -241,7 +241,7 @@ python orthophyl_pipeline_wrapper.py \
     --database-dir databases/ \
     --output-dir results/ \
     --gather-script utils/gather_filter_asms.sh \
-    --gather-args "--reduced_tree --use-bbmap" \
+    --gather-args "--lowmem --use-bbmap" \
     --threads 16
 ```
 
@@ -317,15 +317,16 @@ ls results/checkpoints/
 # Re-run without --resume to start fresh
 ```
 
-### 3. Out of Memory During CheckM
+### 3. Out of Memory During CheckM2
 
-**Problem**: CheckM fails with memory errors
+**Problem**: CheckM2 fails with memory errors
 
 **Solution**:
 ```bash
-# Use reduced tree mode and bbmap instead
+# CheckM2 (DIAMOND + ML models, no reference tree/pplacer) already uses far less
+# RAM than legacy CheckM1. Use --lowmem to halve DIAMOND RAM, or --use-bbmap to skip.
 python orthophyl_pipeline_wrapper.py \
-    --gather-args "--reduced_tree --use-bbmap" \
+    --gather-args "--lowmem --use-bbmap" \
     --threads 16  # Reduce threads
 ```
 
@@ -380,7 +381,7 @@ ls databases/MyDatabase_db/orthophyl_run/OG_alignmentsToHMM/hmms_final/
 
 2. **Low-Memory Systems**:
    ```bash
-   --gather-args "--reduced_tree --use-bbmap"
+   --gather-args "--lowmem --use-bbmap"
    ```
 
 3. **Large Datasets** (>100 assemblies):
