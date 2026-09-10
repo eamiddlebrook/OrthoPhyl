@@ -1401,11 +1401,25 @@ cat_alignments () {
 		mkdir $SCO_dir
 	fi
 	echo "Creating directory with alignments of OGs from $SCO_list"
+	# SCO lists are built from OrthoFinder gene counts (pre-alignment), but trimAl can
+	# empty an alignment entirely and then writes NO output file (still exits 0). Those
+	# OGs have no file in $alignment_dir, so copy only the ones that actually exist and
+	# report the count of dropped OGs instead of emitting one "cp: cannot stat" per OG.
+	local n_missing=0
 	for I in $(cat $SCO_list)
 	do
-		cp $alignment_dir/${I}.* $SCO_dir/
+		if ls $alignment_dir/${I}.* >/dev/null 2>&1
+		then
+			cp $alignment_dir/${I}.* $SCO_dir/
+		else
+			n_missing=$((n_missing+1))
+		fi
 	done
- 
+	if [ $n_missing -gt 0 ]
+	then
+		echo "NOTE: $n_missing of $(wc -l < $SCO_list) OGs in $(basename $SCO_list) had no alignment in $(basename $alignment_dir) (trimming emptied them); excluded from the concatenation."
+	fi
+
 	echo "Concatenating fasta alignments to phylip format"
 	cd $output_dir || exit
 	perl $catfasta2phyml_cmd -c $SCO_dir/*.fa \
