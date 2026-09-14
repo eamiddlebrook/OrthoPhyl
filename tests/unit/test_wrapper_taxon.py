@@ -449,6 +449,96 @@ class TestTaxonUpdateMode:
         # This is a placeholder assertion
         assert result == 0 or result == 1  # Either success or graceful skip
     
+    def _existing_db(self, database_dir, accessions):
+        """Build an existing_db dict + on-disk config the update path expects."""
+        clade = "Methylorubrum"
+        db = database_dir / f"{clade}_db"
+        db.mkdir(parents=True, exist_ok=True)
+        config = {
+            "clade_name": clade,
+            "assembly_accessions": list(accessions),
+            "available_tree_methods": ["iqtree"],
+            "available_data_types": ["CDS"],
+            "n_genomes": len(accessions),
+        }
+        (db / "database_config.json").write_text(json.dumps(config))
+        return {"db_dir": db, "clade_name": clade,
+                "n_assemblies": len(accessions), "config": config}
+
+    def test_update_qc_filters_new_downloads(
+        self, Wrapper, tmp_path, fake_database_dir, fake_gatherer_class, monkeypatch
+    ):
+        """New downloads go through CheckM2 QC; only survivors reach ReLeaf and
+        only their accessions are written to the DB config."""
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, fake_database_dir,
+            taxon="Methylorubrum", update_existing=True, dry_run=False)
+
+        existing_db = self._existing_db(w.database_dir, ["GCF_000001.1"])
+
+        # Gatherer returns one existing + two new; download writes raw FASTAs.
+        import sys as _sys
+        fake_cls = _sys.modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer
+        monkeypatch.setattr(fake_cls, "query_ncbi", lambda self: [
+            {"accession": "GCF_000001.1", "taxonomy": "d__Bacteria;g__Methylorubrum"},
+            {"accession": "GCF_000002.1", "taxonomy": "d__Bacteria;g__Methylorubrum"},
+            {"accession": "GCF_000003.1", "taxonomy": "d__Bacteria;g__Methylorubrum"},
+        ])
+
+        # QC keeps only one of the two new downloads.
+        def fake_qc(subclade_dir, raw_member_paths, taxon_label, query_assemblies=None):
+            gtk = subclade_dir / "genomes_to_keep"
+            gtk.mkdir(parents=True, exist_ok=True)
+            (gtk / "GCF_000002.1.fna").write_text(">a\nACGT\n")  # GCF_000003.1 dropped
+            return gtk
+        monkeypatch.setattr(w, "_qc_subclade", fake_qc)
+
+        releaf_calls = []
+        monkeypatch.setattr(w, "_run_releaf", lambda **k: releaf_calls.append(k))
+
+        rc = w._run_taxon_update_mode(existing_db)
+        assert rc == 0
+
+        # ReLeaf ran on the QC-survivor directory (genomes_to_keep), not raw.
+        assert len(releaf_calls) == 1
+        assert releaf_calls[0]["input_genomes"].name == "genomes_to_keep"
+
+        # DB config records existing + the ONE survivor, not the dropped genome.
+        config = json.loads(
+            (existing_db["db_dir"] / "database_config.json").read_text())
+        assert config["assembly_accessions"] == ["GCF_000001.1", "GCF_000002.1"]
+        assert "GCF_000003.1" not in config["assembly_accessions"]
+        assert config["n_genomes"] == 2
+
+    def test_update_all_dropped_by_qc_leaves_db_unchanged(
+        self, Wrapper, tmp_path, fake_database_dir, fake_gatherer_class, monkeypatch
+    ):
+        """If QC drops every new download, ReLeaf never runs and the DB is untouched."""
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, fake_database_dir,
+            taxon="Methylorubrum", update_existing=True, dry_run=False)
+        existing_db = self._existing_db(w.database_dir, ["GCF_000001.1"])
+
+        import sys as _sys
+        fake_cls = _sys.modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer
+        monkeypatch.setattr(fake_cls, "query_ncbi", lambda self: [
+            {"accession": "GCF_000002.1", "taxonomy": "d__Bacteria;g__Methylorubrum"},
+        ])
+
+        def fake_qc_drops_all(subclade_dir, raw_member_paths, taxon_label, query_assemblies=None):
+            gtk = subclade_dir / "genomes_to_keep"
+            gtk.mkdir(parents=True, exist_ok=True)  # empty: everything dropped
+            return gtk
+        monkeypatch.setattr(w, "_qc_subclade", fake_qc_drops_all)
+        monkeypatch.setattr(w, "_run_releaf",
+                            lambda **k: pytest.fail("ReLeaf must not run when QC drops all"))
+
+        rc = w._run_taxon_update_mode(existing_db)
+        assert rc == 0
+        config = json.loads(
+            (existing_db["db_dir"] / "database_config.json").read_text())
+        assert config["assembly_accessions"] == ["GCF_000001.1"]
+
     def test_dry_run_short_circuits_update_mode(
         self, Wrapper, tmp_path, fake_database_dir, fake_gatherer_class, recording_run
     ):

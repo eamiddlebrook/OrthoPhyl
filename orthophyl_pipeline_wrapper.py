@@ -1961,53 +1961,90 @@ class PipelineWrapper:
         logger.info(f"  Existing: {len(existing_accessions)}")
         logger.info(f"  New: {len(new_assemblies)}")
         
-        # Download new assemblies
+        # Download new assemblies (raw, unfiltered) into assemblies_all.TMP so the
+        # shared QC helper can stage + filter them exactly like create mode does.
         logger.info(f"\nDownloading {len(new_assemblies)} new assemblies...")
         download_dir = self.output_dir / "new_assemblies"
-        download_dir.mkdir(parents=True, exist_ok=True)
-        
-        # TODO: New assemblies downloaded here via TaxonAssemblyGatherer are NOT yet
-        # QC-filtered (completeness/contamination/N50). Harmonize with gather_filter_asms.sh
-        # filtering in a future update. See create-mode for the filtered path.
-        gatherer.download_assemblies(new_assemblies, download_dir)
-        
+        raw_dir = download_dir / "assemblies_all.TMP"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+
+        gatherer.download_assemblies(new_assemblies, raw_dir)
+
+        raw_files = list(raw_dir.glob("*.fna")) + list(raw_dir.glob("*.fasta"))
+        if not raw_files:
+            raise RuntimeError(
+                f"Downloaded {len(new_assemblies)} new assemblies but no FASTAs "
+                f"landed in {raw_dir}. Check the gatherer's download step.")
+
+        # QC-filter the new downloads (CheckM2 completeness/contamination/N50),
+        # consistent with the create-mode filtered path. These are NCBI reference
+        # genomes being added to grow the DB -- not user queries -- so dropping
+        # low-quality ones is the intended behaviour. Falls back to unfiltered when
+        # no gather script is configured (CheckM2 unavailable).
+        if self.gather_script:
+            logger.info(f"\nQC-filtering {len(raw_files)} new assemblies (CheckM2)...")
+            genomes_to_keep = self._qc_subclade(
+                download_dir, raw_files, taxon_label=self.taxon)
+            kept = (list(genomes_to_keep.glob("*.fna")) +
+                    list(genomes_to_keep.glob("*.fasta")))
+            n_kept = len(kept)
+            logger.info(f"  New assemblies passing QC: {n_kept} / {len(raw_files)}")
+            if n_kept == 0:
+                logger.warning(
+                    f"\n⚠ All {len(raw_files)} new assemblies were dropped by QC; "
+                    f"nothing to add. Database left unchanged.")
+                self._save_final_status()
+                return 0
+            releaf_input = genomes_to_keep
+        else:
+            logger.warning(
+                "  ⚠ No gather script configured: skipping CheckM2 QC on new "
+                "assemblies (adding unfiltered).")
+            releaf_input = raw_dir
+
         # Run ReLeaf to add to existing database
         logger.info(f"\nRunning ReLeaf to add new assemblies to database...")
-        
+
         db_dir = existing_db['db_dir']
         config = existing_db['config']
-        
+
         # Get tree method and data type from config
         tree_methods = config.get('available_tree_methods', ['iqtree'])
         tree_data_types = config.get('available_data_types', ['CDS'])
         tree_method = tree_methods[0] if tree_methods else 'iqtree'
         tree_data = tree_data_types[0] if tree_data_types else 'CDS'
-        
+
         releaf_output = self.output_dir / "releaf_update"
-        
+
         self._run_releaf(
             database_dir=db_dir,
-            input_genomes=download_dir,
+            input_genomes=releaf_input,
             output_dir=releaf_output,
             tree_method=tree_method,
             tree_data=tree_data,
             database_name=existing_db['clade_name']
         )
         
-        # Update database metadata
+        # Update database metadata. Record only the accessions that actually
+        # survived QC and entered ReLeaf (filenames in releaf_input are
+        # accessions), NOT the full pre-QC candidate list -- otherwise dropped
+        # genomes would be marked present and never re-tried on a later update.
+        added_accessions = sorted(
+            p.stem for p in
+            list(releaf_input.glob("*.fna")) + list(releaf_input.glob("*.fasta")))
         logger.info(f"\nUpdating database metadata...")
         self._update_taxon_database_metadata(
             db_dir=db_dir,
-            new_assemblies=new_assemblies
+            added_accessions=added_accessions
         )
-        
+
         logger.info("=" * 70)
         logger.info("TAXON UPDATE COMPLETE!")
         logger.info("=" * 70)
         logger.info(f"  Database: {existing_db['clade_name']}")
-        logger.info(f"  Added assemblies: {len(new_assemblies)}")
-        logger.info(f"  Total assemblies: {len(existing_accessions) + len(new_assemblies)}")
-        
+        logger.info(f"  Added assemblies: {len(added_accessions)}")
+        logger.info(f"  Total assemblies: {len(existing_accessions) + len(added_accessions)}")
+
         self._save_final_status()
         return 0
     
@@ -2066,21 +2103,26 @@ class PipelineWrapper:
     def _update_taxon_database_metadata(
         self,
         db_dir: Path,
-        new_assemblies: List[Dict]
+        added_accessions: List[str]
     ):
-        """Update database metadata after adding new assemblies."""
+        """Update database metadata after adding new assemblies.
+
+        added_accessions are the accessions that actually entered ReLeaf (i.e.
+        survived QC), so the config reflects the true DB contents.
+        """
         config_file = db_dir / "database_config.json"
         if not config_file.exists():
             logger.warning(f"  ⚠ Config file not found: {config_file}")
             return
-        
+
         with open(config_file, 'r') as f:
             config = json.load(f)
-        
-        # Update metadata
+
+        # Update metadata (dedupe in case an accession was somehow already listed)
         existing_accessions = config.get('assembly_accessions', [])
-        new_accessions = [a['accession'] for a in new_assemblies]
-        config['assembly_accessions'] = existing_accessions + new_accessions
+        merged = existing_accessions + [
+            a for a in added_accessions if a not in set(existing_accessions)]
+        config['assembly_accessions'] = merged
         config['last_updated'] = datetime.now().isoformat()
         config['n_genomes'] = len(config['assembly_accessions'])
         
