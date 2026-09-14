@@ -110,6 +110,14 @@ def wrapper_module():
 
 
 @pytest.fixture(scope="session")
+def subclade_partition_module():
+    return load_module(
+        REPO_ROOT / "python_scripts" / "subclade_partition.py",
+        name="subclade_partition",
+    )
+
+
+@pytest.fixture(scope="session")
 def add_releaf_version_module():
     return load_module(
         REPO_ROOT / "assembly_router" / "add_releaf_version.py",
@@ -175,6 +183,12 @@ def make_db_dir(tmp_path):
         tree_methods=("iqtree",),
         data_types=("CDS",),
         parent=None,
+        is_subclade=False,
+        parent_taxon=None,
+        subclade_id=None,
+        built=True,
+        sketch_members=None,
+        source_genome_dir=None,
     ):
         base = Path(parent) if parent else (tmp_path / "databases")
         base.mkdir(parents=True, exist_ok=True)
@@ -196,6 +210,23 @@ def make_db_dir(tmp_path):
             "available_tree_methods": list(tree_methods),
             "available_data_types": list(data_types),
         }
+        if is_subclade:
+            # Write a dummy sketch + members file so router MASH tie-break has
+            # concrete paths to work with (contents don't matter when mash is mocked).
+            sketch_file = db_dir / "subclade_sketch.msh"
+            sketch_file.write_bytes(b"MASH-placeholder")
+            members_file = db_dir / "subclade_members.txt"
+            members = list(sketch_members or [f"{safe}_{i}.fna" for i in range(n_genomes)])
+            members_file.write_text("\n".join(members) + "\n")
+            config.update({
+                "is_subclade": True,
+                "parent_taxon": parent_taxon,
+                "subclade_id": subclade_id,
+                "built": built,
+                "sketch_file": str(sketch_file),
+                "members_file": str(members_file),
+                "source_genome_dir": source_genome_dir,
+            })
         (db_dir / "database_config.json").write_text(json.dumps(config, indent=2))
         # A stand-in orthophyl_run target so path joins resolve.
         (db_dir / "orthophyl_run").mkdir(exist_ok=True)

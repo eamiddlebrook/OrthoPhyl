@@ -57,6 +57,20 @@ query_genomes_arg=""
 must_keep_arg=""
 keep_failing_query=false
 
+# Phase gating for the subclade-partitioning workflow. By default the script runs
+#   the full download+QC pipeline (both flags false). The wrapper can split the two
+#   halves so it can MASH-partition the raw download set BEFORE the (expensive) QC
+#   pass and then QC only the subclade(s) it actually builds:
+#     --download-only : run download/dedup/metadata/aggregate/stage_query, then STOP
+#                       before QC. Leaves raw genomes in $wd/assemblies_all.TMP/*.fna.
+#     --qc-only       : skip all download steps; assume $wd/assemblies_all.TMP/*.fna
+#                       already exists (pre-staged by the caller) and run only the
+#                       stats -> threshold -> must-keep -> redundancy -> genomes_to_keep
+#                       QC steps.
+#   The two are mutually exclusive.
+download_only=false
+qc_only=false
+
 # Parse optional flags. --query-genomes and --must-keep take a value, given either
 #   as the next token ("--must-keep GCF_x,GCF_y") or inline ("--must-keep=GCF_x,...").
 prev_flag=""
@@ -75,11 +89,22 @@ for arg in "$@"; do
         --keep-failing-query)
             keep_failing_query=true
             echo "Query genomes that fail QC will be kept with a warning (not aborted)" ;;
+        --download-only)
+            download_only=true
+            echo "Download-only mode: will stop before QC (raw genomes left in assemblies_all.TMP/)" ;;
+        --qc-only)
+            qc_only=true
+            echo "QC-only mode: skipping download, QC-ing pre-staged assemblies_all.TMP/" ;;
         --query-genomes=*) query_genomes_arg="${arg#*=}" ;;
         --must-keep=*)     must_keep_arg="${arg#*=}" ;;
         --query-genomes|--must-keep) prev_flag="$arg" ;;
     esac
 done
+
+if [ "$download_only" = true ] && [ "$qc_only" = true ]; then
+    echo "ERROR: --download-only and --qc-only are mutually exclusive" >&2
+    exit 1
+fi
 
 # Resolve the genome-retention inputs while still in the caller's CWD (the paths
 #   may be relative). must_keep_set / query_paths are newline-delimited.
@@ -137,9 +162,11 @@ MAX_contam_default="0.2"
 
 #taxonomy_check=FALSE
 
-mkdir $wd
+# -p so --qc-only can run into a wd the caller pre-populated with assemblies_all.TMP/,
+#   and so a re-run doesn't error on the existing dir.
+mkdir -p $wd
 cd $wd || (echo $wd "doesnt exist...exiting" ; exit)
-mkdir ./assemblies_datasets_uniq
+mkdir -p ./assemblies_datasets_uniq
 echo "Output will be in $wd"
 
 # Pick a temp dir that is BOTH writable AND short, then point every temp-dir
@@ -174,19 +201,41 @@ echo "Using temp dir (writable + short for CheckM AF_UNIX sockets): $TMPDIR"
 #######################################################
 # comment out function calls ass needed
 main () {
-	get_NCBI_genomes
-	filter_NCBI_genomes
-	get_asm_metadata
-	get_non_datasets_assemblies
-	get_all_asm_list
-	get_biosample_GEOdata
-	merge_metadata_geoloc
-	all_sample_metadata
-	aggregate_assemblies "$wd"/assemblies_all.TMP
-	# Add user-supplied query genomes to the input set so they are QC'd
-	#   alongside the downloads (rather than bypassing the filter).
-	stage_query_genomes
-	#filter_asm_by_taxCheck
+	# --- Download half (skipped in --qc-only mode) ---
+	if [ "$qc_only" != true ]; then
+		get_NCBI_genomes
+		filter_NCBI_genomes
+		get_asm_metadata
+		get_non_datasets_assemblies
+		get_all_asm_list
+		get_biosample_GEOdata
+		merge_metadata_geoloc
+		all_sample_metadata
+		aggregate_assemblies "$wd"/assemblies_all.TMP
+		# Add user-supplied query genomes to the input set so they are QC'd
+		#   alongside the downloads (rather than bypassing the filter).
+		stage_query_genomes
+		#filter_asm_by_taxCheck
+	fi
+
+	# In --download-only mode, stop here: the raw, un-QC'd genomes are now in
+	#   $wd/assemblies_all.TMP/ for the caller to MASH-partition before QC.
+	if [ "$download_only" = true ]; then
+		echo "Download-only mode complete: raw assemblies in $wd/assemblies_all.TMP/"
+		return 0
+	fi
+
+	# --- QC half (skipped in --download-only mode, above) ---
+	# In --qc-only mode the caller must have pre-staged $wd/assemblies_all.TMP/*.fna.
+	if [ "$qc_only" = true ]; then
+		if [ ! -d "$wd"/assemblies_all.TMP ] || [ -z "$(ls -A "$wd"/assemblies_all.TMP/*.fna 2>/dev/null)" ]; then
+			echo "ERROR: --qc-only requires pre-staged genomes in $wd/assemblies_all.TMP/ (none found)" >&2
+			exit 1
+		fi
+		# Query genomes may have been staged into assemblies_all.TMP by the caller;
+		#   still record their stems so enforce_must_keep can cross-check them.
+		stage_query_genomes
+	fi
 
 	# Choose stats method based on flag
 	if [ "$use_bbmap" = true ]; then

@@ -216,4 +216,37 @@ python orthophyl_pipeline_wrapper.py \
 
 ---
 
+### Example 10: Cap Tree Size for Oversized Taxa (`--max-tree-genomes`)
+
+```bash
+python orthophyl_pipeline_wrapper.py \
+    --input assemblies.tsv \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --gather-script utils/gather_filter_asms.sh \
+    --max-tree-genomes 150 \
+    --threads 32
+```
+
+**Scenario**: A query routes to a novel genus (e.g. `Andreesenella`) that has far
+more assemblies on NCBI than OrthoPhyl can put into one tree.
+
+**What happens**:
+- The wrapper downloads the **raw** candidate set (`--download-only`, *before* the
+  expensive CheckM2 QC).
+- If the raw count exceeds `--max-tree-genomes`, MASH partitions the set into
+  size-bounded subclades named `Andreesenella_1`, `Andreesenella_2`, …
+- A tree is built **only for the subclade containing the query** — QC (CheckM2)
+  runs *only* on that subclade's genomes, then OrthoPhyl. The other subclades are
+  registered `built=false` and built lazily the first time a future query routes to
+  them.
+- Future queries are matched to a subclade by **MASH sequence distance** (nearest
+  member), since all subclades share one GTDB taxonomy string.
+
+`--taxon` create mode instead builds **all** subclades (there is no single query to
+target). See `readmes/README_ADVANCED_FEATURES.md` § *Subclade Partitioning* for the
+full flow and caveats.
+
+---
+
 [← Back to Main README](../README.md)

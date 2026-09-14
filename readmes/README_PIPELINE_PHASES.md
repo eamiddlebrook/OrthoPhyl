@@ -195,11 +195,51 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
 
 **Process**: Multi-stage workflow for each novel taxon
 
-### Stage 1: Download Genomes
+> **Subclade partitioning (`--max-tree-genomes`, default 150).** When a taxon
+> downloads more genomes than the ceiling, the raw set is MASH-partitioned into
+> size-bounded subclades (`<Taxon>_1`, `<Taxon>_2`, …) *before* QC, and a tree is
+> built only for the subclade(s) that contain a query. This reorders the stages
+> below: the download is split into a **`--download-only`** phase (Stage 1a) and a
+> per-subclade **`--qc-only`** phase (Stage 1c), with partitioning in between
+> (Stage 1b). When the raw count is under the ceiling the flow collapses to the
+> classic single-tree path (one QC pass on the whole set). See
+> `readmes/README_ADVANCED_FEATURES.md` § *Subclade Partitioning* for full detail.
 
-**Script**: `gather_filter_asms.sh`
+### Stage 1a: Download Genomes (raw, pre-QC)
+
+**Script**: `gather_filter_asms.sh --download-only`
+
+**Purpose**: Download candidate genomes from NCBI and stage them as raw FASTAs at
+`{download_dir}/assemblies_all.TMP/*.fna`, stopping before CheckM2 QC. Query
+genomes are staged here too so partitioning sees them as clustering leaves.
+
+**Checkpoint**: `download_{taxon_name}.flag`
+
+### Stage 1b: Partition into Subclades (only if raw count > `--max-tree-genomes`)
+
+**Script**: `python_scripts/subclade_partition.py`
+
+Runs `mash triangle -k 17 -s 5000 -E` on the raw set, clusters with
+average-linkage (UPGMA), and recursively splits so every subclade ≤
+`--max-tree-genomes`. Writes `partition_manifest.json`, a per-subclade `.msh`
+sketch, and a `.members.txt` list under `02_orthophyl_novel/partitions/{taxon}/`.
+Subclades with a query are built (Stage 1c → 3 → 4); the rest are registered
+`built=false` for lazy build-on-demand.
+
+**Checkpoint**: `partition_{taxon_name}` (resume re-reads the manifest, never
+re-runs mash, so subclade numbering is stable).
+
+### Stage 1c: Quality-Control a Subclade
+
+**Script**: `gather_filter_asms.sh --qc-only`
 
 **Purpose**: Download and filter high-quality genomes from NCBI
+
+The wrapper stages a subclade's raw members into a per-subclade
+`assemblies_all.TMP/` and runs QC **only** on those genomes (CheckM2 runs here,
+not at download time). For the unpartitioned case this is simply the whole raw
+set. The QC steps below are identical whether run as the classic combined
+download+QC or as this `--qc-only` phase.
 
 **Steps**:
 

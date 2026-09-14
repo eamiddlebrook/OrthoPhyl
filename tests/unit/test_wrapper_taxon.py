@@ -224,17 +224,29 @@ class TestTaxonCreateMode:
         
         # Track if _run_orthophyl was called
         orthophyl_called = []
-        
-        # Patch _download_genomes to create fake filtered genomes
-        def patched_download(taxon_name, output_dir):
-            genomes_to_keep = output_dir / "genomes_to_keep"
+
+        # Pre-QC ordering: create mode now downloads the RAW set first, then QCs
+        # only the subclade(s) it will build. Patch both stages. The raw set is
+        # small (2 genomes) so it stays under max_tree_genomes -> single build.
+        def patched_download_raw(taxon_name, output_dir, query_assemblies=None):
+            raw = output_dir / "assemblies_all.TMP"
+            raw.mkdir(parents=True, exist_ok=True)
+            (raw / "GCF_000001.1.fna").write_text(">fake1\nATCG\n")
+            (raw / "GCF_000002.1.fna").write_text(">fake2\nATCG\n")
+            return raw
+        monkeypatch.setattr(w, "_download_raw", patched_download_raw)
+
+        def patched_qc(subclade_dir, raw_member_paths, taxon_label,
+                       query_assemblies=None):
+            genomes_to_keep = subclade_dir / "genomes_to_keep"
             genomes_to_keep.mkdir(parents=True, exist_ok=True)
             (genomes_to_keep / "GCF_000001.1.fna").write_text(">fake1\nATCG\n")
             (genomes_to_keep / "GCF_000002.1.fna").write_text(">fake2\nATCG\n")
-            # Create success marker
-            (output_dir / ".download_complete").write_text(f"Download completed\nTaxon: {taxon_name}\nGenomes: 2\n")
-        monkeypatch.setattr(w, "_download_genomes", patched_download)
-        
+            (genomes_to_keep / "GCF_000003.1.fna").write_text(">fake3\nATCG\n")
+            (genomes_to_keep / "GCF_000004.1.fna").write_text(">fake4\nATCG\n")
+            return genomes_to_keep
+        monkeypatch.setattr(w, "_qc_subclade", patched_qc)
+
         # Patch _run_orthophyl to create fake output and track calls
         def patched_run_op(*args, **kwargs):
             orthophyl_called.append(args)

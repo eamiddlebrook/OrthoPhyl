@@ -77,10 +77,15 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │
   ├─► PHASE 3B: ORTHOPHYL ROUTE (Novel Taxa)
   │   └─ For each taxon:
-  │       ├─ gather_filter_asms.sh
-  │       │   ├─ Download genomes from NCBI
-  │       │   ├─ Stage query genomes into the input set
-  │       │   ├─ Run CheckM2/bbmap QC (downloads + queries)
+  │       ├─ gather_filter_asms.sh --download-only
+  │       │   ├─ Download raw genomes from NCBI (pre-QC)
+  │       │   └─ Stage query genomes into the raw set
+  │       ├─ subclade_partition.py  (only if raw count > --max-tree-genomes)
+  │       │   ├─ MASH-partition raw set into <Taxon>_1, <Taxon>_2, …
+  │       │   ├─ Build tree only for subclade(s) holding a query
+  │       │   └─ Register the rest built=false (lazy build on demand)
+  │       ├─ gather_filter_asms.sh --qc-only   (per built subclade)
+  │       │   ├─ Run CheckM2/bbmap QC (subclade members + queries)
   │       │   └─ Filter by quality; abort if a required genome fails
   │       ├─ OrthoPhyl.sh
   │       │   ├─ Annotate genomes

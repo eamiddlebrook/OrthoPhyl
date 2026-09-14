@@ -66,7 +66,9 @@ class PipelineWrapper:
         # NEW: Taxon mode parameters
         taxon: Optional[str] = None,
         taxon_rank: Optional[str] = None,
-        update_existing: bool = False
+        update_existing: bool = False,
+        # NEW: subclade partitioning
+        max_tree_genomes: int = 150
     ):
         # Validate mutually exclusive flags
         if input_file and taxon:
@@ -106,12 +108,18 @@ class PipelineWrapper:
         self.taxon_rank = taxon_rank
         self.update_existing = update_existing
         self.taxon_mode = taxon is not None
-        
+
+        # NEW: subclade partitioning. When a taxon's RAW downloaded genome set
+        #   exceeds this ceiling, MASH-partition it into <= max_tree_genomes
+        #   subclades and build a tree only for the subclade(s) actually needed.
+        self.max_tree_genomes = max_tree_genomes
+
         # Script paths (relative to this wrapper)
         self.script_dir = Path(__file__).parent
         self.assembly_router = self.script_dir / "assembly_router" / "assembly_router.py"
         self.database_creator = self.script_dir / "assembly_router" / "create_hierarchical_database.py"
         self.releaf_versioner = self.script_dir / "assembly_router" / "add_releaf_version.py"
+        self.subclade_partitioner = self.script_dir / "python_scripts" / "subclade_partition.py"
         self.orthophyl_script = self.script_dir / "OrthoPhyl.sh"
         self.releaf_script = self.script_dir / "ReLeaf.sh"
         
@@ -215,7 +223,11 @@ class PipelineWrapper:
         # Phase 3b: OrthoPhyl route
         if routing_results['orthophyl_batch']:
             self._phase_orthophyl(routing_results['orthophyl_batch'])
-        
+
+        # Phase 3c: lazy subclade-build route (build tree on demand, then ReLeaf)
+        if routing_results.get('subclade_build_batch'):
+            self._phase_subclade_build(routing_results['subclade_build_batch'])
+
         # Phase 4: Results aggregation
         self._phase_aggregation()
         
@@ -407,16 +419,21 @@ class PipelineWrapper:
         # Parse routing results
         routing_results = self._parse_routing_results()
         
+        subclade_build_count = sum(
+            len(v) for v in routing_results['subclade_build_batch'].values())
         logger.info(f"\nRouting Summary:")
         logger.info(f"  ReLeaf route: {len(routing_results['releaf_batch'])} assemblies")
         logger.info(f"  OrthoPhyl route: {sum(len(v) for v in routing_results['orthophyl_batch'].values())} assemblies")
         logger.info(f"    ({len(routing_results['orthophyl_batch'])} unique taxa)")
-        
+        logger.info(f"  Subclade-build route: {subclade_build_count} assemblies")
+        logger.info(f"    ({len(routing_results['subclade_build_batch'])} unbuilt subclades)")
+
         self._write_checkpoint('routing')
         self.pipeline_status['phases']['routing'] = {
             'status': 'complete',
             'releaf_count': len(routing_results['releaf_batch']),
-            'orthophyl_count': sum(len(v) for v in routing_results['orthophyl_batch'].values())
+            'orthophyl_count': sum(len(v) for v in routing_results['orthophyl_batch'].values()),
+            'subclade_build_count': subclade_build_count
         }
         
         return routing_results
@@ -425,12 +442,16 @@ class PipelineWrapper:
         """Parse routing decision JSON files."""
         releaf_batch = []
         orthophyl_batch = defaultdict(list)
-        
+        # Unbuilt subclades a query routed to: build the tree on demand, then ReLeaf.
+        # Grouped by subclade name so one build serves all queries that landed there.
+        subclade_build_batch = defaultdict(list)
+
         for json_file in self.routing_dir.glob("routing_decision_*.json"):
             with open(json_file, 'r') as f:
                 decision = json.load(f)
-            
-            if decision['pipeline'] == 'ReLeaf':
+
+            pipeline = decision['pipeline']
+            if pipeline == 'ReLeaf':
                 releaf_batch.append({
                     'assembly_id': decision['assembly_id'],
                     'assembly_path': decision['assembly'],
@@ -438,6 +459,25 @@ class PipelineWrapper:
                     'database_dir': decision['database_dir'],
                     'tree_method': decision.get('tree_method', 'iqtree'),
                     'tree_data': decision.get('tree_data', 'CDS')
+                })
+            elif pipeline == 'OrthoPhyl_subclade_build':
+                # Lazy subclade: registered (built=false) at partition time but never
+                # built because no query landed there then. This query is the first
+                # to route here, so the wrapper builds its tree, then ReLeafs.
+                sc_name = decision['subclade_name']
+                subclade_build_batch[sc_name].append({
+                    'assembly_id': decision['assembly_id'],
+                    'assembly_path': decision['assembly'],
+                    'subclade_name': sc_name,
+                    'parent_taxon': decision.get('parent_taxon'),
+                    'subclade_id': decision.get('subclade_id'),
+                    'database_dir': decision['database_dir'],
+                    'members_file': decision.get('members_file'),
+                    'sketch_file': decision.get('sketch_file'),
+                    'source_genome_dir': decision.get('source_genome_dir'),
+                    'taxonomy': decision.get('query_taxonomy'),
+                    'tree_method': decision.get('tree_method', 'iqtree'),
+                    'tree_data': decision.get('tree_data', 'CDS'),
                 })
             else:  # OrthoPhyl
                 taxon = decision['download_value']
@@ -448,10 +488,11 @@ class PipelineWrapper:
                     'taxonomy': decision['query_taxonomy'],
                     'download_taxonomy': decision['download_taxonomy']
                 })
-        
+
         return {
             'releaf_batch': releaf_batch,
-            'orthophyl_batch': dict(orthophyl_batch)
+            'orthophyl_batch': dict(orthophyl_batch),
+            'subclade_build_batch': dict(subclade_build_batch)
         }
     
     def _phase_releaf(self, releaf_batch: List[Dict]):
@@ -678,101 +719,365 @@ class PipelineWrapper:
             logger.info(f"\n{'=' * 60}")
             logger.info(f"Processing taxon: {taxon_name} ({len(assemblies)} assemblies)")
             logger.info(f"{'=' * 60}")
-            
-            # Stage 1: Download genomes
-            download_dir = self.orthophyl_dir / "downloads" / taxon_name
-            
-            # Check if download already completed successfully
-            download_complete = self._verify_download_complete(download_dir, taxon_name)
-            
-            if download_complete and self.resume:
-                logger.info(f"  ✓ Download already complete (resuming)")
-                genomes_to_keep = download_dir / "genomes_to_keep"
-                genome_files = list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta"))
-                logger.info(f"    Found {len(genome_files)} genomes")
-            elif not self.skip_download:
-                # Pass the query genomes so they are QC'd alongside the downloads.
-                self._download_genomes(taxon_name, download_dir, query_assemblies=assemblies)
-                self._write_checkpoint(f"download_{taxon_name}")
-            else:
-                logger.info(f"  Skipping download (--skip-download)")
-                # Verify genomes exist if skipping download
-                genomes_to_keep = download_dir / "genomes_to_keep"
-                if not genomes_to_keep.exists():
-                    raise FileNotFoundError(
-                        f"--skip-download specified but no genomes found at: {genomes_to_keep}\n"
-                        f"Please either:\n"
-                        f"  1. Remove --skip-download to allow downloading\n"
-                        f"  2. Manually place genomes in {genomes_to_keep}/"
-                    )
-            
-            # Stage 2: Ensure query genomes are present (fallback only).
-            # On a normal download run the query genomes were already QC-filtered
-            # by gather_filter_asms.sh (--query-genomes) and, if they passed (or
-            # were rescued via --keep-failing-query), copied into genomes_to_keep/
-            # as <stem>.fna. This loop only needs to add them when QC did not run
-            # at all (e.g. --skip-download). It is careful NOT to re-add a genome
-            # that QC already placed under its normalized <stem>.fna name, which
-            # would create a QC-bypassing duplicate.
-            genomes_to_keep = download_dir / "genomes_to_keep"
-            if not genomes_to_keep.exists():
-                genomes_to_keep.mkdir(parents=True, exist_ok=True)
-
-            logger.info(f"\n  Ensuring {len(assemblies)} query genomes are in the input set...")
-            for asm in assemblies:
-                src = Path(asm['assembly_path'])
-                normalized = genomes_to_keep / (src.stem + ".fna")
-                dst = genomes_to_keep / src.name
-                if normalized.exists() or dst.exists():
-                    continue  # already present (QC'd copy or prior fallback)
-                shutil.copy(src, normalized)
-                logger.info(f"    Added (no QC): {asm['assembly_id']}")
-
-            # Count total genomes
-            total_genomes = len(list(genomes_to_keep.glob("*.fna")))
-            logger.info(f"  Total genomes for OrthoPhyl: {total_genomes}")
-            
-            # Stage 3: Run OrthoPhyl
-            orthophyl_output = self.orthophyl_dir / "orthophyl_runs" / taxon_name
             try:
-                if not self._check_checkpoint(f"orthophyl_{taxon_name}") or not self.resume:
-                    self._run_orthophyl(
-                        input_dir=genomes_to_keep,
-                        output_dir=orthophyl_output,
-                        taxon_name=taxon_name,
-                        assemblies=assemblies
-                    )
-                    self._write_checkpoint(f"orthophyl_{taxon_name}")
-                else:
-                    logger.info(f"  ✓ OrthoPhyl already complete (resuming)")
-                
-                # Stage 4: Create database
-                if not self._check_checkpoint(f"database_{taxon_name}") or not self.resume:
-                    self._create_database_entry(
-                        taxon_name=taxon_name,
-                        orthophyl_output=orthophyl_output,
-                        taxonomy=assemblies[0]['download_taxonomy']
-                    )
-                    self._write_checkpoint(f"database_{taxon_name}")
-                else:
-                    logger.info(f"  ✓ Database already created (resuming)")
+                self._process_orthophyl_taxon(taxon_name, assemblies)
             except Exception as e:
                 logger.error(f"✗ OrthoPhyl failed for {taxon_name}: {e}")
                 # Continue with other taxa rather than failing entire pipeline
                 continue
-        
+
         self.pipeline_status['phases']['orthophyl'] = {
             'status': 'complete',
             'taxa_processed': len(orthophyl_batch)
         }
+
+    def _process_orthophyl_taxon(self, taxon_name: str, assemblies: List[Dict]):
+        """Handle one novel taxon: download RAW -> partition -> QC+build needed subclades.
+
+        Partitioning happens BEFORE the expensive CheckM2 QC: only the subclade(s)
+        that will actually become trees get QC'd. When the raw set fits under
+        max_tree_genomes, this collapses to the classic single-tree flow.
+        """
+        download_dir = self.orthophyl_dir / "downloads" / taxon_name
+
+        # ---- Stage 1: download the RAW genome set (no QC yet) ----
+        raw_dir = download_dir / "assemblies_all.TMP"
+        if self._check_checkpoint(f"download_{taxon_name}") and self.resume and raw_dir.exists():
+            logger.info(f"  ✓ Raw download already complete (resuming)")
+        elif not self.skip_download:
+            raw_dir = self._download_raw(taxon_name, download_dir, query_assemblies=assemblies)
+            self._write_checkpoint(f"download_{taxon_name}")
+        else:
+            logger.info(f"  Skipping download (--skip-download)")
+            if not raw_dir.exists():
+                raise FileNotFoundError(
+                    f"--skip-download specified but no raw genomes at: {raw_dir}\n"
+                    f"Provide raw FASTAs there or drop --skip-download.")
+
+        raw_files = (list(raw_dir.glob("*.fna")) + list(raw_dir.glob("*.fasta"))
+                     if raw_dir.exists() else [])
+        raw_count = len(raw_files)
+        logger.info(f"  Raw genomes downloaded: {raw_count}")
+
+        # ---- Stage 2: partition (only if over the ceiling) ----
+        if raw_count > self.max_tree_genomes:
+            logger.info(f"  Raw count {raw_count} > max_tree_genomes "
+                        f"{self.max_tree_genomes}: partitioning into subclades")
+            manifest = self._partition_genomes(taxon_name, raw_dir, assemblies)
+        else:
+            # Synthesize a single-subclade (unpartitioned) manifest covering the
+            # whole raw set -- the flow below is uniform either way.
+            manifest = {
+                'partitioned': False, 'parent_taxon': taxon_name,
+                'max_size': self.max_tree_genomes, 'n_subclades': 1,
+                'subclades': [{'subclade_id': 1, 'name': taxon_name,
+                               'n_genomes': raw_count, 'members_file': None,
+                               'sketch_file': None}],
+                'query_assignments': {Path(a['assembly_path']).name: taxon_name
+                                      for a in assemblies},
+            }
+
+        assignments = manifest.get('query_assignments', {})
+        subclades = manifest['subclades']
+
+        # ---- Stage 3: per-subclade QC + build / lazy-register ----
+        if not manifest.get('partitioned'):
+            # Whole raw set is one tree (classic behaviour, now with explicit QC).
+            entry = subclades[0]
+            self._build_subclade(
+                taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
+                query_assemblies=assemblies,
+                taxonomy=assemblies[0]['download_taxonomy'],
+                is_subclade=False)
+            return
+
+        # Partitioned: build subclades holding >=1 query; lazily register the rest.
+        query_by_subclade: Dict[str, List[Dict]] = {}
+        for asm in assemblies:
+            name = Path(asm['assembly_path']).name
+            sc = assignments.get(name)
+            query_by_subclade.setdefault(sc, []).append(asm)
+
+        for entry in subclades:
+            sc_name = entry['name']
+            queries_here = query_by_subclade.get(sc_name, [])
+            if queries_here:
+                logger.info(f"\n  Building subclade {sc_name} "
+                            f"({entry['n_genomes']} raw genomes, "
+                            f"{len(queries_here)} query)")
+                self._build_subclade(
+                    taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
+                    query_assemblies=queries_here,
+                    taxonomy=assemblies[0]['download_taxonomy'],
+                    is_subclade=True)
+            else:
+                logger.info(f"\n  Registering subclade {sc_name} for lazy build "
+                            f"({entry['n_genomes']} raw genomes, no query)")
+                self._register_lazy_subclade(
+                    taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
+                    taxonomy=assemblies[0]['download_taxonomy'])
+
+    def _phase_subclade_build(self, subclade_build_batch: Dict[str, List[Dict]]):
+        """Phase 3c: build lazily-registered subclades on demand, then ReLeaf.
+
+        Each key is an unbuilt subclade (registered built=false at partition time)
+        that a query has now routed to. For each we:
+          1. Re-stage the subclade's raw member FASTAs (recorded source_genome_dir).
+          2. QC + run OrthoPhyl on those raw members and promote the DB entry to
+             built=true (force-overwriting the placeholder). The query is NOT part
+             of this build -- the tree is the subclade's own genomes.
+          3. ReLeaf the waiting query assemblies onto the freshly-built tree.
+        A failure in one subclade is logged and skipped so others still proceed.
+        """
+        logger.info("\n" + "=" * 70)
+        logger.info("PHASE 3C: SUBCLADE-BUILD ROUTE (Lazy Subclades)")
+        logger.info("=" * 70)
+        logger.info(f"Building {len(subclade_build_batch)} unbuilt subclades on demand")
+
+        for sc_name, queries in subclade_build_batch.items():
+            logger.info(f"\n{'=' * 60}")
+            logger.info(f"Subclade: {sc_name} "
+                        f"({len(queries)} query assemblies waiting)")
+            logger.info(f"{'=' * 60}")
+            try:
+                self._process_subclade_build(sc_name, queries)
+            except Exception as e:
+                logger.error(f"✗ Subclade build failed for {sc_name}: {e}")
+                # Continue with other subclades rather than failing the whole run.
+                continue
+
+        self.pipeline_status['phases']['subclade_build'] = {
+            'status': 'complete',
+            'subclades_processed': len(subclade_build_batch)
+        }
+
+    def _process_subclade_build(self, sc_name: str, queries: List[Dict]):
+        """Build one lazy subclade from its raw members, then ReLeaf the queries."""
+        first = queries[0]
+        source_genome_dir = first.get('source_genome_dir')
+        if not source_genome_dir:
+            raise RuntimeError(
+                f"Subclade {sc_name} has no source_genome_dir recorded; cannot "
+                f"locate its raw members to build. Was it registered lazily?")
+        raw_dir = Path(source_genome_dir)
+        if not self.dry_run and not raw_dir.exists():
+            raise FileNotFoundError(
+                f"Raw member directory for subclade {sc_name} not found: {raw_dir}")
+
+        parent_taxon = first.get('parent_taxon')
+        taxonomy = first.get('taxonomy')
+
+        # Reconstruct the partition entry _build_subclade expects. members_file /
+        # sketch_file point at the in-DB copies written at lazy registration.
+        entry = {
+            'name': sc_name,
+            'subclade_id': first.get('subclade_id'),
+            'members_file': first.get('members_file'),
+            'sketch_file': first.get('sketch_file'),
+        }
+
+        # ---- Build the subclade tree from ITS OWN genomes (no query genomes). ----
+        # force=True promotes the built=false placeholder DB to a real built entry.
+        logger.info(f"\n  Building subclade {sc_name} from raw members in {raw_dir}")
+        self._build_subclade(
+            taxon_name=parent_taxon or sc_name,
+            entry=entry,
+            raw_dir=raw_dir,
+            query_assemblies=[],
+            taxonomy=taxonomy,
+            is_subclade=True,
+            force=True)
+
+        # ---- ReLeaf the waiting queries onto the freshly-built subclade. ----
+        db_dir = Path(first['database_dir'])
+        tree_method = first.get('tree_method', 'iqtree')
+        tree_data = first.get('tree_data', 'CDS')
+
+        input_dir = self.releaf_dir / sc_name / "input_genomes"
+        if not self.dry_run:
+            input_dir.mkdir(parents=True, exist_ok=True)
+            for asm in queries:
+                src = Path(asm['assembly_path'])
+                dst = input_dir / f"{asm['assembly_id']}.fna"
+                if not dst.exists():
+                    shutil.copy(src, dst)
+                logger.info(f"  Prepared query for ReLeaf: {asm['assembly_id']}")
+
+        logger.info(f"\n  ReLeaf {len(queries)} query assemblies onto {sc_name}")
+        self._run_releaf(
+            database_dir=db_dir,
+            input_genomes=input_dir,
+            output_dir=self.releaf_dir / sc_name,
+            tree_method=tree_method,
+            tree_data=tree_data,
+            database_name=sc_name,
+            n_assemblies=len(queries))
+
+    def _build_subclade(self, taxon_name: str, entry: Dict, raw_dir: Path,
+                        query_assemblies: List[Dict], taxonomy: str,
+                        is_subclade: bool, force: bool = False):
+        """QC one subclade's raw members, run OrthoPhyl, and create its DB entry.
+
+        For the unpartitioned case (is_subclade=False) sc_name == taxon_name and
+        the whole raw set is the member list. CheckM2 QC runs HERE (deferred from
+        partition time), only on this subclade's members.
+
+        force=True overwrites an existing DB dir for this subclade -- required when
+        building a subclade that was previously registered lazily (built=false), so
+        the placeholder entry is replaced by the real built=true one.
+        """
+        sc_name = entry['name']
+        sc_id = entry.get('subclade_id')
+        subclade_dir = self.orthophyl_dir / "downloads" / sc_name
+
+        # Determine this subclade's raw member paths.
+        member_names = self._read_members_file(entry.get('members_file'))
+        if member_names:
+            raw_members = [raw_dir / m for m in member_names]
+        else:
+            # Unpartitioned: everything in raw_dir.
+            raw_members = list(raw_dir.glob("*.fna")) + list(raw_dir.glob("*.fasta"))
+
+        ckey = sc_name  # checkpoint key component (already suffixed for subclades)
+
+        # ---- QC ----
+        if self._check_checkpoint(f"qc_{ckey}") and self.resume:
+            logger.info(f"  ✓ QC already complete for {sc_name} (resuming)")
+            genomes_to_keep = subclade_dir / "genomes_to_keep"
+        else:
+            genomes_to_keep = self._qc_subclade(
+                subclade_dir, raw_members, taxon_label=sc_name,
+                query_assemblies=query_assemblies)
+            self._write_checkpoint(f"qc_{ckey}")
+
+        # Ensure query genomes present (fallback, e.g. --skip-download / dry-run).
+        if not self.dry_run:
+            if not genomes_to_keep.exists():
+                genomes_to_keep.mkdir(parents=True, exist_ok=True)
+            for asm in query_assemblies:
+                src = Path(asm['assembly_path'])
+                normalized = genomes_to_keep / (src.stem + ".fna")
+                dst = genomes_to_keep / src.name
+                if normalized.exists() or dst.exists():
+                    continue
+                shutil.copy(src, normalized)
+                logger.info(f"    Added (no QC): {asm['assembly_id']}")
+
+            # Post-QC floor: OrthoPhyl needs >=4 genomes for SCO analysis.
+            n_kept = len(list(genomes_to_keep.glob("*.fna")) +
+                         list(genomes_to_keep.glob("*.fasta")))
+            logger.info(f"  Genomes passing QC for {sc_name}: {n_kept}")
+            if n_kept < 4:
+                raise RuntimeError(
+                    f"Subclade {sc_name} has only {n_kept} genomes after QC "
+                    f"(< 4 required for OrthoPhyl). Raw member count was "
+                    f"{len(raw_members)}; QC dropped too many. Consider raising "
+                    f"--max-tree-genomes or relaxing QC.")
+
+        # ---- OrthoPhyl ----
+        orthophyl_output = self.orthophyl_dir / "orthophyl_runs" / sc_name
+        if self._check_checkpoint(f"orthophyl_{ckey}") and self.resume:
+            logger.info(f"  ✓ OrthoPhyl already complete for {sc_name} (resuming)")
+        else:
+            self._run_orthophyl(
+                input_dir=genomes_to_keep,
+                output_dir=orthophyl_output,
+                taxon_name=sc_name,
+                assemblies=query_assemblies)
+            self._write_checkpoint(f"orthophyl_{ckey}")
+
+        # ---- Database entry ----
+        subclade_meta = None
+        if is_subclade:
+            subclade_meta = {
+                'is_subclade': True,
+                'parent_taxon': taxon_name,
+                'subclade_id': sc_id,
+                'sketch_file': entry.get('sketch_file'),
+                'members_file': entry.get('members_file'),
+                'source_genome_dir': str(raw_dir),
+                'built': True,
+            }
+        if self._check_checkpoint(f"database_{ckey}") and self.resume:
+            logger.info(f"  ✓ Database already created for {sc_name} (resuming)")
+        else:
+            self._create_database_entry(
+                taxon_name=sc_name,
+                orthophyl_output=orthophyl_output,
+                taxonomy=taxonomy,
+                subclade_meta=subclade_meta,
+                force=force)
+            self._write_checkpoint(f"database_{ckey}")
+
+    def _register_lazy_subclade(self, taxon_name: str, entry: Dict,
+                                raw_dir: Path, taxonomy: str):
+        """Register a subclade as built=false (no QC, no tree) via the DB creator.
+
+        Records its raw member list + sketch + source_genome_dir so a future query
+        routing here can QC + build it on demand.
+        """
+        sc_name = entry['name']
+        sc_id = entry.get('subclade_id')
+        ckey = sc_name
+
+        if self._check_checkpoint(f"database_{ckey}") and self.resume:
+            logger.info(f"  ✓ Lazy subclade already registered for {sc_name} (resuming)")
+            return
+
+        cmd = [
+            'python', str(self.database_creator),
+            '--single-clade', sc_name, taxonomy, str(raw_dir),
+            '--output-dir', str(self.database_dir),
+            '--is-subclade',
+            '--parent-taxon', taxon_name,
+            '--register-only',
+            '--n-genomes', str(entry.get('n_genomes', 0)),
+            '--source-genome-dir', str(raw_dir),
+        ]
+        if sc_id is not None:
+            cmd.extend(['--subclade-id', str(sc_id)])
+        if entry.get('sketch_file'):
+            cmd.extend(['--sketch-file', str(entry['sketch_file'])])
+        if entry.get('members_file'):
+            cmd.extend(['--members-file', str(entry['members_file'])])
+
+        if self.verbose:
+            logger.info(f"    Command: {' '.join(cmd)}")
+        if self.dry_run:
+            logger.info(f"  [DRY RUN] Would register lazy subclade {sc_name}")
+            return
+
+        log_file = self.logs_dir / f"database_{sc_name}.log"
+        with open(log_file, 'w') as f:
+            result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Lazy registration failed for {sc_name}. Check log: {log_file}")
+        logger.info(f"  ✓ Registered lazy subclade: {sc_name}_db (built=false)")
+        self._write_checkpoint(f"database_{ckey}")
     
-    def _download_genomes(self, taxon_name: str, output_dir: Path, query_assemblies: Optional[List[Dict]] = None):
-        """Download genomes using gather_filter_asms.sh.
+    def _download_genomes(self, taxon_name: str, output_dir: Path,
+                          query_assemblies: Optional[List[Dict]] = None,
+                          download_only: bool = False, qc_only: bool = False):
+        """Run gather_filter_asms.sh to download and/or QC-filter genomes.
 
         query_assemblies, if given, are the user's input assemblies; their FASTA
         paths are passed via --query-genomes so they are QC-filtered alongside the
         downloads instead of bypassing QC.
+
+        Modes (mutually exclusive; default runs the full download+QC pipeline as
+        before, byte-identical to prior behaviour):
+          download_only : run only the NCBI download + staging steps, stopping
+                          before CheckM2 QC. Raw genomes land at
+                          <output_dir>/assemblies_all.TMP/*.fna. No genomes_to_keep/
+                          or stats table is produced, so those checks are skipped.
+          qc_only       : skip the download; assume <output_dir>/assemblies_all.TMP/
+                          already holds the raw member FASTAs (the wrapper staged
+                          them). Runs only CheckM2 QC + filtering -> genomes_to_keep/.
         """
+        if download_only and qc_only:
+            raise ValueError("download_only and qc_only are mutually exclusive")
+
         if not self.gather_script:
             logger.warning(f"  No gather script provided, skipping download for {taxon_name}")
             logger.warning(f"  Please manually download genomes to: {output_dir}/genomes_to_keep/")
@@ -787,36 +1092,50 @@ class PipelineWrapper:
             str(self.threads)
         ]
 
-        # Add optional flags
-        if self.use_bbmap:
-            cmd.append('--use-bbmap')
-            logger.info(f"  Using bbmap statswrapper instead of CheckM2")
-        elif self.low_ram:
-            cmd.append('--lowmem')
-            logger.info(f"  Using CheckM2 --lowmem option (low RAM mode)")
+        if download_only:
+            cmd.append('--download-only')
+        elif qc_only:
+            cmd.append('--qc-only')
 
-        # Genome-retention controls. Pass the raw --must-keep value straight
-        #   through -- the gather script resolves list-vs-file itself.
-        if self.must_keep:
-            cmd.extend(['--must-keep', self.must_keep])
-            logger.info(f"  Enforcing must-keep genomes: {self.must_keep}")
+        # QC-time flags only matter when QC runs (full or qc_only). In
+        # download_only mode CheckM2 never runs, so skip them.
+        qc_runs = not download_only
+        if qc_runs:
+            if self.use_bbmap:
+                cmd.append('--use-bbmap')
+                logger.info(f"  Using bbmap statswrapper instead of CheckM2")
+            elif self.low_ram:
+                cmd.append('--lowmem')
+                logger.info(f"  Using CheckM2 --lowmem option (low RAM mode)")
+
+            # Genome-retention controls. Pass the raw --must-keep value straight
+            #   through -- the gather script resolves list-vs-file itself.
+            if self.must_keep:
+                cmd.extend(['--must-keep', self.must_keep])
+                logger.info(f"  Enforcing must-keep genomes: {self.must_keep}")
+            if self.keep_failing_query:
+                cmd.append('--keep-failing-query')
+                logger.info(f"  Query genomes failing QC will be kept with a warning")
+
+        # --query-genomes is needed by BOTH phases: download_only stages the query
+        # as a raw leaf (so partitioning sees it); qc_only QCs it. In full mode it
+        # does both. Only omit for a qc_only call with no queries in this subclade.
         if query_assemblies:
             query_paths = ','.join(str(Path(a['assembly_path'])) for a in query_assemblies)
             cmd.extend(['--query-genomes', query_paths])
-            logger.info(f"  Running {len(query_assemblies)} query genome(s) through QC")
-        if self.keep_failing_query:
-            cmd.append('--keep-failing-query')
-            logger.info(f"  Query genomes failing QC will be kept with a warning")
+            logger.info(f"  Including {len(query_assemblies)} query genome(s)")
 
-        logger.info(f"  Downloading genomes for {taxon_name}...")
+        mode_label = ("download-only" if download_only else
+                      "qc-only" if qc_only else "download+QC")
+        logger.info(f"  Running gather ({mode_label}) for {taxon_name}...")
         if self.verbose:
             logger.info(f"    Command: {' '.join(cmd)}")
         logger.info(f"    Output: {output_dir}")
-        
+
         if self.dry_run:
-            logger.info(f"  [DRY RUN] Would download genomes for {taxon_name}")
+            logger.info(f"  [DRY RUN] Would run gather ({mode_label}) for {taxon_name}")
             return
-        
+
         log_file = self.logs_dir / f"download_{taxon_name}.log"
         with open(log_file, 'w') as f:
             if self.verbose == 1:
@@ -837,10 +1156,24 @@ class PipelineWrapper:
                     stderr=subprocess.STDOUT,
                     text=True
                 )
-        
+
         if result.returncode != 0:
             raise RuntimeError(f"Genome download failed for {taxon_name}. Check log: {log_file}")
 
+        if download_only:
+            # No QC ran: verify only that raw genomes were materialized.
+            raw_dir = output_dir / "assemblies_all.TMP"
+            raw_files = list(raw_dir.glob("*.fna")) + list(raw_dir.glob("*.fasta"))
+            if not raw_files:
+                raise RuntimeError(
+                    f"Download-only completed but no raw genomes found in {raw_dir}\n"
+                    f"This could mean no genomes are available for taxon '{taxon_name}',\n"
+                    f"or an incorrect taxon name. Check log: {log_file}"
+                )
+            logger.info(f"  ✓ Downloaded {len(raw_files)} raw genomes (pre-QC)")
+            return
+
+        # QC ran (full or qc_only): validate the stats table and genomes_to_keep/.
         # Defense-in-depth: verify the QC stats table was actually populated.
         # If CheckM2 crashes (e.g. OOM), gather_filter_asms.sh can leave
         # assemblies_all.stats.txt as a header-only file, which causes the stats
@@ -875,11 +1208,11 @@ class PipelineWrapper:
                 f"Download appeared to succeed but expected directory not found: {genomes_to_keep}\n"
                 f"Check log: {log_file}"
             )
-        
+
         # Count downloaded genomes
         genome_files = list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta"))
         n_genomes = len(genome_files)
-        
+
         if n_genomes == 0:
             raise RuntimeError(
                 f"Download completed but no genomes found in {genomes_to_keep}\n"
@@ -889,15 +1222,130 @@ class PipelineWrapper:
                 f"  - Incorrect taxon name\n"
                 f"Check log: {log_file}"
             )
-        
+
         logger.info(f"  ✓ Downloaded and filtered {n_genomes} genomes")
-        
+
         # Write success marker for this download
         success_file = output_dir / ".download_complete"
         with open(success_file, 'w') as f:
             f.write(f"Download completed: {datetime.now().isoformat()}\n")
             f.write(f"Taxon: {taxon_name}\n")
             f.write(f"Genomes: {n_genomes}\n")
+
+    # ------------------------------------------------------------------ #
+    # Subclade partitioning helpers (pre-QC MASH partition -> lazy build)
+    # ------------------------------------------------------------------ #
+
+    def _download_raw(self, taxon_name: str, output_dir: Path,
+                      query_assemblies: Optional[List[Dict]] = None) -> Path:
+        """Download the RAW genome set (no QC) via gather --download-only.
+
+        Returns the directory holding the raw FASTAs (<output_dir>/assemblies_all.TMP).
+        Query genomes are staged into it as leaves so partitioning can see them.
+        """
+        self._download_genomes(taxon_name, output_dir,
+                               query_assemblies=query_assemblies, download_only=True)
+        return output_dir / "assemblies_all.TMP"
+
+    def _qc_subclade(self, subclade_dir: Path, raw_member_paths: List[Path],
+                     taxon_label: str,
+                     query_assemblies: Optional[List[Dict]] = None) -> Path:
+        """QC one subclade's raw members via gather --qc-only.
+
+        Stages the given raw member FASTAs into <subclade_dir>/assemblies_all.TMP/
+        (symlinks, falling back to copies), then runs CheckM2 QC + filtering.
+        Returns <subclade_dir>/genomes_to_keep.
+        """
+        raw_tmp = subclade_dir / "assemblies_all.TMP"
+        raw_tmp.mkdir(parents=True, exist_ok=True)
+
+        if not self.dry_run:
+            for src in raw_member_paths:
+                src = Path(src)
+                dst = raw_tmp / src.name
+                if dst.exists() or dst.is_symlink():
+                    continue
+                try:
+                    os.symlink(os.path.abspath(src), dst)
+                except OSError:
+                    shutil.copy(src, dst)
+
+        self._download_genomes(taxon_label, subclade_dir,
+                               query_assemblies=query_assemblies, qc_only=True)
+        return subclade_dir / "genomes_to_keep"
+
+    def _partition_genomes(self, taxon_name: str, raw_genome_dir: Path,
+                           query_assemblies: List[Dict]) -> Dict:
+        """Run subclade_partition.py on the RAW genome set; return the manifest dict.
+
+        Builds <orthophyl_dir>/partitions/<taxon>/ holding MASH_out, per-subclade
+        .msh/.members.txt, and partition_manifest.json. Every query stem must land
+        in exactly one subclade (it is a clustering leaf), which we assert.
+        """
+        part_dir = self.orthophyl_dir / "partitions" / taxon_name
+        part_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = part_dir / "partition_manifest.json"
+
+        # Resume: never re-mash (would risk renumbering) -- re-read the manifest.
+        if self.resume and manifest_path.exists():
+            logger.info(f"  ✓ Partition manifest exists (resuming): {manifest_path}")
+            with open(manifest_path) as f:
+                return json.load(f)
+
+        cmd = [
+            'python', str(self.subclade_partitioner),
+            '--genome-dir', str(raw_genome_dir),
+            '--taxon', taxon_name,
+            '--out-dir', str(part_dir),
+            '--max-size', str(self.max_tree_genomes),
+            '--threads', str(self.threads),
+        ]
+        for asm in query_assemblies:
+            cmd.extend(['--query', Path(asm['assembly_path']).name])
+
+        if self.verbose:
+            logger.info(f"    Command: {' '.join(cmd)}")
+        if self.dry_run:
+            logger.info(f"  [DRY RUN] Would partition {taxon_name} into subclades")
+            # Synthesize a trivial single-subclade manifest for dry-run flow.
+            return {
+                'partitioned': False, 'parent_taxon': taxon_name,
+                'max_size': self.max_tree_genomes, 'n_subclades': 1,
+                'subclades': [{'subclade_id': 1, 'name': taxon_name, 'n_genomes': 0,
+                               'members_file': None, 'sketch_file': None}],
+                'query_assignments': {Path(a['assembly_path']).name: taxon_name
+                                      for a in query_assemblies},
+            }
+
+        log_file = self.logs_dir / f"partition_{taxon_name}.log"
+        with open(log_file, 'w') as f:
+            result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Partitioning failed for {taxon_name}. Check log: {log_file}")
+
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+
+        # Invariant: every query stem lands in exactly one subclade.
+        assignments = manifest.get('query_assignments', {})
+        for asm in query_assemblies:
+            name = Path(asm['assembly_path']).name
+            if name not in assignments:
+                raise RuntimeError(
+                    f"Query {name} not assigned to any subclade in {manifest_path}; "
+                    f"partitioning invariant violated.")
+        return manifest
+
+    @staticmethod
+    def _read_members_file(members_file: Optional[str]) -> List[str]:
+        """Read a subclade .members.txt (one basename per line)."""
+        if not members_file:
+            return []
+        p = Path(members_file)
+        if not p.exists():
+            return []
+        with open(p) as f:
+            return [ln.strip() for ln in f if ln.strip()]
     
     def _run_orthophyl(
         self,
@@ -996,21 +1444,69 @@ class PipelineWrapper:
         self,
         taxon_name: str,
         orthophyl_output: Path,
-        taxonomy: str
+        taxonomy: str,
+        subclade_meta: Optional[Dict] = None,
+        force: bool = False
     ):
-        """Create new database entry from OrthoPhyl run."""
+        """Create new database entry from OrthoPhyl run.
+
+        When subclade_meta is given, the entry is written as a built subclade
+        (is_subclade + parent_taxon + sketch/members recorded) via the DB creator's
+        --single-clade path; otherwise the classic TSV --update path is used.
+
+        force=True passes --force so an existing DB dir is overwritten. Needed when
+        building a subclade that was previously registered lazily (built=false):
+        without it the DB creator refuses (FileExistsError) and the placeholder
+        entry survives instead of being promoted to built=true.
+        """
         logger.info(f"\n  Creating database entry for {taxon_name}...")
-        
+
+        if subclade_meta is not None:
+            # Built subclade: register a single clade carrying subclade metadata.
+            cmd = [
+                'python', str(self.database_creator),
+                '--single-clade', taxon_name, taxonomy, str(orthophyl_output),
+                '--output-dir', str(self.database_dir),
+                '--is-subclade',
+                '--parent-taxon', str(subclade_meta.get('parent_taxon')),
+            ]
+            if force:
+                cmd.append('--force')
+            if subclade_meta.get('subclade_id') is not None:
+                cmd.extend(['--subclade-id', str(subclade_meta['subclade_id'])])
+            if subclade_meta.get('sketch_file'):
+                cmd.extend(['--sketch-file', str(subclade_meta['sketch_file'])])
+            if subclade_meta.get('members_file'):
+                cmd.extend(['--members-file', str(subclade_meta['members_file'])])
+            if subclade_meta.get('source_genome_dir'):
+                cmd.extend(['--source-genome-dir', str(subclade_meta['source_genome_dir'])])
+
+            if self.verbose:
+                logger.info(f"    Command: {' '.join(cmd)}")
+            if self.dry_run:
+                logger.info(f"  [DRY RUN] Would create subclade database for {taxon_name}")
+                return
+
+            log_file = self.logs_dir / f"database_{taxon_name}.log"
+            with open(log_file, 'w') as f:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Database creation failed for {taxon_name}. Check log: {log_file}")
+            logger.info(f"  ✓ Database created: {taxon_name}_db (subclade of "
+                        f"{subclade_meta.get('parent_taxon')})")
+            return
+
         # Update orthophyl_runs.tsv
         tsv_file = self.database_dir / "orthophyl_runs.tsv"
-        
+
         # Append new entry
         with open(tsv_file, 'a') as f:
             f.write(f"{taxon_name}\t{orthophyl_output}\t{taxonomy}\n")
-        
+
         if self.verbose:
             logger.info(f"    Added to orthophyl_runs.tsv: {taxon_name}")
-        
+
         # Run database creator in update mode
         cmd = [
             'python', str(self.database_creator),
@@ -1018,10 +1514,10 @@ class PipelineWrapper:
             '--output-dir', str(self.database_dir),
             '--update'
         ]
-        
+
         if self.verbose:
             logger.info(f"    Command: {' '.join(cmd)}")
-        
+
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would create database for {taxon_name}")
             return
@@ -1233,8 +1729,9 @@ class PipelineWrapper:
         logger.info("    - Which assemblies match existing databases (→ ReLeaf)")
         logger.info("    - Which assemblies need new databases (→ OrthoPhyl)")
         logger.info("    Run without --dry-run to see actual routing decisions\n")
-        
-        return {'releaf_batch': releaf_batch, 'orthophyl_batch': dict(orthophyl_batch)}
+
+        return {'releaf_batch': releaf_batch, 'orthophyl_batch': dict(orthophyl_batch),
+                'subclade_build_batch': {}}
     
     def _check_existing_taxon_database(self) -> Optional[Dict]:
         """Check if a database exists for the specified taxon.
@@ -1329,55 +1826,85 @@ class PipelineWrapper:
             logger.error(f"  Please provide --gather-script utils/gather_filter_asms.sh")
             return 1
         
-        # Download assemblies using gather_filter_asms.sh (with QC filtering)
-        logger.info(f"\nDownloading and QC-filtering {self.taxon} assemblies...")
+        # Download the RAW assemblies (no QC yet) so we can MASH-partition before
+        # spending CheckM2 compute -- same pre-QC ordering as batch mode.
+        logger.info(f"\nDownloading {self.taxon} assemblies (raw, pre-QC)...")
         logger.info(f"  Using: {self.gather_script}")
         download_dir = self.output_dir / "downloaded_assemblies"
-        
-        if not self.skip_download and not self._verify_download_complete(download_dir, self.taxon):
-            self._download_genomes(self.taxon, download_dir)
-            self._write_checkpoint(f"download_{self.taxon}")
+        raw_dir = download_dir / "assemblies_all.TMP"
+
+        if (self.skip_download or
+                (self._check_checkpoint(f"download_{self.taxon}") and self.resume
+                 and raw_dir.exists())):
+            logger.info(f"  ✓ Raw download already complete, skipping")
         else:
-            logger.info(f"  ✓ Download already complete, skipping")
-        
-        # Verify filtered genomes exist
-        genomes_to_keep = download_dir / "genomes_to_keep"
-        if not genomes_to_keep.exists() or not list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta")):
-            logger.error(f"\n❌ ERROR: No genomes passed QC filtering")
-            logger.error(f"  Check {download_dir} for filtering logs")
+            raw_dir = self._download_raw(self.taxon, download_dir)
+            self._write_checkpoint(f"download_{self.taxon}")
+
+        raw_files = (list(raw_dir.glob("*.fna")) + list(raw_dir.glob("*.fasta"))
+                     if raw_dir.exists() else [])
+        raw_count = len(raw_files)
+        if raw_count == 0:
+            logger.error(f"\n❌ ERROR: No genomes downloaded for {self.taxon}")
+            logger.error(f"  Check {download_dir} for logs")
             return 1
-        
-        genome_count = len(list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta")))
-        logger.info(f"  ✓ {genome_count} genomes passed QC filtering")
-        
-        # Run OrthoPhyl on downloaded assemblies (using filtered genomes)
-        logger.info(f"\nRunning OrthoPhyl on {self.taxon} assemblies...")
-        orthophyl_output = self.output_dir / "orthophyl_run"
-        
-        self._run_orthophyl(
-            input_dir=genomes_to_keep,  # Use filtered genomes, not raw download_dir
-            output_dir=orthophyl_output,
-            taxon_name=self.taxon,
-            assemblies=[]  # No query assemblies in create mode
-        )
-        
-        # Create database with metadata. Accession metadata is derived from the
-        # QC-filtered genomes_to_keep/ dir (post-QC survivors), not a pre-QC
-        # NCBI query.
-        logger.info(f"\nCreating database for {self.taxon}...")
-        self._create_taxon_database(
-            taxon_name=self.taxon,
-            orthophyl_output=orthophyl_output,
-            gatherer=gatherer,
-            genomes_to_keep=genomes_to_keep
-        )
+        logger.info(f"  ✓ {raw_count} raw genomes downloaded")
+
+        # Partition if over the ceiling; create mode builds ALL subclades.
+        if raw_count > self.max_tree_genomes:
+            logger.info(f"  Raw count {raw_count} > max_tree_genomes "
+                        f"{self.max_tree_genomes}: partitioning into subclades")
+            manifest = self._partition_genomes(self.taxon, raw_dir, query_assemblies=[])
+        else:
+            manifest = {
+                'partitioned': False, 'parent_taxon': self.taxon,
+                'max_size': self.max_tree_genomes, 'n_subclades': 1,
+                'subclades': [{'subclade_id': 1, 'name': self.taxon,
+                               'n_genomes': raw_count, 'members_file': None,
+                               'sketch_file': None}],
+                'query_assignments': {},
+            }
+
+        taxonomy = gatherer.get_taxonomy_string()
+
+        if not manifest.get('partitioned'):
+            # Single tree: QC the whole raw set then build + taxon-flavored DB.
+            genomes_to_keep = self._qc_subclade(
+                download_dir, raw_files, taxon_label=self.taxon, query_assemblies=[])
+            kept = (list(genomes_to_keep.glob("*.fna")) +
+                    list(genomes_to_keep.glob("*.fasta")))
+            if len(kept) < 4:
+                logger.error(f"\n❌ ERROR: only {len(kept)} genomes passed QC (<4)")
+                return 1
+            orthophyl_output = self.output_dir / "orthophyl_run"
+            self._run_orthophyl(
+                input_dir=genomes_to_keep, output_dir=orthophyl_output,
+                taxon_name=self.taxon, assemblies=[])
+            logger.info(f"\nCreating database for {self.taxon}...")
+            self._create_taxon_database(
+                taxon_name=self.taxon, orthophyl_output=orthophyl_output,
+                gatherer=gatherer, genomes_to_keep=genomes_to_keep)
+            logger.info("=" * 70)
+            logger.info("TAXON MODE COMPLETE!")
+            logger.info("=" * 70)
+            logger.info(f"  Database created: {self.taxon}_db")
+            logger.info(f"  Assemblies: {len(kept)}")
+            self._save_final_status()
+            return 0
+
+        # Partitioned: build every subclade (create mode has no single query).
+        logger.info(f"  Building all {manifest['n_subclades']} subclades")
+        for entry in manifest['subclades']:
+            logger.info(f"\n  Building subclade {entry['name']} "
+                        f"({entry['n_genomes']} raw genomes)")
+            self._build_subclade(
+                taxon_name=self.taxon, entry=entry, raw_dir=raw_dir,
+                query_assemblies=[], taxonomy=taxonomy, is_subclade=True)
 
         logger.info("=" * 70)
         logger.info("TAXON MODE COMPLETE!")
         logger.info("=" * 70)
-        logger.info(f"  Database created: {self.taxon}_db")
-        logger.info(f"  Assemblies: {genome_count}")
-        
+        logger.info(f"  Subclade databases created: {manifest['n_subclades']}")
         self._save_final_status()
         return 0
     
@@ -1707,7 +2234,16 @@ Examples:
         action='store_true',
         help='Update existing database with new assemblies (taxon mode only)'
     )
-    
+    parser.add_argument(
+        '--max-tree-genomes',
+        type=int,
+        default=150,
+        help='Maximum genomes per tree/subclade. When a taxon downloads more raw '
+             'genomes than this, MASH-partition them into size-bounded subclades '
+             '(<Taxon>_1, <Taxon>_2, ...); build a tree only for the subclade(s) '
+             'containing a query (others are registered for lazy build). Default 150.'
+    )
+
     args = parser.parse_args()
     
     # Validate argument combinations (mutually_exclusive_group handles --input vs --taxon)
@@ -1737,9 +2273,10 @@ Examples:
         keep_failing_query=args.keep_failing_query,
         taxon=args.taxon,
         taxon_rank=args.taxon_rank,
-        update_existing=args.update_existing
+        update_existing=args.update_existing,
+        max_tree_genomes=args.max_tree_genomes
     )
-    
+
     return wrapper.run()
 
 

@@ -388,6 +388,72 @@ python orthophyl_pipeline_wrapper.py \
 
 ---
 
+### 10. Subclade Partitioning (`--max-tree-genomes`)
+
+Some taxa (large genera especially) have far more assemblies than OrthoPhyl can
+put into a single tree in reasonable time/RAM. The `ANI_shortlist` (`-n`) only
+shrinks the OrthoFinder step — the full genome set still lands in the final
+tree. To cap tree size, the pipeline wrapper can **partition an oversized taxon
+into MASH-based subclades** and build a tree only for the subclade(s) actually
+needed.
+
+```bash
+python orthophyl_pipeline_wrapper.py \
+    --input assemblies.tsv \
+    --database-dir /data/databases/ \
+    --output-dir /data/runs/ \
+    --gather-script utils/gather_filter_asms.sh \
+    --max-tree-genomes 150 \
+    --threads 64
+```
+
+**How it works** (novel-taxon / OrthoPhyl route):
+
+1. **Download raw, pre-QC.** The wrapper downloads the full candidate genome set
+   with `gather_filter_asms.sh --download-only` — it stops *before* the expensive
+   CheckM2 QC pass.
+2. **Partition.** If the raw count exceeds `--max-tree-genomes`,
+   `python_scripts/subclade_partition.py` runs `mash triangle` (all-vs-all, the
+   same `-k 17 -s 5000` parameters OrthoPhyl uses), clusters with average-linkage
+   (UPGMA), and recursively splits the tree so every subclade holds
+   ≤ `--max-tree-genomes` genomes. Subclades are numbered deterministically:
+   `Andreesenella_1`, `Andreesenella_2`, … A combined MASH sketch (`.msh`) and a
+   member list are written per subclade.
+3. **QC + build only what's needed.** For each subclade containing a query
+   genome, the wrapper stages that subclade's raw members, runs
+   `gather_filter_asms.sh --qc-only` (CheckM2 runs **here**, only on genomes that
+   will enter a tree), then runs OrthoPhyl and creates a database entry. This is
+   why QC comes *after* partitioning — genomes that never enter a tree are never
+   QC'd.
+4. **Register the rest lazily.** Subclades with no query are registered as
+   `built=false` database entries carrying their raw member list + sketch, but no
+   tree. Their tree is built on demand the first time a query routes to them.
+
+**Routing to subclades.** All subclades of a taxon share one GTDB taxonomy
+string, so the assembly router cannot tell them apart by taxonomy. Instead it
+sketches the query with MASH and compares it (`mash dist`) against each
+subclade's sketch, routing to the subclade holding the query's **nearest member**
+(minimum distance). If that subclade is already built, the query goes to ReLeaf;
+if it is an unbuilt (lazy) subclade, the router emits an
+`OrthoPhyl_subclade_build` decision and the wrapper QCs + builds it before ReLeaf.
+
+**`--taxon` create mode** builds **all** subclades (there is no single query to
+target).
+
+**Notes and caveats:**
+
+- `--max-tree-genomes` is a ceiling compared against the *raw* (pre-QC) count, so
+  a subclade will usually end up somewhat smaller than the ceiling after QC.
+- Because QC runs per-subclade, `--must-keep` is enforced only within the
+  subclade(s) actually built — it does not guarantee co-location of accessions in
+  the same subclade.
+- If a subclade drops below OrthoPhyl's 4-genome minimum after QC, the build for
+  that subclade fails with a clear error (raise `--max-tree-genomes` or relax QC).
+- Partitioning is deterministic (sorted input + UPGMA + size-desc numbering), so
+  subclade names are stable across runs — required for `--resume` and lazy build.
+
+---
+
 ---
 
 [← Back to Main README](../README.md)
