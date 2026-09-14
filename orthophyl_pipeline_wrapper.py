@@ -68,7 +68,8 @@ class PipelineWrapper:
         taxon_rank: Optional[str] = None,
         update_existing: bool = False,
         # NEW: subclade partitioning
-        max_tree_genomes: int = 150
+        max_tree_genomes: int = 150,
+        max_total_genomes: int = 5000
     ):
         # Validate mutually exclusive flags
         if input_file and taxon:
@@ -113,6 +114,14 @@ class PipelineWrapper:
         #   exceeds this ceiling, MASH-partition it into <= max_tree_genomes
         #   subclades and build a tree only for the subclade(s) actually needed.
         self.max_tree_genomes = max_tree_genomes
+
+        # Guardrail: the partitioner runs an all-vs-all `mash triangle` and builds a
+        #   DENSE NxN distance matrix (subclade_partition.py), which is O(n^2) in both
+        #   time and memory -- e.g. ~20 GB just for the matrix at n=50k. Above this
+        #   ceiling we refuse to partition rather than OOM-kill the node. The coming
+        #   --subsample / --megatree strategies are the supported way to handle very
+        #   large taxa; until one is selected, this is a hard stop.
+        self.max_total_genomes = max_total_genomes
 
         # Script paths (relative to this wrapper)
         self.script_dir = Path(__file__).parent
@@ -761,6 +770,7 @@ class PipelineWrapper:
 
         # ---- Stage 2: partition (only if over the ceiling) ----
         if raw_count > self.max_tree_genomes:
+            self._enforce_total_genome_ceiling(taxon_name, raw_count)
             logger.info(f"  Raw count {raw_count} > max_tree_genomes "
                         f"{self.max_tree_genomes}: partitioning into subclades")
             manifest = self._partition_genomes(taxon_name, raw_dir, assemblies)
@@ -1273,6 +1283,33 @@ class PipelineWrapper:
         self._download_genomes(taxon_label, subclade_dir,
                                query_assemblies=query_assemblies, qc_only=True)
         return subclade_dir / "genomes_to_keep"
+
+    def _enforce_total_genome_ceiling(self, taxon_name: str, raw_count: int):
+        """Refuse to partition an over-large raw set (guardrail).
+
+        The partitioner's dense NxN MASH-distance matrix is O(n^2) in time and
+        memory; past a few thousand genomes it OOM-kills the node. Rather than
+        fail opaquely mid-`mash triangle`, stop here with actionable guidance.
+
+        This is a hard stop until one of the large-taxon strategies (--subsample
+        to build one tree from a diverse subset, or --megatree to build per-
+        subclade trees and merge) is selected. Both will route around this check
+        with their own bounded handling.
+        """
+        if raw_count <= self.max_total_genomes:
+            return
+        raise RuntimeError(
+            f"Taxon '{taxon_name}' has {raw_count} raw genomes, exceeding the "
+            f"--max-total-genomes ceiling of {self.max_total_genomes}.\n"
+            f"Partitioning builds an all-vs-all MASH distance matrix that grows "
+            f"as O(n^2) in memory (~{(raw_count ** 2 * 8) / 1e9:.1f} GB at this "
+            f"size) and would likely exhaust RAM.\n"
+            f"Options:\n"
+            f"  - Choose a more specific taxon/rank so fewer genomes are pulled.\n"
+            f"  - Raise --max-total-genomes if you have the memory for an "
+            f"{raw_count}x{raw_count} matrix.\n"
+            f"  - Use a large-taxon strategy (--subsample / --megatree) once "
+            f"available.")
 
     def _partition_genomes(self, taxon_name: str, raw_genome_dir: Path,
                            query_assemblies: List[Dict]) -> Dict:
@@ -1852,6 +1889,7 @@ class PipelineWrapper:
 
         # Partition if over the ceiling; create mode builds ALL subclades.
         if raw_count > self.max_tree_genomes:
+            self._enforce_total_genome_ceiling(self.taxon, raw_count)
             logger.info(f"  Raw count {raw_count} > max_tree_genomes "
                         f"{self.max_tree_genomes}: partitioning into subclades")
             manifest = self._partition_genomes(self.taxon, raw_dir, query_assemblies=[])
@@ -2285,6 +2323,16 @@ Examples:
              '(<Taxon>_1, <Taxon>_2, ...); build a tree only for the subclade(s) '
              'containing a query (others are registered for lazy build). Default 150.'
     )
+    parser.add_argument(
+        '--max-total-genomes',
+        type=int,
+        default=5000,
+        help='Guardrail: refuse to MASH-partition a raw genome set larger than this. '
+             'Partitioning builds an all-vs-all distance matrix that grows O(n^2) in '
+             'memory (~20 GB at 50k genomes), so very large taxa are stopped with '
+             'guidance rather than OOM-killing the node. Raise it if you have the RAM, '
+             'or narrow the taxon. Default 5000.'
+    )
 
     args = parser.parse_args()
     
@@ -2316,7 +2364,8 @@ Examples:
         taxon=args.taxon,
         taxon_rank=args.taxon_rank,
         update_existing=args.update_existing,
-        max_tree_genomes=args.max_tree_genomes
+        max_tree_genomes=args.max_tree_genomes,
+        max_total_genomes=args.max_total_genomes
     )
 
     return wrapper.run()

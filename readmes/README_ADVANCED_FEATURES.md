@@ -451,6 +451,11 @@ target).
   that subclade fails with a clear error (raise `--max-tree-genomes` or relax QC).
 - Partitioning is deterministic (sorted input + UPGMA + size-desc numbering), so
   subclade names are stable across runs — required for `--resume` and lazy build.
+- **`--max-total-genomes` (default 5000)** guards the partitioner itself: it builds
+  a dense `N×N` MASH distance matrix that is O(n²) in memory (~20 GB at n=50k), so
+  a raw set larger than this ceiling is refused with actionable guidance rather than
+  OOM-killing the node. Narrow the taxon/rank, raise the ceiling if you have the RAM,
+  or (once available) use the `--subsample` / `--megatree` large-taxon strategies.
 
 ---
 

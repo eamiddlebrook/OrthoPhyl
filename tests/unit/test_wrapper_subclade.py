@@ -270,6 +270,68 @@ class TestCreateModeBuildsAll:
         assert sorted(built) == ["Andreesenella_1", "Andreesenella_2"]
 
 
+class TestTotalGenomeGuardrail:
+    """The O(n^2) MASH matrix must not be built for an over-large raw set."""
+
+    def test_over_total_ceiling_raises_before_partitioning(self, Wrapper, tmp_path, monkeypatch):
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, max_total_genomes=6)
+
+        def fake_dl_raw(taxon, output_dir, query_assemblies=None):
+            d = output_dir / "assemblies_all.TMP"
+            d.mkdir(parents=True, exist_ok=True)
+            for i in range(8):  # 8 > max_total_genomes (6)
+                (d / f"g{i}.fna").write_text(">c\nAC\n")
+            return d
+        monkeypatch.setattr(w, "_download_raw", fake_dl_raw)
+        monkeypatch.setattr(w, "_partition_genomes",
+                            lambda *a, **k: pytest.fail("must not partition over ceiling"))
+
+        with pytest.raises(RuntimeError, match="max-total-genomes"):
+            w._process_orthophyl_taxon("Andreesenella", [_query(tmp_path)])
+
+    def test_under_total_ceiling_still_partitions(self, Wrapper, tmp_path, monkeypatch):
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, max_total_genomes=100)
+
+        def fake_dl_raw(taxon, output_dir, query_assemblies=None):
+            d = output_dir / "assemblies_all.TMP"
+            d.mkdir(parents=True, exist_ok=True)
+            for i in range(8):  # 8 > tree ceiling (5) but < total ceiling (100)
+                (d / f"g{i}.fna").write_text(">c\nAC\n")
+            return d
+        monkeypatch.setattr(w, "_download_raw", fake_dl_raw)
+
+        manifest = {
+            "partitioned": True, "parent_taxon": "Andreesenella",
+            "max_size": 5, "n_subclades": 1,
+            "subclades": [{"subclade_id": 1, "name": "Andreesenella_1",
+                           "n_genomes": 8, "members_file": None, "sketch_file": None}],
+            "query_assignments": {"GCF_query.fna": "Andreesenella_1"},
+        }
+        part_called = []
+        monkeypatch.setattr(w, "_partition_genomes",
+                            lambda *a, **k: part_called.append(1) or manifest)
+        monkeypatch.setattr(w, "_build_subclade", lambda **k: None)
+        monkeypatch.setattr(w, "_register_lazy_subclade", lambda **k: None)
+
+        w._process_orthophyl_taxon("Andreesenella", [_query(tmp_path)])
+        assert part_called == [1]
+
+    def test_helper_message_reports_matrix_size(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path, max_total_genomes=1000)
+        with pytest.raises(RuntimeError) as exc:
+            w._enforce_total_genome_ceiling("BigGenus", 50000)
+        msg = str(exc.value)
+        assert "50000" in msg
+        assert "BigGenus" in msg
+        # ~20 GB matrix at 50k (50000^2 * 8 bytes = 20 GB)
+        assert "20.0 GB" in msg
+
+    def test_at_ceiling_is_allowed(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path, max_total_genomes=10)
+        # Exactly at the ceiling must not raise.
+        w._enforce_total_genome_ceiling("Foo", 10)
+
+
 def _write_decision(routing_dir, idx, decision):
     import json
     routing_dir.mkdir(parents=True, exist_ok=True)
