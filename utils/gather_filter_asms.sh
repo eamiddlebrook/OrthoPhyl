@@ -154,7 +154,7 @@ MIN_GC="default"
 MAX_GC="default"
 MAX_dup="default"
 MIN_completeness="95"
-MAX_contam="1.0"
+MAX_contam="3.0"
 
 MAX_dup_default="0.02"
 MIN_completness_default="98"
