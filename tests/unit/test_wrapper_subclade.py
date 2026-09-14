@@ -1,11 +1,13 @@
-"""Tests for subclade partitioning wiring in orthophyl_pipeline_wrapper.py.
+"""Tests for large-taxon wiring in orthophyl_pipeline_wrapper.py.
 
-Covers the pre-QC partition ordering:
-  * raw set under the ceiling -> single build (is_subclade=False)
-  * raw set over the ceiling  -> partition; build query subclades, lazy-register rest
-  * create mode over ceiling  -> build ALL subclades
+The DEFAULT large-taxon behavior is diverse subsampling to one tree:
+  * raw set under the ceiling -> single build (is_subclade=False), no subsample
+  * raw set over the ceiling  -> diverse-subsample to --subsample-size, single build
+  * create mode over ceiling  -> subsample, single taxon-flavored DB
   * gather split issues --download-only then --qc-only
-All heavy steps (mash, gather, OrthoPhyl, DB creator) are mocked.
+The per-subclade partition/lazy-build path is retained (opt-in megatree, wired in
+a later commit) and still covered by the parse/build-phase tests below.
+All heavy steps (mash, subsample, gather, OrthoPhyl, DB creator) are mocked.
 """
 
 from pathlib import Path
@@ -93,75 +95,72 @@ class TestProcessOrthophylTaxon:
         assert len(built) == 1
         assert built[0]["is_subclade"] is False
 
-    def test_over_ceiling_builds_query_subclade_registers_rest(
+    def test_over_ceiling_subsamples_then_single_build(
             self, Wrapper, tmp_path, monkeypatch):
-        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5)
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, subsample_size=4)
 
         def fake_dl_raw(taxon, output_dir, query_assemblies=None):
             d = output_dir / "assemblies_all.TMP"
             d.mkdir(parents=True, exist_ok=True)
-            for i in range(8):
+            for i in range(8):  # 8 > ceiling (5) -> subsample
                 (d / f"g{i}.fna").write_text(">c\nAC\n")
             return d
         monkeypatch.setattr(w, "_download_raw", fake_dl_raw)
 
-        # Two subclades; query lands in Andreesenella_2.
-        manifest = {
-            "partitioned": True, "parent_taxon": "Andreesenella",
-            "max_size": 5, "n_subclades": 2,
-            "subclades": [
-                {"subclade_id": 1, "name": "Andreesenella_1", "n_genomes": 5,
-                 "members_file": None, "sketch_file": None},
-                {"subclade_id": 2, "name": "Andreesenella_2", "n_genomes": 3,
-                 "members_file": None, "sketch_file": None},
-            ],
-            "query_assignments": {"GCF_query.fna": "Andreesenella_2"},
-        }
-        monkeypatch.setattr(w, "_partition_genomes", lambda *a, **k: manifest)
-
-        built, registered = [], []
-        monkeypatch.setattr(w, "_build_subclade", lambda **k: built.append(k["entry"]["name"]))
-        monkeypatch.setattr(w, "_register_lazy_subclade",
-                            lambda **k: registered.append(k["entry"]["name"]))
-
-        w._process_orthophyl_taxon("Andreesenella", [_query(tmp_path)])
-        assert built == ["Andreesenella_2"]
-        assert registered == ["Andreesenella_1"]
-
-    def test_multi_query_split_builds_each(self, Wrapper, tmp_path, monkeypatch):
-        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5)
-
-        def fake_dl_raw(taxon, output_dir, query_assemblies=None):
-            d = output_dir / "assemblies_all.TMP"
-            d.mkdir(parents=True, exist_ok=True)
-            for i in range(8):
-                (d / f"g{i}.fna").write_text(">c\nAC\n")
-            return d
-        monkeypatch.setattr(w, "_download_raw", fake_dl_raw)
-
-        q1 = _query(tmp_path, "GCF_q1")
-        q2 = _query(tmp_path, "GCF_q2")
-        manifest = {
-            "partitioned": True, "parent_taxon": "Andreesenella",
-            "max_size": 5, "n_subclades": 2,
-            "subclades": [
-                {"subclade_id": 1, "name": "Andreesenella_1", "n_genomes": 5,
-                 "members_file": None, "sketch_file": None},
-                {"subclade_id": 2, "name": "Andreesenella_2", "n_genomes": 3,
-                 "members_file": None, "sketch_file": None},
-            ],
-            "query_assignments": {"GCF_q1.fna": "Andreesenella_1",
-                                  "GCF_q2.fna": "Andreesenella_2"},
-        }
-        monkeypatch.setattr(w, "_partition_genomes", lambda *a, **k: manifest)
+        # Subsample returns a dir of 4 selected genomes; query stem seeds it.
+        sub_calls = []
+        def fake_subsample(taxon, raw_dir, target, must_keep_stems=None):
+            sub_calls.append({"taxon": taxon, "target": target,
+                              "seeds": must_keep_stems})
+            sel = w.orthophyl_dir / "subsample" / taxon / "selected"
+            sel.mkdir(parents=True, exist_ok=True)
+            for i in range(4):
+                (sel / f"g{i}.fna").write_text(">c\nAC\n")
+            return sel
+        monkeypatch.setattr(w, "_subsample_genomes", fake_subsample)
+        # Partitioning must NOT be used on the default path.
+        monkeypatch.setattr(w, "_partition_genomes",
+                            lambda *a, **k: pytest.fail("default path must subsample, not partition"))
 
         built = []
-        monkeypatch.setattr(w, "_build_subclade", lambda **k: built.append(k["entry"]["name"]))
+        monkeypatch.setattr(w, "_build_subclade", lambda **k: built.append(k))
         monkeypatch.setattr(w, "_register_lazy_subclade",
-                            lambda **k: pytest.fail("both subclades have queries"))
+                            lambda **k: pytest.fail("no lazy register on subsample path"))
 
-        w._process_orthophyl_taxon("Andreesenella", [q1, q2])
-        assert sorted(built) == ["Andreesenella_1", "Andreesenella_2"]
+        w._process_orthophyl_taxon("Andreesenella", [_query(tmp_path)])
+
+        # Subsampled once, to --subsample-size, seeded by the query stem.
+        assert len(sub_calls) == 1
+        assert sub_calls[0]["target"] == 4
+        assert "GCF_query" in sub_calls[0]["seeds"]
+        # One tree over the subsampled set (not a subclade).
+        assert len(built) == 1
+        assert built[0]["is_subclade"] is False
+        assert built[0]["entry"]["name"] == "Andreesenella"
+
+    def test_subsample_size_threads_through(self, Wrapper, tmp_path, monkeypatch):
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, subsample_size=42)
+
+        def fake_dl_raw(taxon, output_dir, query_assemblies=None):
+            d = output_dir / "assemblies_all.TMP"
+            d.mkdir(parents=True, exist_ok=True)
+            for i in range(8):
+                (d / f"g{i}.fna").write_text(">c\nAC\n")
+            return d
+        monkeypatch.setattr(w, "_download_raw", fake_dl_raw)
+
+        seen = {}
+        def fake_subsample(taxon, raw_dir, target, must_keep_stems=None):
+            seen["target"] = target
+            sel = w.orthophyl_dir / "subsample" / taxon / "selected"
+            sel.mkdir(parents=True, exist_ok=True)
+            (sel / "g0.fna").write_text(">c\nAC\n")
+            return sel
+        monkeypatch.setattr(w, "_subsample_genomes", fake_subsample)
+        monkeypatch.setattr(w, "_build_subclade", lambda **k: None)
+
+        w._process_orthophyl_taxon("Andreesenella", [_query(tmp_path)])
+        assert seen["target"] == 42
 
 
 class TestGatherSplitArgv:
@@ -224,10 +223,10 @@ class TestGatherSplitArgv:
         assert "--must-keep" in qc_cmd
 
 
-class TestCreateModeBuildsAll:
-    def test_partitioned_create_builds_all_subclades(self, Wrapper, tmp_path, monkeypatch):
+class TestCreateModeSubsamples:
+    def test_over_ceiling_create_subsamples_single_db(self, Wrapper, tmp_path, monkeypatch):
         w = _make_wrapper(Wrapper, tmp_path, input_file=None, taxon="Andreesenella",
-                          max_tree_genomes=5)
+                          max_tree_genomes=5, subsample_size=4)
 
         # Stub the gatherer import path used inside _run_taxon_create_mode.
         class FakeGatherer:
@@ -243,78 +242,49 @@ class TestCreateModeBuildsAll:
         def fake_dl_raw(taxon, output_dir, query_assemblies=None):
             d = output_dir / "assemblies_all.TMP"
             d.mkdir(parents=True, exist_ok=True)
-            for i in range(8):
+            for i in range(8):  # 8 > ceiling (5) -> subsample
                 (d / f"g{i}.fna").write_text(">c\nAC\n")
             return d
         monkeypatch.setattr(w, "_download_raw", fake_dl_raw)
 
-        manifest = {
-            "partitioned": True, "parent_taxon": "Andreesenella",
-            "max_size": 5, "n_subclades": 2,
-            "subclades": [
-                {"subclade_id": 1, "name": "Andreesenella_1", "n_genomes": 5,
-                 "members_file": None, "sketch_file": None},
-                {"subclade_id": 2, "name": "Andreesenella_2", "n_genomes": 3,
-                 "members_file": None, "sketch_file": None},
-            ],
-            "query_assignments": {},
-        }
-        monkeypatch.setattr(w, "_partition_genomes", lambda *a, **k: manifest)
+        sub_calls = []
+        def fake_subsample(taxon, raw_dir, target, must_keep_stems=None):
+            sub_calls.append(target)
+            sel = w.orthophyl_dir / "subsample" / taxon / "selected"
+            sel.mkdir(parents=True, exist_ok=True)
+            for i in range(4):
+                (sel / f"g{i}.fna").write_text(">c\nAC\n")
+            return sel
+        monkeypatch.setattr(w, "_subsample_genomes", fake_subsample)
+        monkeypatch.setattr(w, "_partition_genomes",
+                            lambda *a, **k: pytest.fail("create mode must subsample, not partition"))
 
-        built = []
-        monkeypatch.setattr(w, "_build_subclade", lambda **k: built.append(k["entry"]["name"]))
+        # Single-tree QC + build + DB path.
+        def fake_qc(subclade_dir, raw, taxon_label, query_assemblies=None):
+            gtk = subclade_dir / "genomes_to_keep"
+            gtk.mkdir(parents=True, exist_ok=True)
+            for i in range(4):
+                (gtk / f"g{i}.fna").write_text(">c\nAC\n")
+            return gtk
+        monkeypatch.setattr(w, "_qc_subclade", fake_qc)
+        monkeypatch.setattr(w, "_run_orthophyl", lambda **k: None)
+        db_calls = []
+        monkeypatch.setattr(w, "_create_taxon_database", lambda **k: db_calls.append(k))
         monkeypatch.setattr(w, "_save_final_status", lambda: None)
 
         rc = w._run_taxon_create_mode()
         assert rc == 0
-        assert sorted(built) == ["Andreesenella_1", "Andreesenella_2"]
+        assert sub_calls == [4]                     # subsampled to --subsample-size
+        assert len(db_calls) == 1                    # one taxon-flavored DB
+        assert db_calls[0]["taxon_name"] == "Andreesenella"
 
 
 class TestTotalGenomeGuardrail:
-    """The O(n^2) MASH matrix must not be built for an over-large raw set."""
+    """The O(n^2) MASH matrix guardrail for the opt-in partition/megatree path.
 
-    def test_over_total_ceiling_raises_before_partitioning(self, Wrapper, tmp_path, monkeypatch):
-        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, max_total_genomes=6)
-
-        def fake_dl_raw(taxon, output_dir, query_assemblies=None):
-            d = output_dir / "assemblies_all.TMP"
-            d.mkdir(parents=True, exist_ok=True)
-            for i in range(8):  # 8 > max_total_genomes (6)
-                (d / f"g{i}.fna").write_text(">c\nAC\n")
-            return d
-        monkeypatch.setattr(w, "_download_raw", fake_dl_raw)
-        monkeypatch.setattr(w, "_partition_genomes",
-                            lambda *a, **k: pytest.fail("must not partition over ceiling"))
-
-        with pytest.raises(RuntimeError, match="max-total-genomes"):
-            w._process_orthophyl_taxon("Andreesenella", [_query(tmp_path)])
-
-    def test_under_total_ceiling_still_partitions(self, Wrapper, tmp_path, monkeypatch):
-        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, max_total_genomes=100)
-
-        def fake_dl_raw(taxon, output_dir, query_assemblies=None):
-            d = output_dir / "assemblies_all.TMP"
-            d.mkdir(parents=True, exist_ok=True)
-            for i in range(8):  # 8 > tree ceiling (5) but < total ceiling (100)
-                (d / f"g{i}.fna").write_text(">c\nAC\n")
-            return d
-        monkeypatch.setattr(w, "_download_raw", fake_dl_raw)
-
-        manifest = {
-            "partitioned": True, "parent_taxon": "Andreesenella",
-            "max_size": 5, "n_subclades": 1,
-            "subclades": [{"subclade_id": 1, "name": "Andreesenella_1",
-                           "n_genomes": 8, "members_file": None, "sketch_file": None}],
-            "query_assignments": {"GCF_query.fna": "Andreesenella_1"},
-        }
-        part_called = []
-        monkeypatch.setattr(w, "_partition_genomes",
-                            lambda *a, **k: part_called.append(1) or manifest)
-        monkeypatch.setattr(w, "_build_subclade", lambda **k: None)
-        monkeypatch.setattr(w, "_register_lazy_subclade", lambda **k: None)
-
-        w._process_orthophyl_taxon("Andreesenella", [_query(tmp_path)])
-        assert part_called == [1]
+    The DEFAULT large-taxon path subsamples and never builds the matrix, so it no
+    longer routes through this check; the guardrail is exercised directly here and
+    will gate the megatree path once that is wired (commit 3)."""
 
     def test_helper_message_reports_matrix_size(self, Wrapper, tmp_path):
         w = _make_wrapper(Wrapper, tmp_path, max_total_genomes=1000)

@@ -118,6 +118,14 @@ def subclade_partition_module():
 
 
 @pytest.fixture(scope="session")
+def subsample_module():
+    return load_module(
+        REPO_ROOT / "python_scripts" / "subsample_genomes.py",
+        name="subsample_genomes",
+    )
+
+
+@pytest.fixture(scope="session")
 def add_releaf_version_module():
     return load_module(
         REPO_ROOT / "assembly_router" / "add_releaf_version.py",

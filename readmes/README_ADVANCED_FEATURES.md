@@ -388,14 +388,48 @@ python orthophyl_pipeline_wrapper.py \
 
 ---
 
-### 10. Subclade Partitioning (`--max-tree-genomes`)
+### 10. Large-Taxon Handling (`--max-tree-genomes`, `--subsample-size`)
 
 Some taxa (large genera especially) have far more assemblies than OrthoPhyl can
 put into a single tree in reasonable time/RAM. The `ANI_shortlist` (`-n`) only
 shrinks the OrthoFinder step — the full genome set still lands in the final
-tree. To cap tree size, the pipeline wrapper can **partition an oversized taxon
-into MASH-based subclades** and build a tree only for the subclade(s) actually
-needed.
+tree. To cap tree size, the pipeline wrapper **diverse-subsamples an oversized
+taxon down to one manageable tree** by default.
+
+#### Default: diverse subsampling
+
+When a taxon downloads more raw genomes than `--max-tree-genomes` (default
+**2000**), the wrapper builds **one** tree from a maximally-diverse MASH subsample
+of `--subsample-size` genomes (default **500**):
+
+```bash
+python orthophyl_pipeline_wrapper.py \
+    --input assemblies.tsv \
+    --database-dir /data/databases/ \
+    --output-dir /data/runs/ \
+    --gather-script utils/gather_filter_asms.sh \
+    --max-tree-genomes 2000 \
+    --subsample-size 500 \
+    --threads 64
+```
+
+- **Method** (`python_scripts/subsample_genomes.py`): sketch every genome once
+  with `mash sketch` (linear — no all-vs-all matrix), then greedily pick the most
+  diverse subset via farthest-point (max-min) sampling. Each pick is a single
+  `mash dist <candidate> combined.msh` call, so the whole selection is O(n·N) time
+  and O(n) memory. This scales to very large taxa (tens of thousands of genomes)
+  that would OOM the O(n²) partitioner.
+- **Query / must-keep genomes are always retained**: they seed the greedy pick, so
+  the subset is guaranteed to include them.
+- Selection is deterministic (sorted input, lexical tie-break), so `--resume`
+  re-uses the same subset.
+- QC (CheckM2) runs on the subsampled set, so it also skips genomes that will
+  never enter the tree.
+
+The per-subclade **partitioning / megatree** path below is opt-in (wired in a
+later release) and is what `--max-total-genomes` guards.
+
+#### Opt-in: per-subclade partitioning (megatree)
 
 ```bash
 python orthophyl_pipeline_wrapper.py \
@@ -451,11 +485,12 @@ target).
   that subclade fails with a clear error (raise `--max-tree-genomes` or relax QC).
 - Partitioning is deterministic (sorted input + UPGMA + size-desc numbering), so
   subclade names are stable across runs — required for `--resume` and lazy build.
-- **`--max-total-genomes` (default 5000)** guards the partitioner itself: it builds
+- **`--max-total-genomes` (default 5000)** guards the *partitioner* only: it builds
   a dense `N×N` MASH distance matrix that is O(n²) in memory (~20 GB at n=50k), so
-  a raw set larger than this ceiling is refused with actionable guidance rather than
-  OOM-killing the node. Narrow the taxon/rank, raise the ceiling if you have the RAM,
-  or (once available) use the `--subsample` / `--megatree` large-taxon strategies.
+  a raw set larger than this ceiling is refused rather than OOM-killing the node.
+  The **default subsample path does not build this matrix and is unaffected** — it
+  handles arbitrarily large taxa. This ceiling only bounds the opt-in partition/
+  megatree route above.
 
 ---
 

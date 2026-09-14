@@ -68,8 +68,9 @@ class PipelineWrapper:
         taxon_rank: Optional[str] = None,
         update_existing: bool = False,
         # NEW: subclade partitioning
-        max_tree_genomes: int = 150,
-        max_total_genomes: int = 5000
+        max_tree_genomes: int = 2000,
+        max_total_genomes: int = 5000,
+        subsample_size: int = 500
     ):
         # Validate mutually exclusive flags
         if input_file and taxon:
@@ -110,17 +111,21 @@ class PipelineWrapper:
         self.update_existing = update_existing
         self.taxon_mode = taxon is not None
 
-        # NEW: subclade partitioning. When a taxon's RAW downloaded genome set
-        #   exceeds this ceiling, MASH-partition it into <= max_tree_genomes
-        #   subclades and build a tree only for the subclade(s) actually needed.
+        # NEW: large-taxon handling. When a taxon's RAW downloaded genome set
+        #   exceeds max_tree_genomes, the DEFAULT behavior is to build ONE tree from
+        #   a diverse MASH subsample of subsample_size genomes (greedy max-min, no
+        #   O(n^2) matrix -- see python_scripts/subsample_genomes.py). The per-
+        #   subclade partition/megatree path (subclade_partition.py) is opt-in and
+        #   still guarded by max_total_genomes below.
         self.max_tree_genomes = max_tree_genomes
+        self.subsample_size = subsample_size
 
-        # Guardrail: the partitioner runs an all-vs-all `mash triangle` and builds a
-        #   DENSE NxN distance matrix (subclade_partition.py), which is O(n^2) in both
-        #   time and memory -- e.g. ~20 GB just for the matrix at n=50k. Above this
-        #   ceiling we refuse to partition rather than OOM-kill the node. The coming
-        #   --subsample / --megatree strategies are the supported way to handle very
-        #   large taxa; until one is selected, this is a hard stop.
+        # Guardrail for the PARTITION/megatree path only: subclade_partition.py runs
+        #   an all-vs-all `mash triangle` and builds a DENSE NxN distance matrix,
+        #   which is O(n^2) in time and memory -- e.g. ~20 GB just for the matrix at
+        #   n=50k. Above this ceiling we refuse to partition rather than OOM-kill the
+        #   node. The default subsample path does NOT hit this (it never builds the
+        #   matrix); this only bounds the opt-in partition/megatree route.
         self.max_total_genomes = max_total_genomes
 
         # Script paths (relative to this wrapper)
@@ -129,6 +134,7 @@ class PipelineWrapper:
         self.database_creator = self.script_dir / "assembly_router" / "create_hierarchical_database.py"
         self.releaf_versioner = self.script_dir / "assembly_router" / "add_releaf_version.py"
         self.subclade_partitioner = self.script_dir / "python_scripts" / "subclade_partition.py"
+        self.subsampler = self.script_dir / "python_scripts" / "subsample_genomes.py"
         self.orthophyl_script = self.script_dir / "OrthoPhyl.sh"
         self.releaf_script = self.script_dir / "ReLeaf.sh"
         
@@ -768,24 +774,34 @@ class PipelineWrapper:
         raw_count = len(raw_files)
         logger.info(f"  Raw genomes downloaded: {raw_count}")
 
-        # ---- Stage 2: partition (only if over the ceiling) ----
+        # ---- Stage 2: cap tree size (default = diverse subsample) ----
+        # Over the ceiling, the DEFAULT large-taxon behavior is to build ONE tree
+        # from a MASH greedy max-min diverse subset (no O(n^2) matrix). Query
+        # genomes seed the pick so they are always retained. The subsampled dir
+        # then flows through the single-tree path below exactly like a raw dir.
         if raw_count > self.max_tree_genomes:
-            self._enforce_total_genome_ceiling(taxon_name, raw_count)
             logger.info(f"  Raw count {raw_count} > max_tree_genomes "
-                        f"{self.max_tree_genomes}: partitioning into subclades")
-            manifest = self._partition_genomes(taxon_name, raw_dir, assemblies)
-        else:
-            # Synthesize a single-subclade (unpartitioned) manifest covering the
-            # whole raw set -- the flow below is uniform either way.
-            manifest = {
-                'partitioned': False, 'parent_taxon': taxon_name,
-                'max_size': self.max_tree_genomes, 'n_subclades': 1,
-                'subclades': [{'subclade_id': 1, 'name': taxon_name,
-                               'n_genomes': raw_count, 'members_file': None,
-                               'sketch_file': None}],
-                'query_assignments': {Path(a['assembly_path']).name: taxon_name
-                                      for a in assemblies},
-            }
+                        f"{self.max_tree_genomes}: diverse-subsampling to "
+                        f"{self.subsample_size} genomes")
+            query_stems = [Path(a['assembly_path']).stem for a in assemblies]
+            raw_dir = self._subsample_genomes(
+                taxon_name, raw_dir, self.subsample_size,
+                must_keep_stems=query_stems)
+            raw_files = (list(raw_dir.glob("*.fna")) + list(raw_dir.glob("*.fasta"))
+                         if raw_dir.exists() else [])
+            raw_count = len(raw_files)
+
+        # One tree over the (possibly subsampled) raw set -- uniform single-subclade
+        # manifest. (Per-subclade partitioning is the opt-in megatree path.)
+        manifest = {
+            'partitioned': False, 'parent_taxon': taxon_name,
+            'max_size': self.max_tree_genomes, 'n_subclades': 1,
+            'subclades': [{'subclade_id': 1, 'name': taxon_name,
+                           'n_genomes': raw_count, 'members_file': None,
+                           'sketch_file': None}],
+            'query_assignments': {Path(a['assembly_path']).name: taxon_name
+                                  for a in assemblies},
+        }
 
         assignments = manifest.get('query_assignments', {})
         subclades = manifest['subclades']
@@ -1283,6 +1299,90 @@ class PipelineWrapper:
         self._download_genomes(taxon_label, subclade_dir,
                                query_assemblies=query_assemblies, qc_only=True)
         return subclade_dir / "genomes_to_keep"
+
+    def _must_keep_stems(self) -> List[str]:
+        """Parse self.must_keep (comma-sep accession list OR file path) to stems.
+
+        Returns [] when unset. Accessions are returned as-is; the subsampler
+        matches them against member basenames by stem, so extensions don't matter.
+        """
+        if not self.must_keep:
+            return []
+        p = Path(self.must_keep)
+        if p.exists() and p.is_file():
+            with open(p) as f:
+                return [ln.strip() for ln in f if ln.strip()]
+        return [s.strip() for s in self.must_keep.split(',') if s.strip()]
+
+    def _subsample_genomes(self, taxon_name: str, raw_dir: Path,
+                           target: int,
+                           must_keep_stems: Optional[List[str]] = None) -> Path:
+        """Diverse-subsample an oversized raw set to `target` genomes; return a dir.
+
+        Runs python_scripts/subsample_genomes.py (MASH greedy max-min -- linear
+        sketch, no O(n^2) matrix) on the raw FASTAs, then stages the selected
+        members into <orthophyl_dir>/subsample/<taxon>/selected/ (symlinks, falling
+        back to copies). Returns that directory so the caller's single-tree
+        _build_subclade path can consume it exactly like a raw download dir.
+
+        must_keep_stems seed the greedy pick so query/must-keep genomes are always
+        retained. Guarded by a `subsample_<taxon>` checkpoint for --resume.
+        """
+        sub_dir = self.orthophyl_dir / "subsample" / taxon_name
+        sub_dir.mkdir(parents=True, exist_ok=True)
+        selected_dir = sub_dir / "selected"
+        manifest_path = sub_dir / "subsample_manifest.json"
+
+        # Resume: re-mashing risks a different pick, so reuse the manifest.
+        if self.resume and manifest_path.exists() and selected_dir.exists():
+            logger.info(f"  ✓ Subsample already complete (resuming): {manifest_path}")
+            return selected_dir
+
+        cmd = [
+            'python', str(self.subsampler),
+            '--genome-dir', str(raw_dir),
+            '--out-dir', str(sub_dir),
+            '--n', str(target),
+            '--threads', str(self.threads),
+        ]
+        for stem in (must_keep_stems or []):
+            cmd.extend(['--must-keep', stem])
+
+        if self.verbose:
+            logger.info(f"    Command: {' '.join(cmd)}")
+        if self.dry_run:
+            logger.info(f"  [DRY RUN] Would subsample {taxon_name} to {target} genomes")
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            return selected_dir
+
+        log_file = self.logs_dir / f"subsample_{taxon_name}.log"
+        with open(log_file, 'w') as f:
+            result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Subsampling failed for {taxon_name}. Check log: {log_file}")
+
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+
+        # Stage the selected members into selected/ (symlink, copy fallback).
+        selected_dir.mkdir(parents=True, exist_ok=True)
+        for name in manifest.get('members', []):
+            src = raw_dir / name
+            dst = selected_dir / name
+            if dst.exists() or dst.is_symlink():
+                continue
+            if not src.exists():
+                logger.warning(f"    Subsample member missing from raw dir: {name}")
+                continue
+            try:
+                os.symlink(os.path.abspath(src), dst)
+            except OSError:
+                shutil.copy(src, dst)
+
+        logger.info(f"  Subsampled {taxon_name}: {manifest.get('n_selected')} of "
+                    f"{manifest.get('n_total')} genomes selected (target {target})")
+        return selected_dir
 
     def _enforce_total_genome_ceiling(self, taxon_name: str, raw_count: int):
         """Refuse to partition an over-large raw set (guardrail).
@@ -1887,21 +1987,29 @@ class PipelineWrapper:
             return 1
         logger.info(f"  ✓ {raw_count} raw genomes downloaded")
 
-        # Partition if over the ceiling; create mode builds ALL subclades.
+        # Over the ceiling, the DEFAULT is to diverse-subsample to one tree (no
+        # O(n^2) matrix). Create mode has no query; must-keep accessions (if any)
+        # seed the pick so they are retained. The subsampled dir replaces raw_dir/
+        # raw_files, then flows through the single-tree QC+build path below.
         if raw_count > self.max_tree_genomes:
-            self._enforce_total_genome_ceiling(self.taxon, raw_count)
             logger.info(f"  Raw count {raw_count} > max_tree_genomes "
-                        f"{self.max_tree_genomes}: partitioning into subclades")
-            manifest = self._partition_genomes(self.taxon, raw_dir, query_assemblies=[])
-        else:
-            manifest = {
-                'partitioned': False, 'parent_taxon': self.taxon,
-                'max_size': self.max_tree_genomes, 'n_subclades': 1,
-                'subclades': [{'subclade_id': 1, 'name': self.taxon,
-                               'n_genomes': raw_count, 'members_file': None,
-                               'sketch_file': None}],
-                'query_assignments': {},
-            }
+                        f"{self.max_tree_genomes}: diverse-subsampling to "
+                        f"{self.subsample_size} genomes")
+            raw_dir = self._subsample_genomes(
+                self.taxon, raw_dir, self.subsample_size,
+                must_keep_stems=self._must_keep_stems())
+            raw_files = (list(raw_dir.glob("*.fna")) + list(raw_dir.glob("*.fasta"))
+                         if raw_dir.exists() else [])
+            raw_count = len(raw_files)
+
+        manifest = {
+            'partitioned': False, 'parent_taxon': self.taxon,
+            'max_size': self.max_tree_genomes, 'n_subclades': 1,
+            'subclades': [{'subclade_id': 1, 'name': self.taxon,
+                           'n_genomes': raw_count, 'members_file': None,
+                           'sketch_file': None}],
+            'query_assignments': {},
+        }
 
         taxonomy = gatherer.get_taxonomy_string()
 
@@ -2317,21 +2425,30 @@ Examples:
     parser.add_argument(
         '--max-tree-genomes',
         type=int,
-        default=150,
-        help='Maximum genomes per tree/subclade. When a taxon downloads more raw '
-             'genomes than this, MASH-partition them into size-bounded subclades '
-             '(<Taxon>_1, <Taxon>_2, ...); build a tree only for the subclade(s) '
-             'containing a query (others are registered for lazy build). Default 150.'
+        default=2000,
+        help='Regular single-tree ceiling. When a taxon downloads more raw genomes '
+             'than this, the default behavior is to build ONE tree from a diverse '
+             'MASH subsample of --subsample-size genomes (greedy max-min; query '
+             'genomes are always kept). Default 2000.'
+    )
+    parser.add_argument(
+        '--subsample-size',
+        type=int,
+        default=500,
+        help='Target genome count when a taxon exceeds --max-tree-genomes: a MASH '
+             'greedy max-min diverse subset of this size is used to build one tree. '
+             'Sketches genomes linearly (no O(n^2) matrix), so it scales to very '
+             'large taxa. Default 500.'
     )
     parser.add_argument(
         '--max-total-genomes',
         type=int,
         default=5000,
-        help='Guardrail: refuse to MASH-partition a raw genome set larger than this. '
+        help='Guardrail for the opt-in per-subclade partition/megatree path only. '
              'Partitioning builds an all-vs-all distance matrix that grows O(n^2) in '
-             'memory (~20 GB at 50k genomes), so very large taxa are stopped with '
-             'guidance rather than OOM-killing the node. Raise it if you have the RAM, '
-             'or narrow the taxon. Default 5000.'
+             'memory (~20 GB at 50k genomes), so it is refused above this ceiling. '
+             'The default subsample path never builds the matrix and is unaffected. '
+             'Default 5000.'
     )
 
     args = parser.parse_args()
@@ -2365,7 +2482,8 @@ Examples:
         taxon_rank=args.taxon_rank,
         update_existing=args.update_existing,
         max_tree_genomes=args.max_tree_genomes,
-        max_total_genomes=args.max_total_genomes
+        max_total_genomes=args.max_total_genomes,
+        subsample_size=args.subsample_size
     )
 
     return wrapper.run()
