@@ -80,11 +80,13 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │       ├─ gather_filter_asms.sh --download-only
   │       │   ├─ Download raw genomes from NCBI (pre-QC)
   │       │   └─ Stage query genomes into the raw set
-  │       ├─ subclade_partition.py  (only if raw count > --max-tree-genomes)
+  │       ├─ subsample_genomes.py   (default, if raw count > --max-tree-genomes)
+  │       │   └─ Diverse MASH subsample down to --subsample-size (one tree)
+  │       ├─ subclade_partition.py + megatree_graft.py   (opt-in: --megatree)
   │       │   ├─ MASH-partition raw set into <Taxon>_1, <Taxon>_2, …
-  │       │   ├─ Build tree only for subclade(s) holding a query
-  │       │   └─ Register the rest built=false (lazy build on demand)
-  │       ├─ gather_filter_asms.sh --qc-only   (per built subclade)
+  │       │   ├─ Build a full tree per subclade + a backbone tree
+  │       │   └─ Graft subclade trees onto backbone → one merged megatree
+  │       ├─ gather_filter_asms.sh --qc-only   (per subclade)
   │       │   ├─ Run CheckM2/bbmap QC (subclade members + queries)
   │       │   └─ Filter by quality; abort if a required genome fails
   │       ├─ OrthoPhyl.sh

@@ -5,8 +5,9 @@ The DEFAULT large-taxon behavior is diverse subsampling to one tree:
   * raw set over the ceiling  -> diverse-subsample to --subsample-size, single build
   * create mode over ceiling  -> subsample, single taxon-flavored DB
   * gather split issues --download-only then --qc-only
-The per-subclade partition/lazy-build path is retained (opt-in megatree, wired in
-a later commit) and still covered by the parse/build-phase tests below.
+The router now emits only ReLeaf / OrthoPhyl decisions (the lazy-build
+OrthoPhyl_subclade_build path was removed); the opt-in --megatree path is
+covered by tests/unit/test_wrapper_megatree.py.
 All heavy steps (mash, subsample, gather, OrthoPhyl, DB creator) are mocked.
 """
 
@@ -86,8 +87,6 @@ class TestProcessOrthophylTaxon:
         built = []
         monkeypatch.setattr(w, "_build_subclade",
                             lambda **k: built.append(k))
-        monkeypatch.setattr(w, "_register_lazy_subclade",
-                            lambda **k: pytest.fail("should not register in single build"))
 
         w._process_orthophyl_taxon("Andreesenella", [_query(tmp_path)])
         # No partitioning under the ceiling.
@@ -124,8 +123,6 @@ class TestProcessOrthophylTaxon:
 
         built = []
         monkeypatch.setattr(w, "_build_subclade", lambda **k: built.append(k))
-        monkeypatch.setattr(w, "_register_lazy_subclade",
-                            lambda **k: pytest.fail("no lazy register on subsample path"))
 
         w._process_orthophyl_taxon("Andreesenella", [_query(tmp_path)])
 
@@ -308,35 +305,11 @@ def _write_decision(routing_dir, idx, decision):
     (routing_dir / f"routing_decision_{idx}.json").write_text(json.dumps(decision))
 
 
-class TestParseSubcladeBuildDecisions:
-    """The router's third decision (OrthoPhyl_subclade_build) must parse into its
-    own batch WITHOUT touching download_value (which it does not carry)."""
+class TestParseRoutingResults:
+    """After lazy-build removal the router emits only ReLeaf / OrthoPhyl decisions;
+    _parse_routing_results splits them two ways."""
 
-    def test_subclade_build_decision_parsed_into_batch(self, Wrapper, tmp_path):
-        w = _make_wrapper(Wrapper, tmp_path)
-        _write_decision(w.routing_dir, 0, {
-            "pipeline": "OrthoPhyl_subclade_build",
-            "assembly_id": "GCF_query",
-            "assembly": str(tmp_path / "GCF_query.fna"),
-            "subclade_name": "Andreesenella_2",
-            "parent_taxon": "Andreesenella",
-            "subclade_id": 2,
-            "database_dir": str(tmp_path / "databases" / "Andreesenella_2_db"),
-            "members_file": str(tmp_path / "m.txt"),
-            "sketch_file": str(tmp_path / "s.msh"),
-            "source_genome_dir": str(tmp_path / "raw"),
-            "query_taxonomy": "d__Bacteria;g__Andreesenella",
-        })
-
-        results = w._parse_routing_results()
-        assert results["releaf_batch"] == []
-        assert results["orthophyl_batch"] == {}
-        assert list(results["subclade_build_batch"].keys()) == ["Andreesenella_2"]
-        item = results["subclade_build_batch"]["Andreesenella_2"][0]
-        assert item["parent_taxon"] == "Andreesenella"
-        assert item["source_genome_dir"] == str(tmp_path / "raw")
-
-    def test_mixed_decisions_split_three_ways(self, Wrapper, tmp_path):
+    def test_mixed_decisions_split_two_ways(self, Wrapper, tmp_path):
         w = _make_wrapper(Wrapper, tmp_path)
         _write_decision(w.routing_dir, 0, {
             "pipeline": "ReLeaf", "assembly_id": "r1",
@@ -350,85 +323,8 @@ class TestParseSubcladeBuildDecisions:
             "query_taxonomy": "d__Bacteria;g__Bacillus",
             "download_taxonomy": "d__Bacteria;g__Bacillus",
         })
-        _write_decision(w.routing_dir, 2, {
-            "pipeline": "OrthoPhyl_subclade_build", "assembly_id": "s1",
-            "assembly": str(tmp_path / "s1.fna"),
-            "subclade_name": "Andreesenella_2", "parent_taxon": "Andreesenella",
-            "subclade_id": 2,
-            "database_dir": str(tmp_path / "Andreesenella_2_db"),
-            "source_genome_dir": str(tmp_path / "raw"),
-        })
 
         results = w._parse_routing_results()
         assert len(results["releaf_batch"]) == 1
         assert list(results["orthophyl_batch"].keys()) == ["Bacillus"]
-        assert list(results["subclade_build_batch"].keys()) == ["Andreesenella_2"]
-
-
-class TestPhaseSubcladeBuild:
-    """The build phase builds the subclade's own tree (force overwrite of the
-    built=false placeholder), then ReLeafs the waiting query assemblies."""
-
-    def test_builds_then_releafs(self, Wrapper, tmp_path, monkeypatch):
-        w = _make_wrapper(Wrapper, tmp_path)
-        raw = tmp_path / "raw"
-        raw.mkdir()
-        for i in range(5):
-            (raw / f"g{i}.fna").write_text(">c\nAC\n")
-
-        build_calls = []
-        monkeypatch.setattr(w, "_build_subclade",
-                            lambda **k: build_calls.append(k))
-        releaf_calls = []
-        monkeypatch.setattr(w, "_run_releaf",
-                            lambda **k: releaf_calls.append(k))
-
-        q = _query(tmp_path)
-        batch = {"Andreesenella_2": [{
-            "assembly_id": q["assembly_id"],
-            "assembly_path": q["assembly_path"],
-            "subclade_name": "Andreesenella_2",
-            "parent_taxon": "Andreesenella",
-            "subclade_id": 2,
-            "database_dir": str(tmp_path / "databases" / "Andreesenella_2_db"),
-            "members_file": None, "sketch_file": None,
-            "source_genome_dir": str(raw),
-            "taxonomy": "d__Bacteria;g__Andreesenella",
-            "tree_method": "iqtree", "tree_data": "CDS",
-        }]}
-
-        w._phase_subclade_build(batch)
-
-        # Built the subclade with force=True, no query genomes in the tree.
-        assert len(build_calls) == 1
-        assert build_calls[0]["force"] is True
-        assert build_calls[0]["is_subclade"] is True
-        assert build_calls[0]["query_assemblies"] == []
-        assert build_calls[0]["entry"]["name"] == "Andreesenella_2"
-        # Then ReLeafed the waiting query.
-        assert len(releaf_calls) == 1
-        assert releaf_calls[0]["database_name"] == "Andreesenella_2"
-        assert releaf_calls[0]["n_assemblies"] == 1
-        assert w.pipeline_status["phases"]["subclade_build"]["status"] == "complete"
-
-    def test_missing_source_dir_is_skipped_not_fatal(self, Wrapper, tmp_path, monkeypatch):
-        w = _make_wrapper(Wrapper, tmp_path)
-        monkeypatch.setattr(w, "_build_subclade",
-                            lambda **k: pytest.fail("should not build without source dir"))
-        releaf_calls = []
-        monkeypatch.setattr(w, "_run_releaf", lambda **k: releaf_calls.append(k))
-
-        q = _query(tmp_path)
-        batch = {"Andreesenella_2": [{
-            "assembly_id": q["assembly_id"],
-            "assembly_path": q["assembly_path"],
-            "subclade_name": "Andreesenella_2",
-            "parent_taxon": "Andreesenella",
-            "database_dir": str(tmp_path / "Andreesenella_2_db"),
-            "source_genome_dir": None,
-        }]}
-
-        # One bad subclade must not raise -- it is logged and skipped.
-        w._phase_subclade_build(batch)
-        assert releaf_calls == []
-        assert w.pipeline_status["phases"]["subclade_build"]["status"] == "complete"
+        assert "subclade_build_batch" not in results

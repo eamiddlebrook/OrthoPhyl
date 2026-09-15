@@ -126,6 +126,14 @@ def subsample_module():
 
 
 @pytest.fixture(scope="session")
+def megatree_graft_module():
+    return load_module(
+        REPO_ROOT / "python_scripts" / "megatree_graft.py",
+        name="megatree_graft",
+    )
+
+
+@pytest.fixture(scope="session")
 def add_releaf_version_module():
     return load_module(
         REPO_ROOT / "assembly_router" / "add_releaf_version.py",

@@ -426,10 +426,17 @@ python orthophyl_pipeline_wrapper.py \
 - QC (CheckM2) runs on the subsampled set, so it also skips genomes that will
   never enter the tree.
 
-The per-subclade **partitioning / megatree** path below is opt-in (wired in a
-later release) and is what `--max-total-genomes` guards.
+The per-subclade **partitioning / megatree** path below is opt-in (enabled with
+`--megatree`) and is what `--max-total-genomes` guards.
 
-#### Opt-in: per-subclade partitioning (megatree)
+#### Opt-in: full-coverage megatree (`--megatree`)
+
+Where diverse subsampling keeps *one* tree by discarding most genomes, `--megatree`
+keeps **every** genome: it partitions the oversized taxon into size-bounded
+subclades, builds a full tree per subclade, builds a small backbone tree from a few
+diverse representatives of each subclade, and grafts each subclade's full tree onto
+its representatives in the backbone — producing **one merged tree containing every
+genome**.
 
 ```bash
 python orthophyl_pipeline_wrapper.py \
@@ -437,60 +444,68 @@ python orthophyl_pipeline_wrapper.py \
     --database-dir /data/databases/ \
     --output-dir /data/runs/ \
     --gather-script utils/gather_filter_asms.sh \
-    --max-tree-genomes 150 \
+    --megatree \
+    --max-tree-genomes 2000 \
+    --subclade-size 150 \
+    --backbone-reps 5 \
+    --conflict-min-support 90 \
+    --max-total-genomes 5000 \
     --threads 64
 ```
+
+`--megatree` is only engaged when a taxon's raw count exceeds `--max-tree-genomes`;
+under that ceiling it collapses to the normal single-tree build. It is **not**
+mutually exclusive with subsampling — subsampling is simply the default when
+`--megatree` is absent.
 
 **How it works** (novel-taxon / OrthoPhyl route):
 
 1. **Download raw, pre-QC.** The wrapper downloads the full candidate genome set
    with `gather_filter_asms.sh --download-only` — it stops *before* the expensive
    CheckM2 QC pass.
-2. **Partition.** If the raw count exceeds `--max-tree-genomes`,
-   `python_scripts/subclade_partition.py` runs `mash triangle` (all-vs-all, the
-   same `-k 17 -s 5000` parameters OrthoPhyl uses), clusters with average-linkage
-   (UPGMA), and recursively splits the tree so every subclade holds
-   ≤ `--max-tree-genomes` genomes. Subclades are numbered deterministically:
-   `Andreesenella_1`, `Andreesenella_2`, … A combined MASH sketch (`.msh`) and a
-   member list are written per subclade.
-3. **QC + build only what's needed.** For each subclade containing a query
-   genome, the wrapper stages that subclade's raw members, runs
-   `gather_filter_asms.sh --qc-only` (CheckM2 runs **here**, only on genomes that
-   will enter a tree), then runs OrthoPhyl and creates a database entry. This is
-   why QC comes *after* partitioning — genomes that never enter a tree are never
-   QC'd.
-4. **Register the rest lazily.** Subclades with no query are registered as
-   `built=false` database entries carrying their raw member list + sketch, but no
-   tree. Their tree is built on demand the first time a query routes to them.
+2. **Enforce the guardrail.** The partitioner builds a dense `N×N` MASH matrix, so
+   `--max-total-genomes` (default 5000) is enforced here: a raw set larger than the
+   ceiling is refused rather than OOM-killing the node.
+3. **Partition.** `python_scripts/subclade_partition.py` runs `mash triangle`
+   (all-vs-all, the same `-k 17 -s 5000` parameters OrthoPhyl uses), clusters with
+   average-linkage (UPGMA), and recursively splits the tree so every subclade holds
+   ≤ `--subclade-size` genomes (default **150**). Subclades are numbered
+   deterministically: `Andreesenella_1`, `Andreesenella_2`, … A combined MASH sketch
+   (`.msh`) and a member list are written per subclade.
+4. **Build every subclade.** For each subclade the wrapper QCs its raw members
+   (`gather_filter_asms.sh --qc-only`, CheckM2 runs here) and runs OrthoPhyl,
+   producing a full per-subclade tree.
+5. **Build the backbone.** From each subclade, `min(subclade_size, --backbone-reps)`
+   (default **5**) diverse representatives are picked (that subclade's own MASH
+   greedy max-min, seeded by any query genomes so they anchor the backbone). The
+   pooled reps are run through OrthoPhyl once to produce a backbone tree.
+6. **Graft.** `python_scripts/megatree_graft.py` replaces each subclade's
+   representative clade in the backbone with that subclade's full tree
+   (MRCA-replace with a monophyly check), writing the merged tree to
+   `03_results/trees/orthophyl/<taxon>_megatree.nwk`.
+7. **Flag conflicts (do not resolve).** Where a subclade tree and the backbone
+   disagree on a bipartition that is strongly supported (≥ `--conflict-min-support`,
+   default **90**) on both sides, the disagreement is recorded to
+   `<taxon>_megatree_conflicts.json`. Topology reconciliation is deliberate future
+   work; this pass only flags.
 
-**Routing to subclades.** All subclades of a taxon share one GTDB taxonomy
-string, so the assembly router cannot tell them apart by taxonomy. Instead it
-sketches the query with MASH and compares it (`mash dist`) against each
-subclade's sketch, routing to the subclade holding the query's **nearest member**
-(minimum distance). If that subclade is already built, the query goes to ReLeaf;
-if it is an unbuilt (lazy) subclade, the router emits an
-`OrthoPhyl_subclade_build` decision and the wrapper QCs + builds it before ReLeaf.
-
-**`--taxon` create mode** builds **all** subclades (there is no single query to
-target).
+The taxon database is created from the **backbone** OrthoPhyl run so ReLeaf has a
+coherent HMM set. **`--taxon` create mode** takes the same path (there is no query,
+so all subclades and their reps are built).
 
 **Notes and caveats:**
 
-- `--max-tree-genomes` is a ceiling compared against the *raw* (pre-QC) count, so
-  a subclade will usually end up somewhat smaller than the ceiling after QC.
-- Because QC runs per-subclade, `--must-keep` is enforced only within the
-  subclade(s) actually built — it does not guarantee co-location of accessions in
-  the same subclade.
-- If a subclade drops below OrthoPhyl's 4-genome minimum after QC, the build for
-  that subclade fails with a clear error (raise `--max-tree-genomes` or relax QC).
+- `--subclade-size` is a ceiling compared against the *raw* (pre-QC) count, so a
+  subclade will usually end up somewhat smaller after QC.
+- Non-monophyletic representatives (reps interleaved with other subclades in the
+  backbone) are grafted best-effort — foreign leaves are preserved and the subclade
+  is flagged `monophyletic: false` in the conflict report.
 - Partitioning is deterministic (sorted input + UPGMA + size-desc numbering), so
-  subclade names are stable across runs — required for `--resume` and lazy build.
-- **`--max-total-genomes` (default 5000)** guards the *partitioner* only: it builds
-  a dense `N×N` MASH distance matrix that is O(n²) in memory (~20 GB at n=50k), so
-  a raw set larger than this ceiling is refused rather than OOM-killing the node.
-  The **default subsample path does not build this matrix and is unaffected** — it
-  handles arbitrarily large taxa. This ceiling only bounds the opt-in partition/
-  megatree route above.
+  subclade names are stable across runs — required for `--resume`.
+- **`--max-total-genomes` (default 5000)** guards this path only: it bounds the
+  dense `N×N` MASH distance matrix (O(n²) in memory, ~20 GB at n=50k). The
+  **default subsample path does not build this matrix and is unaffected** — it
+  handles arbitrarily large taxa.
 
 ---
 

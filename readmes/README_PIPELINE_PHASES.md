@@ -215,19 +215,26 @@ genomes are staged here too so partitioning sees them as clustering leaves.
 
 **Checkpoint**: `download_{taxon_name}.flag`
 
-### Stage 1b: Partition into Subclades (only if raw count > `--max-tree-genomes`)
+### Stage 1b: Cap tree size (only if raw count > `--max-tree-genomes`)
 
-**Script**: `python_scripts/subclade_partition.py`
+By default the wrapper **diverse-subsamples** the oversized taxon down to one tree
+(`python_scripts/subsample_genomes.py`, `--subsample-size` genomes) and continues
+through the single-tree path (Stage 1c → 3 → 4).
 
-Runs `mash triangle -k 17 -s 5000 -E` on the raw set, clusters with
-average-linkage (UPGMA), and recursively splits so every subclade ≤
-`--max-tree-genomes`. Writes `partition_manifest.json`, a per-subclade `.msh`
-sketch, and a `.members.txt` list under `02_orthophyl_novel/partitions/{taxon}/`.
-Subclades with a query are built (Stage 1c → 3 → 4); the rest are registered
-`built=false` for lazy build-on-demand.
+With **`--megatree`** the wrapper instead partitions and builds a full-coverage
+merged tree. `python_scripts/subclade_partition.py` runs `mash triangle -k 17 -s
+5000 -E` on the raw set, clusters with average-linkage (UPGMA), and recursively
+splits so every subclade ≤ `--subclade-size`. It writes `partition_manifest.json`,
+a per-subclade `.msh` sketch, and a `.members.txt` list under
+`02_orthophyl_novel/partitions/{taxon}/`. **Every** subclade is then QC'd and built
+(Stage 1c → 3 → 4); a backbone tree is built from `--backbone-reps` diverse reps per
+subclade, and `python_scripts/megatree_graft.py` grafts each subclade tree onto its
+backbone reps into one merged tree (`03_results/trees/orthophyl/{taxon}_megatree.nwk`),
+flagging high-support topology conflicts to `{taxon}_megatree_conflicts.json`.
 
 **Checkpoint**: `partition_{taxon_name}` (resume re-reads the manifest, never
-re-runs mash, so subclade numbering is stable).
+re-runs mash, so subclade numbering is stable); `megatree_backbone_{taxon}` and
+`megatree_graft_{taxon}` for the backbone build and graft.
 
 ### Stage 1c: Quality-Control a Subclade
 

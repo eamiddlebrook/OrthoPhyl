@@ -1,7 +1,7 @@
 """Tests for subclade support in create_hierarchical_database.py.
 
-Covers subclade_meta config fields + file copies for a built subclade, and the
---register-only lazy path (built=false, no tree validation).
+Covers subclade_meta config fields + file copies for a built subclade. (The
+lazy --register-only path was removed; every subclade DB is now built.)
 """
 
 import json
@@ -71,38 +71,3 @@ class TestBuiltSubclade:
         assert config.get("is_subclade") is False
         assert config.get("built") is True
         assert not (db_dir / "subclade_sketch.msh").exists()
-
-
-class TestRegisterOnly:
-    def test_lazy_registration_builds_false(
-            self, db_creator_module, sketch_and_members, tmp_path):
-        # No orthophyl run needed -- register-only skips validation.
-        sketch, members = sketch_and_members
-        out = tmp_path / "databases"
-        out.mkdir()
-        raw = tmp_path / "raw"
-        raw.mkdir()
-
-        subclade_meta = {
-            "is_subclade": True,
-            "parent_taxon": "Escherichia",
-            "subclade_id": 2,
-            "sketch_file": str(sketch),
-            "members_file": str(members),
-            "source_genome_dir": str(raw),
-            "n_genomes": 4,
-            "built": False,
-        }
-        db_dir = db_creator_module.create_database_for_run(
-            orthophyl_dir=raw,  # arbitrary; not validated in register_only
-            clade_taxonomy=ESCHERICHIA_TAX,
-            clade_name="Escherichia_2", output_dir=out,
-            subclade_meta=subclade_meta, register_only=True,
-        )
-        config = json.loads((db_dir / "database_config.json").read_text())
-        assert config["built"] is False
-        assert config["has_trees"] is False
-        assert config["is_subclade"] is True
-        assert config["source_genome_dir"] == str(raw)
-        # No orthophyl_run symlink for an unbuilt subclade.
-        assert not (db_dir / "orthophyl_run").is_symlink()

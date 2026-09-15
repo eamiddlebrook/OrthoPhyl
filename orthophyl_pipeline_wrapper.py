@@ -70,7 +70,12 @@ class PipelineWrapper:
         # NEW: subclade partitioning
         max_tree_genomes: int = 2000,
         max_total_genomes: int = 5000,
-        subsample_size: int = 500
+        subsample_size: int = 500,
+        # NEW: opt-in megatree (partition -> per-subclade trees -> backbone graft)
+        megatree: bool = False,
+        backbone_reps: int = 5,
+        subclade_size: int = 150,
+        conflict_min_support: int = 90
     ):
         # Validate mutually exclusive flags
         if input_file and taxon:
@@ -128,6 +133,20 @@ class PipelineWrapper:
         #   matrix); this only bounds the opt-in partition/megatree route.
         self.max_total_genomes = max_total_genomes
 
+        # Opt-in MEGATREE path: instead of subsampling an oversized taxon down to
+        #   one tree, partition the raw set into size-bounded subclades
+        #   (subclade_size each), build a full tree per subclade, build a small
+        #   BACKBONE tree from backbone_reps diverse reps per subclade, and GRAFT
+        #   each subclade tree onto its reps in the backbone -> one merged tree with
+        #   every genome. High-support bipartition disagreements between a subclade
+        #   tree and the backbone are FLAGGED (>= conflict_min_support), not
+        #   resolved. This path builds the dense matrix and so IS subject to
+        #   max_total_genomes above.
+        self.megatree = megatree
+        self.backbone_reps = backbone_reps
+        self.subclade_size = subclade_size
+        self.conflict_min_support = conflict_min_support
+
         # Script paths (relative to this wrapper)
         self.script_dir = Path(__file__).parent
         self.assembly_router = self.script_dir / "assembly_router" / "assembly_router.py"
@@ -135,6 +154,7 @@ class PipelineWrapper:
         self.releaf_versioner = self.script_dir / "assembly_router" / "add_releaf_version.py"
         self.subclade_partitioner = self.script_dir / "python_scripts" / "subclade_partition.py"
         self.subsampler = self.script_dir / "python_scripts" / "subsample_genomes.py"
+        self.megatree_grafter = self.script_dir / "python_scripts" / "megatree_graft.py"
         self.orthophyl_script = self.script_dir / "OrthoPhyl.sh"
         self.releaf_script = self.script_dir / "ReLeaf.sh"
         
@@ -238,10 +258,6 @@ class PipelineWrapper:
         # Phase 3b: OrthoPhyl route
         if routing_results['orthophyl_batch']:
             self._phase_orthophyl(routing_results['orthophyl_batch'])
-
-        # Phase 3c: lazy subclade-build route (build tree on demand, then ReLeaf)
-        if routing_results.get('subclade_build_batch'):
-            self._phase_subclade_build(routing_results['subclade_build_batch'])
 
         # Phase 4: Results aggregation
         self._phase_aggregation()
@@ -433,33 +449,25 @@ class PipelineWrapper:
         
         # Parse routing results
         routing_results = self._parse_routing_results()
-        
-        subclade_build_count = sum(
-            len(v) for v in routing_results['subclade_build_batch'].values())
+
         logger.info(f"\nRouting Summary:")
         logger.info(f"  ReLeaf route: {len(routing_results['releaf_batch'])} assemblies")
         logger.info(f"  OrthoPhyl route: {sum(len(v) for v in routing_results['orthophyl_batch'].values())} assemblies")
         logger.info(f"    ({len(routing_results['orthophyl_batch'])} unique taxa)")
-        logger.info(f"  Subclade-build route: {subclade_build_count} assemblies")
-        logger.info(f"    ({len(routing_results['subclade_build_batch'])} unbuilt subclades)")
 
         self._write_checkpoint('routing')
         self.pipeline_status['phases']['routing'] = {
             'status': 'complete',
             'releaf_count': len(routing_results['releaf_batch']),
             'orthophyl_count': sum(len(v) for v in routing_results['orthophyl_batch'].values()),
-            'subclade_build_count': subclade_build_count
         }
-        
+
         return routing_results
-    
+
     def _parse_routing_results(self) -> Dict:
         """Parse routing decision JSON files."""
         releaf_batch = []
         orthophyl_batch = defaultdict(list)
-        # Unbuilt subclades a query routed to: build the tree on demand, then ReLeaf.
-        # Grouped by subclade name so one build serves all queries that landed there.
-        subclade_build_batch = defaultdict(list)
 
         for json_file in self.routing_dir.glob("routing_decision_*.json"):
             with open(json_file, 'r') as f:
@@ -475,25 +483,6 @@ class PipelineWrapper:
                     'tree_method': decision.get('tree_method', 'iqtree'),
                     'tree_data': decision.get('tree_data', 'CDS')
                 })
-            elif pipeline == 'OrthoPhyl_subclade_build':
-                # Lazy subclade: registered (built=false) at partition time but never
-                # built because no query landed there then. This query is the first
-                # to route here, so the wrapper builds its tree, then ReLeafs.
-                sc_name = decision['subclade_name']
-                subclade_build_batch[sc_name].append({
-                    'assembly_id': decision['assembly_id'],
-                    'assembly_path': decision['assembly'],
-                    'subclade_name': sc_name,
-                    'parent_taxon': decision.get('parent_taxon'),
-                    'subclade_id': decision.get('subclade_id'),
-                    'database_dir': decision['database_dir'],
-                    'members_file': decision.get('members_file'),
-                    'sketch_file': decision.get('sketch_file'),
-                    'source_genome_dir': decision.get('source_genome_dir'),
-                    'taxonomy': decision.get('query_taxonomy'),
-                    'tree_method': decision.get('tree_method', 'iqtree'),
-                    'tree_data': decision.get('tree_data', 'CDS'),
-                })
             else:  # OrthoPhyl
                 taxon = decision['download_value']
                 orthophyl_batch[taxon].append({
@@ -507,7 +496,6 @@ class PipelineWrapper:
         return {
             'releaf_batch': releaf_batch,
             'orthophyl_batch': dict(orthophyl_batch),
-            'subclade_build_batch': dict(subclade_build_batch)
         }
     
     def _phase_releaf(self, releaf_batch: List[Dict]):
@@ -774,6 +762,16 @@ class PipelineWrapper:
         raw_count = len(raw_files)
         logger.info(f"  Raw genomes downloaded: {raw_count}")
 
+        # ---- Opt-in megatree: partition -> per-subclade trees -> backbone graft ----
+        # When --megatree is set, an oversized taxon is covered in full instead of
+        # subsampled. Under the ceiling this collapses to the normal single tree.
+        if self.megatree and raw_count > self.max_tree_genomes:
+            self._run_megatree(
+                taxon_name=taxon_name, raw_dir=raw_dir,
+                query_assemblies=assemblies,
+                taxonomy=assemblies[0]['download_taxonomy'])
+            return
+
         # ---- Stage 2: cap tree size (default = diverse subsample) ----
         # Over the ceiling, the DEFAULT large-taxon behavior is to build ONE tree
         # from a MASH greedy max-min diverse subset (no O(n^2) matrix). Query
@@ -791,153 +789,183 @@ class PipelineWrapper:
                          if raw_dir.exists() else [])
             raw_count = len(raw_files)
 
-        # One tree over the (possibly subsampled) raw set -- uniform single-subclade
-        # manifest. (Per-subclade partitioning is the opt-in megatree path.)
-        manifest = {
-            'partitioned': False, 'parent_taxon': taxon_name,
-            'max_size': self.max_tree_genomes, 'n_subclades': 1,
-            'subclades': [{'subclade_id': 1, 'name': taxon_name,
-                           'n_genomes': raw_count, 'members_file': None,
-                           'sketch_file': None}],
-            'query_assignments': {Path(a['assembly_path']).name: taxon_name
-                                  for a in assemblies},
-        }
+        # ---- Stage 3: QC + build one tree over the (possibly subsampled) set ----
+        entry = {'subclade_id': 1, 'name': taxon_name, 'n_genomes': raw_count,
+                 'members_file': None, 'sketch_file': None}
+        self._build_subclade(
+            taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
+            query_assemblies=assemblies,
+            taxonomy=assemblies[0]['download_taxonomy'],
+            is_subclade=False)
 
-        assignments = manifest.get('query_assignments', {})
+    def _run_megatree(self, taxon_name: str, raw_dir: Path,
+                      query_assemblies: List[Dict], taxonomy: str) -> None:
+        """Opt-in large-taxon strategy: partition -> per-subclade trees -> graft.
+
+        For an oversized taxon (raw count > max_tree_genomes) build FULL coverage
+        rather than a subsample:
+
+          1. Enforce --max-total-genomes (the partitioner builds a dense O(n^2)
+             MASH matrix; refuse rather than OOM).
+          2. Partition the raw set into subclades of <= subclade_size genomes.
+          3. Build a full OrthoPhyl tree for EVERY subclade (queries mapped to
+             their subclade via the manifest's query_assignments).
+          4. Pick backbone_reps diverse reps per subclade (MASH greedy max-min,
+             seeded by that subclade's queries), pool them, and build one BACKBONE
+             OrthoPhyl tree.
+          5. Graft each subclade tree onto its reps in the backbone -> one merged
+             megatree, flagging (not resolving) high-support bipartition conflicts.
+          6. Publish the merged tree + conflict report and create the taxon DB from
+             the backbone run so ReLeaf has a coherent HMM set.
+
+        Checkpointed per stage; dry-run short-circuits.
+        """
+        logger.info("\n" + "=" * 70)
+        logger.info(f"MEGATREE: full-coverage build for {taxon_name}")
+        logger.info("=" * 70)
+
+        raw_files = (list(raw_dir.glob("*.fna")) + list(raw_dir.glob("*.fasta"))
+                     if raw_dir.exists() else [])
+        raw_count = len(raw_files)
+
+        # (1) Guard the dense matrix.
+        self._enforce_total_genome_ceiling(taxon_name, raw_count)
+
+        # (2) Partition into size-bounded subclades.
+        manifest = self._partition_genomes(
+            taxon_name, raw_dir, query_assemblies, max_size=self.subclade_size)
         subclades = manifest['subclades']
+        assignments = manifest.get('query_assignments', {})
+        logger.info(f"  Partitioned into {len(subclades)} subclade(s)")
 
-        # ---- Stage 3: per-subclade QC + build / lazy-register ----
-        if not manifest.get('partitioned'):
-            # Whole raw set is one tree (classic behaviour, now with explicit QC).
-            entry = subclades[0]
-            self._build_subclade(
-                taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
-                query_assemblies=assemblies,
-                taxonomy=assemblies[0]['download_taxonomy'],
-                is_subclade=False)
-            return
-
-        # Partitioned: build subclades holding >=1 query; lazily register the rest.
+        # Map queries to their subclade.
         query_by_subclade: Dict[str, List[Dict]] = {}
-        for asm in assemblies:
+        for asm in query_assemblies:
             name = Path(asm['assembly_path']).name
             sc = assignments.get(name)
             query_by_subclade.setdefault(sc, []).append(asm)
 
+        # (3) Build a full tree for every subclade + (4) collect backbone reps.
+        backbone_dir = self.orthophyl_dir / "megatree" / taxon_name / "backbone_genomes"
+        backbone_dir.mkdir(parents=True, exist_ok=True)
+        # subclade name -> {tree, reps} accumulated for the graft.
+        subclade_specs: Dict[str, Dict] = {}
+
         for entry in subclades:
             sc_name = entry['name']
             queries_here = query_by_subclade.get(sc_name, [])
-            if queries_here:
-                logger.info(f"\n  Building subclade {sc_name} "
-                            f"({entry['n_genomes']} raw genomes, "
-                            f"{len(queries_here)} query)")
-                self._build_subclade(
-                    taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
-                    query_assemblies=queries_here,
-                    taxonomy=assemblies[0]['download_taxonomy'],
-                    is_subclade=True)
-            else:
-                logger.info(f"\n  Registering subclade {sc_name} for lazy build "
-                            f"({entry['n_genomes']} raw genomes, no query)")
-                self._register_lazy_subclade(
-                    taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
-                    taxonomy=assemblies[0]['download_taxonomy'])
+            logger.info(f"\n  Building subclade {sc_name} "
+                        f"({entry['n_genomes']} raw genomes, "
+                        f"{len(queries_here)} query)")
+            self._build_subclade(
+                taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
+                query_assemblies=queries_here, taxonomy=taxonomy,
+                is_subclade=True)
 
-    def _phase_subclade_build(self, subclade_build_batch: Dict[str, List[Dict]]):
-        """Phase 3c: build lazily-registered subclades on demand, then ReLeaf.
+            # Backbone reps: diverse pick over this subclade's QC-kept genomes,
+            # seeded by its queries so they anchor the backbone.
+            sc_genomes = self.orthophyl_dir / "downloads" / sc_name / "genomes_to_keep"
+            seed_stems = [Path(a['assembly_path']).stem for a in queries_here]
+            reps_dir = self._subsample_genomes(
+                f"{sc_name}_backbone", sc_genomes, self.backbone_reps,
+                must_keep_stems=seed_stems)
+            rep_stems = []
+            if not self.dry_run:
+                for p in (list(reps_dir.glob("*.fna")) +
+                          list(reps_dir.glob("*.fasta"))):
+                    rep_stems.append(p.stem)
+                    dst = backbone_dir / p.name
+                    if not dst.exists() and not dst.is_symlink():
+                        try:
+                            os.symlink(os.path.abspath(p), dst)
+                        except OSError:
+                            shutil.copy(p, dst)
+            sc_tree = self._locate_species_tree(
+                self.orthophyl_dir / "orthophyl_runs" / sc_name)
+            subclade_specs[sc_name] = {'tree': sc_tree, 'reps': rep_stems}
 
-        Each key is an unbuilt subclade (registered built=false at partition time)
-        that a query has now routed to. For each we:
-          1. Re-stage the subclade's raw member FASTAs (recorded source_genome_dir).
-          2. QC + run OrthoPhyl on those raw members and promote the DB entry to
-             built=true (force-overwriting the placeholder). The query is NOT part
-             of this build -- the tree is the subclade's own genomes.
-          3. ReLeaf the waiting query assemblies onto the freshly-built tree.
-        A failure in one subclade is logged and skipped so others still proceed.
+        # (5) Build the backbone tree over pooled reps.
+        backbone_out = self.orthophyl_dir / "megatree" / taxon_name / "backbone_run"
+        if self._check_checkpoint(f"megatree_backbone_{taxon_name}") and self.resume:
+            logger.info(f"  ✓ Backbone tree already built for {taxon_name} (resuming)")
+        else:
+            logger.info(f"\n  Building backbone tree from "
+                        f"{len(subclade_specs)} subclade rep sets")
+            self._run_orthophyl(
+                input_dir=backbone_dir, output_dir=backbone_out,
+                taxon_name=f"{taxon_name}_backbone", assemblies=[])
+            self._write_checkpoint(f"megatree_backbone_{taxon_name}")
+        backbone_tree = self._locate_species_tree(backbone_out)
+
+        # (6) Graft subclade trees onto the backbone.
+        megatree_dir = self.results_dir / "trees" / "orthophyl"
+        megatree_dir.mkdir(parents=True, exist_ok=True)
+        merged_tree = megatree_dir / f"{taxon_name}_megatree.nwk"
+        conflict_report = megatree_dir / f"{taxon_name}_megatree_conflicts.json"
+
+        if self.dry_run:
+            logger.info(f"  [DRY RUN] Would graft {len(subclade_specs)} subclades "
+                        f"onto backbone -> {merged_tree}")
+        else:
+            cmd = ['python', str(self.megatree_grafter),
+                   '--backbone', str(backbone_tree),
+                   '--out-tree', str(merged_tree),
+                   '--out-report', str(conflict_report),
+                   '--min-support', str(self.conflict_min_support)]
+            for sc_name, spec in sorted(subclade_specs.items()):
+                if not spec['reps']:
+                    logger.warning(f"    Subclade {sc_name} contributed no backbone "
+                                   f"reps; skipping its graft.")
+                    continue
+                cmd.extend(['--subclade',
+                            f"{sc_name}:{spec['tree']}:{','.join(spec['reps'])}"])
+            if self.verbose:
+                logger.info(f"    Command: {' '.join(cmd)}")
+            log_file = self.logs_dir / f"megatree_{taxon_name}.log"
+            with open(log_file, 'w') as f:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT,
+                                        text=True)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Megatree graft failed for {taxon_name}. Check log: {log_file}")
+            logger.info(f"  ✓ Megatree written: {merged_tree}")
+            logger.info(f"    Conflict report: {conflict_report}")
+            self._write_checkpoint(f"megatree_graft_{taxon_name}")
+
+        # Create the taxon DB from the backbone run (coherent HMM set for ReLeaf).
+        self._create_database_entry(
+            taxon_name=taxon_name, orthophyl_output=backbone_out,
+            taxonomy=taxonomy)
+
+    @staticmethod
+    def _locate_species_tree(orthophyl_output: Path) -> Path:
+        """Find an OrthoPhyl run's species tree by pattern, tolerating the known
+        filename variants.
+
+        script_lib/functions.sh writes FINAL_SPECIES_TREES/iqtree.SCO_strict.CDS.tree
+        while other code globs SCO_strict.CDS.iqtree.treefile; we match by pattern
+        (mirroring create_hierarchical_database.py) so grafting is not broken by the
+        ordering. Prefers IQ-TREE trees, then any .treefile/.tree/.nwk.
         """
-        logger.info("\n" + "=" * 70)
-        logger.info("PHASE 3C: SUBCLADE-BUILD ROUTE (Lazy Subclades)")
-        logger.info("=" * 70)
-        logger.info(f"Building {len(subclade_build_batch)} unbuilt subclades on demand")
-
-        for sc_name, queries in subclade_build_batch.items():
-            logger.info(f"\n{'=' * 60}")
-            logger.info(f"Subclade: {sc_name} "
-                        f"({len(queries)} query assemblies waiting)")
-            logger.info(f"{'=' * 60}")
-            try:
-                self._process_subclade_build(sc_name, queries)
-            except Exception as e:
-                logger.error(f"✗ Subclade build failed for {sc_name}: {e}")
-                # Continue with other subclades rather than failing the whole run.
+        tree_dirs = [
+            orthophyl_output / "FINAL_SPECIES_TREES",
+            orthophyl_output / "phylo_current" / "SpeciesTree",
+        ]
+        for tree_dir in tree_dirs:
+            if not tree_dir.exists():
                 continue
-
-        self.pipeline_status['phases']['subclade_build'] = {
-            'status': 'complete',
-            'subclades_processed': len(subclade_build_batch)
-        }
-
-    def _process_subclade_build(self, sc_name: str, queries: List[Dict]):
-        """Build one lazy subclade from its raw members, then ReLeaf the queries."""
-        first = queries[0]
-        source_genome_dir = first.get('source_genome_dir')
-        if not source_genome_dir:
-            raise RuntimeError(
-                f"Subclade {sc_name} has no source_genome_dir recorded; cannot "
-                f"locate its raw members to build. Was it registered lazily?")
-        raw_dir = Path(source_genome_dir)
-        if not self.dry_run and not raw_dir.exists():
-            raise FileNotFoundError(
-                f"Raw member directory for subclade {sc_name} not found: {raw_dir}")
-
-        parent_taxon = first.get('parent_taxon')
-        taxonomy = first.get('taxonomy')
-
-        # Reconstruct the partition entry _build_subclade expects. members_file /
-        # sketch_file point at the in-DB copies written at lazy registration.
-        entry = {
-            'name': sc_name,
-            'subclade_id': first.get('subclade_id'),
-            'members_file': first.get('members_file'),
-            'sketch_file': first.get('sketch_file'),
-        }
-
-        # ---- Build the subclade tree from ITS OWN genomes (no query genomes). ----
-        # force=True promotes the built=false placeholder DB to a real built entry.
-        logger.info(f"\n  Building subclade {sc_name} from raw members in {raw_dir}")
-        self._build_subclade(
-            taxon_name=parent_taxon or sc_name,
-            entry=entry,
-            raw_dir=raw_dir,
-            query_assemblies=[],
-            taxonomy=taxonomy,
-            is_subclade=True,
-            force=True)
-
-        # ---- ReLeaf the waiting queries onto the freshly-built subclade. ----
-        db_dir = Path(first['database_dir'])
-        tree_method = first.get('tree_method', 'iqtree')
-        tree_data = first.get('tree_data', 'CDS')
-
-        input_dir = self.releaf_dir / sc_name / "input_genomes"
-        if not self.dry_run:
-            input_dir.mkdir(parents=True, exist_ok=True)
-            for asm in queries:
-                src = Path(asm['assembly_path'])
-                dst = input_dir / f"{asm['assembly_id']}.fna"
-                if not dst.exists():
-                    shutil.copy(src, dst)
-                logger.info(f"  Prepared query for ReLeaf: {asm['assembly_id']}")
-
-        logger.info(f"\n  ReLeaf {len(queries)} query assemblies onto {sc_name}")
-        self._run_releaf(
-            database_dir=db_dir,
-            input_genomes=input_dir,
-            output_dir=self.releaf_dir / sc_name,
-            tree_method=tree_method,
-            tree_data=tree_data,
-            database_name=sc_name,
-            n_assemblies=len(queries))
+            candidates = (list(tree_dir.glob("*iqtree*.tree*")) +
+                          list(tree_dir.glob("*.treefile")) +
+                          list(tree_dir.glob("*.tree")) +
+                          list(tree_dir.glob("*.nwk")))
+            # De-dup preserving order.
+            seen = set()
+            for c in candidates:
+                if c not in seen and c.exists():
+                    return c
+                seen.add(c)
+        # Fall back to the canonical path so the error message is actionable.
+        return orthophyl_output / "FINAL_SPECIES_TREES" / "SCO_strict.CDS.iqtree.treefile"
 
     def _build_subclade(self, taxon_name: str, entry: Dict, raw_dir: Path,
                         query_assemblies: List[Dict], taxonomy: str,
@@ -948,9 +976,8 @@ class PipelineWrapper:
         the whole raw set is the member list. CheckM2 QC runs HERE (deferred from
         partition time), only on this subclade's members.
 
-        force=True overwrites an existing DB dir for this subclade -- required when
-        building a subclade that was previously registered lazily (built=false), so
-        the placeholder entry is replaced by the real built=true one.
+        force=True overwrites an existing DB dir for this subclade (e.g. when
+        rebuilding), rather than aborting on FileExistsError.
         """
         sc_name = entry['name']
         sc_id = entry.get('subclade_id')
@@ -1035,53 +1062,6 @@ class PipelineWrapper:
                 force=force)
             self._write_checkpoint(f"database_{ckey}")
 
-    def _register_lazy_subclade(self, taxon_name: str, entry: Dict,
-                                raw_dir: Path, taxonomy: str):
-        """Register a subclade as built=false (no QC, no tree) via the DB creator.
-
-        Records its raw member list + sketch + source_genome_dir so a future query
-        routing here can QC + build it on demand.
-        """
-        sc_name = entry['name']
-        sc_id = entry.get('subclade_id')
-        ckey = sc_name
-
-        if self._check_checkpoint(f"database_{ckey}") and self.resume:
-            logger.info(f"  ✓ Lazy subclade already registered for {sc_name} (resuming)")
-            return
-
-        cmd = [
-            'python', str(self.database_creator),
-            '--single-clade', sc_name, taxonomy, str(raw_dir),
-            '--output-dir', str(self.database_dir),
-            '--is-subclade',
-            '--parent-taxon', taxon_name,
-            '--register-only',
-            '--n-genomes', str(entry.get('n_genomes', 0)),
-            '--source-genome-dir', str(raw_dir),
-        ]
-        if sc_id is not None:
-            cmd.extend(['--subclade-id', str(sc_id)])
-        if entry.get('sketch_file'):
-            cmd.extend(['--sketch-file', str(entry['sketch_file'])])
-        if entry.get('members_file'):
-            cmd.extend(['--members-file', str(entry['members_file'])])
-
-        if self.verbose:
-            logger.info(f"    Command: {' '.join(cmd)}")
-        if self.dry_run:
-            logger.info(f"  [DRY RUN] Would register lazy subclade {sc_name}")
-            return
-
-        log_file = self.logs_dir / f"database_{sc_name}.log"
-        with open(log_file, 'w') as f:
-            result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Lazy registration failed for {sc_name}. Check log: {log_file}")
-        logger.info(f"  ✓ Registered lazy subclade: {sc_name}_db (built=false)")
-        self._write_checkpoint(f"database_{ckey}")
-    
     def _download_genomes(self, taxon_name: str, output_dir: Path,
                           query_assemblies: Optional[List[Dict]] = None,
                           download_only: bool = False, qc_only: bool = False):
@@ -1259,7 +1239,7 @@ class PipelineWrapper:
             f.write(f"Genomes: {n_genomes}\n")
 
     # ------------------------------------------------------------------ #
-    # Subclade partitioning helpers (pre-QC MASH partition -> lazy build)
+    # Subclade partitioning helpers (pre-QC MASH partition, used by --megatree)
     # ------------------------------------------------------------------ #
 
     def _download_raw(self, taxon_name: str, output_dir: Path,
@@ -1412,13 +1392,19 @@ class PipelineWrapper:
             f"available.")
 
     def _partition_genomes(self, taxon_name: str, raw_genome_dir: Path,
-                           query_assemblies: List[Dict]) -> Dict:
+                           query_assemblies: List[Dict],
+                           max_size: Optional[int] = None) -> Dict:
         """Run subclade_partition.py on the RAW genome set; return the manifest dict.
 
         Builds <orthophyl_dir>/partitions/<taxon>/ holding MASH_out, per-subclade
         .msh/.members.txt, and partition_manifest.json. Every query stem must land
         in exactly one subclade (it is a clustering leaf), which we assert.
+
+        max_size is the per-subclade genome ceiling (`--max-size`); it defaults to
+        self.max_tree_genomes. The megatree path passes self.subclade_size instead.
         """
+        if max_size is None:
+            max_size = self.max_tree_genomes
         part_dir = self.orthophyl_dir / "partitions" / taxon_name
         part_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = part_dir / "partition_manifest.json"
@@ -1434,7 +1420,7 @@ class PipelineWrapper:
             '--genome-dir', str(raw_genome_dir),
             '--taxon', taxon_name,
             '--out-dir', str(part_dir),
-            '--max-size', str(self.max_tree_genomes),
+            '--max-size', str(max_size),
             '--threads', str(self.threads),
         ]
         for asm in query_assemblies:
@@ -1447,7 +1433,7 @@ class PipelineWrapper:
             # Synthesize a trivial single-subclade manifest for dry-run flow.
             return {
                 'partitioned': False, 'parent_taxon': taxon_name,
-                'max_size': self.max_tree_genomes, 'n_subclades': 1,
+                'max_size': max_size, 'n_subclades': 1,
                 'subclades': [{'subclade_id': 1, 'name': taxon_name, 'n_genomes': 0,
                                'members_file': None, 'sketch_file': None}],
                 'query_assignments': {Path(a['assembly_path']).name: taxon_name
@@ -1591,10 +1577,8 @@ class PipelineWrapper:
         (is_subclade + parent_taxon + sketch/members recorded) via the DB creator's
         --single-clade path; otherwise the classic TSV --update path is used.
 
-        force=True passes --force so an existing DB dir is overwritten. Needed when
-        building a subclade that was previously registered lazily (built=false):
-        without it the DB creator refuses (FileExistsError) and the placeholder
-        entry survives instead of being promoted to built=true.
+        force=True passes --force so an existing DB dir is overwritten (e.g.
+        rebuilding a subclade); without it the DB creator refuses (FileExistsError).
         """
         logger.info(f"\n  Creating database entry for {taxon_name}...")
 
@@ -1867,8 +1851,7 @@ class PipelineWrapper:
         logger.info("    - Which assemblies need new databases (→ OrthoPhyl)")
         logger.info("    Run without --dry-run to see actual routing decisions\n")
 
-        return {'releaf_batch': releaf_batch, 'orthophyl_batch': dict(orthophyl_batch),
-                'subclade_build_batch': {}}
+        return {'releaf_batch': releaf_batch, 'orthophyl_batch': dict(orthophyl_batch)}
     
     def _check_existing_taxon_database(self) -> Optional[Dict]:
         """Check if a database exists for the specified taxon.
@@ -1987,6 +1970,21 @@ class PipelineWrapper:
             return 1
         logger.info(f"  ✓ {raw_count} raw genomes downloaded")
 
+        taxonomy = gatherer.get_taxonomy_string()
+
+        # Opt-in megatree: full-coverage partition -> per-subclade trees -> graft.
+        # Create mode has no query, so every subclade is built. Under the ceiling
+        # this falls through to the normal single-tree path.
+        if self.megatree and raw_count > self.max_tree_genomes:
+            self._run_megatree(
+                taxon_name=self.taxon, raw_dir=raw_dir,
+                query_assemblies=[], taxonomy=taxonomy)
+            logger.info("=" * 70)
+            logger.info("TAXON MODE COMPLETE (megatree)!")
+            logger.info("=" * 70)
+            self._save_final_status()
+            return 0
+
         # Over the ceiling, the DEFAULT is to diverse-subsample to one tree (no
         # O(n^2) matrix). Create mode has no query; must-keep accessions (if any)
         # seed the pick so they are retained. The subsampled dir replaces raw_dir/
@@ -2002,55 +2000,28 @@ class PipelineWrapper:
                          if raw_dir.exists() else [])
             raw_count = len(raw_files)
 
-        manifest = {
-            'partitioned': False, 'parent_taxon': self.taxon,
-            'max_size': self.max_tree_genomes, 'n_subclades': 1,
-            'subclades': [{'subclade_id': 1, 'name': self.taxon,
-                           'n_genomes': raw_count, 'members_file': None,
-                           'sketch_file': None}],
-            'query_assignments': {},
-        }
-
-        taxonomy = gatherer.get_taxonomy_string()
-
-        if not manifest.get('partitioned'):
-            # Single tree: QC the whole raw set then build + taxon-flavored DB.
-            genomes_to_keep = self._qc_subclade(
-                download_dir, raw_files, taxon_label=self.taxon, query_assemblies=[])
-            kept = (list(genomes_to_keep.glob("*.fna")) +
-                    list(genomes_to_keep.glob("*.fasta")))
-            if len(kept) < 4:
-                logger.error(f"\n❌ ERROR: only {len(kept)} genomes passed QC (<4)")
-                return 1
-            orthophyl_output = self.output_dir / "orthophyl_run"
-            self._run_orthophyl(
-                input_dir=genomes_to_keep, output_dir=orthophyl_output,
-                taxon_name=self.taxon, assemblies=[])
-            logger.info(f"\nCreating database for {self.taxon}...")
-            self._create_taxon_database(
-                taxon_name=self.taxon, orthophyl_output=orthophyl_output,
-                gatherer=gatherer, genomes_to_keep=genomes_to_keep)
-            logger.info("=" * 70)
-            logger.info("TAXON MODE COMPLETE!")
-            logger.info("=" * 70)
-            logger.info(f"  Database created: {self.taxon}_db")
-            logger.info(f"  Assemblies: {len(kept)}")
-            self._save_final_status()
-            return 0
-
-        # Partitioned: build every subclade (create mode has no single query).
-        logger.info(f"  Building all {manifest['n_subclades']} subclades")
-        for entry in manifest['subclades']:
-            logger.info(f"\n  Building subclade {entry['name']} "
-                        f"({entry['n_genomes']} raw genomes)")
-            self._build_subclade(
-                taxon_name=self.taxon, entry=entry, raw_dir=raw_dir,
-                query_assemblies=[], taxonomy=taxonomy, is_subclade=True)
-
+        # Single tree: QC the whole (possibly subsampled) raw set, build, and
+        # create the taxon-flavored DB.
+        genomes_to_keep = self._qc_subclade(
+            download_dir, raw_files, taxon_label=self.taxon, query_assemblies=[])
+        kept = (list(genomes_to_keep.glob("*.fna")) +
+                list(genomes_to_keep.glob("*.fasta")))
+        if len(kept) < 4:
+            logger.error(f"\n❌ ERROR: only {len(kept)} genomes passed QC (<4)")
+            return 1
+        orthophyl_output = self.output_dir / "orthophyl_run"
+        self._run_orthophyl(
+            input_dir=genomes_to_keep, output_dir=orthophyl_output,
+            taxon_name=self.taxon, assemblies=[])
+        logger.info(f"\nCreating database for {self.taxon}...")
+        self._create_taxon_database(
+            taxon_name=self.taxon, orthophyl_output=orthophyl_output,
+            gatherer=gatherer, genomes_to_keep=genomes_to_keep)
         logger.info("=" * 70)
         logger.info("TAXON MODE COMPLETE!")
         logger.info("=" * 70)
-        logger.info(f"  Subclade databases created: {manifest['n_subclades']}")
+        logger.info(f"  Database created: {self.taxon}_db")
+        logger.info(f"  Assemblies: {len(kept)}")
         self._save_final_status()
         return 0
     
@@ -2450,6 +2421,41 @@ Examples:
              'The default subsample path never builds the matrix and is unaffected. '
              'Default 5000.'
     )
+    parser.add_argument(
+        '--megatree',
+        action='store_true',
+        help='Opt-in large-taxon strategy: instead of subsampling an oversized taxon '
+             'to one tree, partition the raw set into size-bounded subclades '
+             '(--subclade-size each), build a full tree per subclade, build a small '
+             'BACKBONE tree from --backbone-reps diverse reps per subclade, and graft '
+             'each subclade tree onto its reps -> one merged tree containing every '
+             'genome. High-support bipartition disagreements are flagged (not '
+             'resolved). Enforces --max-total-genomes. Overrides the default subsample.'
+    )
+    parser.add_argument(
+        '--backbone-reps',
+        type=int,
+        default=5,
+        help='Megatree only: number of diverse representatives each subclade '
+             'contributes to the backbone tree (min(subclade_size, this)); '
+             'guarantees every subclade several backbone anchors. Default 5.'
+    )
+    parser.add_argument(
+        '--subclade-size',
+        type=int,
+        default=150,
+        help='Megatree only: per-subclade genome ceiling passed to the partitioner '
+             '(--max-size). Distinct from --max-tree-genomes (the single-tree '
+             'ceiling). Default 150.'
+    )
+    parser.add_argument(
+        '--conflict-min-support',
+        type=int,
+        default=90,
+        help='Megatree only: support threshold for flagging a bipartition conflict '
+             'between a subclade tree and the backbone (0-100 scale, e.g. IQ-TREE '
+             'UFBoot). Default 90.'
+    )
 
     args = parser.parse_args()
     
@@ -2483,7 +2489,11 @@ Examples:
         update_existing=args.update_existing,
         max_tree_genomes=args.max_tree_genomes,
         max_total_genomes=args.max_total_genomes,
-        subsample_size=args.subsample_size
+        subsample_size=args.subsample_size,
+        megatree=args.megatree,
+        backbone_reps=args.backbone_reps,
+        subclade_size=args.subclade_size,
+        conflict_min_support=args.conflict_min_support
     )
 
     return wrapper.run()
