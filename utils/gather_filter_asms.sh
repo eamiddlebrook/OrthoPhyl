@@ -37,6 +37,13 @@ else
 	export entrez_query="${taxon}[organism]"
 fi
 
+# Filesystem-safe form of the taxon for use in output filenames. A binomial
+#   like "Pseudomonas aeruginosa" contains a space, which would word-split or
+#   cause "ambiguous redirect" errors if used bare in a filename/redirect.
+#   Only used for naming; the real $taxon (spaces intact, quoted) is passed to
+#   NCBI tools.
+export taxon_safe="${taxon// /_}"
+
 # Low-memory / stats-engine flags.
 #   CheckM2 replaces the old CheckM1 pplacer/reference-tree design (which
 #   OOM-killed even with --reduced_tree) with DIAMOND + pretrained ML models.
@@ -310,7 +317,7 @@ echo "
 		fi
 		
 		# Download and dehydrate
-		if datasets download genome taxon $taxon --dehydrated; then
+		if datasets download genome taxon "$taxon" --dehydrated; then
 			if unzip -o -q ncbi_dataset.zip; then
 				# Rehydrate with error checking
 				if datasets rehydrate --gzip --directory ./ 2>&1 | tee rehydrate.log; then
@@ -440,20 +447,20 @@ get_asm_metadata () {
         echo "################################################"
         echo "##### mapping biosample to GB accesstions ######"
         echo "################################################"
-	if ! run_esearch_with_retry assembly "$entrez_query" All-$taxon-info.assembly.xml; then
+	if ! run_esearch_with_retry assembly "$entrez_query" All-${taxon_safe}-info.assembly.xml; then
 		# datasets (get_NCBI_genomes) already fetched the bulk assemblies;
 		# this metadata only drives supplementary (non-datasets) downloads.
 		# Degrade gracefully with an empty table so the downstream grep -vf
 		# in get_non_datasets_assemblies has something to read.
 		echo "WARNING: proceeding without assembly metadata; supplementary (non-datasets) assemblies will be skipped."
-		:> All-$taxon.assembly.BS_to_meta
+		:> All-${taxon_safe}.assembly.BS_to_meta
 		return 0
 	fi
-	cat All-$taxon-info.assembly.xml \
+	cat All-${taxon_safe}-info.assembly.xml \
 		| xtract -pattern DocumentSummary \
 			-def "NA" -element BioSampleAccn RefSeq Genbank SpeciesName Sub_value FtpPath_GenBank FtpPath_RefSeq Taxid taxonomy-check-status ExclFromRefSeq | \
 			sed 's/ /_/g' \
-			> All-$taxon.assembly.BS_to_meta
+			> All-${taxon_safe}.assembly.BS_to_meta
 }
 
 get_non_datasets_assemblies () {
@@ -463,8 +470,8 @@ get_non_datasets_assemblies () {
 	echo "############################################"
 
 	#get info for assemblies not in datasets
-	#  Uses All-$taxon.assembly.BS_to_meta to identify asm accessions
-	cat All-$taxon.assembly.BS_to_meta | \
+	#  Uses All-${taxon_safe}.assembly.BS_to_meta to identify asm accessions
+	cat All-${taxon_safe}.assembly.BS_to_meta | \
 	grep -vf assemblies_datasets_uniq.names \
 	> assemblies_not_in_datasets.BS_to_meta
 
@@ -533,18 +540,18 @@ get_biosample_GEOdata () {
 	echo "###########   or Isolation country   ###########"
         echo "################################################"
 	# grab XML file with all brucalla info from BioSample DB
-	if ! run_esearch_with_retry biosample "$entrez_query" All-$taxon-info.biosample.xml; then
+	if ! run_esearch_with_retry biosample "$entrez_query" All-${taxon_safe}-info.biosample.xml; then
 		# Geolocation is decorative metadata; degrade gracefully to an empty
 		# table so merge_metadata_geoloc still has a file to join against.
 		echo "WARNING: proceeding without biosample geolocation metadata."
-		:> All-$taxon.biosample.BS_to_Geoloc
+		:> All-${taxon_safe}.biosample.BS_to_Geoloc
 		return 0
 	fi
 	#Tried to capture most cases of unknown value with sed. Super messy and dumb
 	#   Rewrote to use the ATTR@subATTR syntax
 	#   The "if" statement stuff is really dumb, cant figure out how to use "def" value
 	#   still need sed cmds to change stuff to "Unknown"
-        cat All-$taxon-info.biosample.xml |\
+        cat All-${taxon_safe}-info.biosample.xml |\
 		xtract -pattern DocumentSummary -def "NA" \
 			-element Accession  \
 			-def "NA" \
@@ -563,7 +570,7 @@ get_biosample_GEOdata () {
 			sed 's/ /\t/g' | \
                        	sed 's/:/\t/g' | \
 			awk '{print $1"\t"$2}'  \
-			> All-$taxon.biosample.BS_to_Geoloc
+			> All-${taxon_safe}.biosample.BS_to_Geoloc
 }
 
 merge_metadata_geoloc () {
@@ -573,11 +580,11 @@ merge_metadata_geoloc () {
 	# this is super duper dumb
 	#   there is probably a builtin way to merge files by column falue
 	#   oh well, files arnt huge
-	:> All-$taxon.BS_to_all_meta
-	cat All-$taxon.assembly.BS_to_meta |
+	:> All-${taxon_safe}.BS_to_all_meta
+	cat All-${taxon_safe}.assembly.BS_to_meta |
 	while read BS BLAH
 	do
-		cat All-$taxon.biosample.BS_to_Geoloc |
+		cat All-${taxon_safe}.biosample.BS_to_Geoloc |
 		while read BS1 BLAH1
 		do
 			if [ $BS = $BS1 ]
@@ -585,7 +592,7 @@ merge_metadata_geoloc () {
 				echo -e $BS'\t'$BLAH'\t'$BLAH1
 			fi
 		done
-	done >> All-$taxon.BS_to_all_meta
+	done >> All-${taxon_safe}.BS_to_all_meta
 }
 
 all_sample_metadata () {
@@ -596,12 +603,12 @@ all_sample_metadata () {
         cat all_asm_acc | grep GCA > all_asm_acc.GCA
 
 	:> all_asm_acc_metadata
-	cat All-$taxon.BS_to_all_meta |\
+	cat All-${taxon_safe}.BS_to_all_meta |\
 	grep -f all_asm_acc.GCF |\
 	awk '{print $2,$4,$4"."$5,$1,$8,$9,$10,$11}' \
 	>> all_asm_acc_metadata
 
-        cat All-$taxon.BS_to_all_meta |\
+        cat All-${taxon_safe}.BS_to_all_meta |\
         grep -f all_asm_acc.GCA |\
         awk '{print $3,$4,$4"."$5,$1,$8,$9,$10,$11}' \
 	>> all_asm_acc_metadata
