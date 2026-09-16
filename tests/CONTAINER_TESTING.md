@@ -8,14 +8,14 @@ This guide explains how to run OrthoPhyl tests inside Singularity or Docker cont
 
 ```bash
 # Basic unit tests (no special setup needed)
-singularity exec OrthoPhyl.v2.2.1.router.6.sif pytest tests/unit/
+singularity exec OrthoPhyl.v3.1.0.sif pytest tests/unit/
 
 # Integration tests with writable temp directory
 singularity exec \
   --bind /scratch:/scratch \
   --env TMPDIR=/scratch/pytest_tmp \
   --env ORTHOPHYL_RUN_INTEGRATION=1 \
-  OrthoPhyl.v2.2.1.router.6.sif \
+  OrthoPhyl.v3.1.0.sif \
   pytest -m integration
 
 # Alternative: Use explicit PYTEST_TMP_DIR
@@ -23,7 +23,7 @@ singularity exec \
   --bind /scratch:/scratch \
   --env PYTEST_TMP_DIR=/scratch/pytest_tmp \
   --env ORTHOPHYL_RUN_INTEGRATION=1 \
-  OrthoPhyl.v2.2.1.router.6.sif \
+  OrthoPhyl.v3.1.0.sif \
   pytest -m integration
 ```
 

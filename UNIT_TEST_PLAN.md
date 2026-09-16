@@ -1,7 +1,7 @@
 # OrthoPhyl Unit Testing Plan
 
 ## Overview
-This document outlines a comprehensive unit testing strategy for the OrthoPhyl v2.2.1 pipeline and its ReLeaf extension. The testing plan is organized by component type and covers both Python scripts and Bash functions.
+This document outlines a comprehensive unit testing strategy for the OrthoPhyl v3.1.0 pipeline and its ReLeaf extension. The testing plan is organized by component type and covers both Python scripts and Bash functions.
 
 ---
 

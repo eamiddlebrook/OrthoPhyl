@@ -134,13 +134,13 @@ singularity_images=~/singularity_images/
 mkdir -p ${singularity_images}
 cd ${singularity_images}
 singularity pull library://earlyevol/default/orthophyl
-mv orthophyl_latest.sif OrthoPhyl_v2.2.1.sif
+mv orthophyl_latest.sif OrthoPhyl.v3.1.0.sif
 ```
 
 Verify the image runs (writes 12 trees under `FINAL_SPECIES_TREES/`; `-s` output dir is **required** in a container):
 
 ```bash
-singularity run ${singularity_images}/OrthoPhyl_v2.2.1.sif -T TESTER_fasttest -s ./tester_fasttest_output -t 4
+singularity run ${singularity_images}/OrthoPhyl.v3.1.0.sif -T TESTER_fasttest -s ./tester_fasttest_output -t 4
 ```
 
 **Option B — conda/mamba environment**

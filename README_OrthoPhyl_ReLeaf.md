@@ -1,4 +1,4 @@
-# **OrthoPhyl2 (v2.2.1)**: Bigger and Better Orthology-based Phylogenomics
+# **OrthoPhyl2 (v3.1.0)**: Bigger and Better Orthology-based Phylogenomics
 # Now Freaturing **ReLeaf!**: Rapidly Add Samples to Previous OrthoPhyl Runs
 <br /> <br />
 ## Table of Contents
@@ -59,7 +59,7 @@ singularity_images=~/singularity_images/
 mkdir ${singularity_images}
 cd ${singularity_images}
 singularity pull library://earlyevol/default/orthophyl
-mv orthophyl_latest.sif OrthoPhyl_v2.2.1.sif
+mv orthophyl_latest.sif OrthoPhyl.v3.1.0.sif
 ```
 Congradulations! You can skip down to testing the "install"!
 
@@ -165,12 +165,12 @@ cd Alignment_Assessment/
 ### Test Singularity container
 You must specify an output directory (-s) if running through singularity, because the script will try to write directly to the container (wont work). The ```-t 4 ``` allows OP to run on 4 cores. Change if required.
 ```
-singularity run ${singularity_images}/OrthoPhyl_v2.2.1.sif -T TESTER_fasttest -s ./tester_fasttest_output -t 4
+singularity run ${singularity_images}/OrthoPhyl.v3.1.0.sif -T TESTER_fasttest -s ./tester_fasttest_output -t 4
 ```
 If ```ls ./tester_fasttest_output/FINAL_SPECIES_TREES``` returns trees with prefixes [astral fasttree iqtree] with [SCO_3 SCO_strict] and [CDS PROT] suffixes (12 total trees), the pipline ran successfully!
 #### Test Releaf within the singularity container
 ```
-singularity exec ${singularity_images}/OrthoPhyl_v2.2.1.sif -a TESTER/annots_nucls_fasttest_addasm,TESTER/annots_prots_fasttest_addasm -t 4 -s ./tester_fasttest_output
+singularity exec ${singularity_images}/OrthoPhyl.v3.1.0.sif -a TESTER/annots_nucls_fasttest_addasm,TESTER/annots_prots_fasttest_addasm -t 4 -s ./tester_fasttest_output
 ```
 If ```ls ./tester_fasttest_output/FINAL_SPECIES_TREES``` returns trees (iqtree.[].treefile fasttree.[].tree), then the ReLeaf pipeline ran successfully!
 
@@ -264,7 +264,7 @@ singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir
 ### Run Examples 
 #### Example1: Run OrthoPhyl on assemblies in ~/Projects/ASMS/ecoli/ using 12 cores within singularity and place all results and intermediate files in ~/Projects/phylogenetics/ecoli/
 ```
-singularity run ${singularity_images}/OrthoPhyl.X.X.X.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
+singularity run ${singularity_images}/OrthoPhyl.v3.1.0.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
 
 ```
 #### Example2: Run the same OrthoPhyl command from the manual install
