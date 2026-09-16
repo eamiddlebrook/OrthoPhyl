@@ -248,7 +248,12 @@ main () {
 	# --- QC half (skipped in --download-only mode, above) ---
 	# In --qc-only mode the caller must have pre-staged $wd/assemblies_all.TMP/*.fna.
 	if [ "$qc_only" = true ]; then
-		if [ ! -d "$wd"/assemblies_all.TMP ] || [ -z "$(ls -A "$wd"/assemblies_all.TMP/*.fna 2>/dev/null)" ]; then
+		# Count with `find`, not `ls -A DIR/*.fna`: the glob expands onto one
+		#   command line and blows ARG_MAX at large genome counts (verified at
+		#   ~70k files), which made this guard report "none found" and abort a
+		#   perfectly good staged set.
+		if [ ! -d "$wd"/assemblies_all.TMP ] || \
+		   [ "$(find "$wd"/assemblies_all.TMP -maxdepth 1 -name '*.fna' -print -quit 2>/dev/null | wc -l)" -eq 0 ]; then
 			echo "ERROR: --qc-only requires pre-staged genomes in $wd/assemblies_all.TMP/ (none found)" >&2
 			exit 1
 		fi
