@@ -782,9 +782,16 @@ get_asm_stats () {
 	cd $wd
 
 	echo "Running statswrapper.sh on assemblies..."
-	# Run bbmap statswrapper on all assemblies
-	statswrapper.sh ${input_dir}*.fna > assemblies_all.stats.bbmap.txt
-	
+	# Feed the file list via xargs, NOT `statswrapper.sh ${input_dir}*.fna`:
+	#   the bare glob puts every path on one command line and blows ARG_MAX on
+	#   large sets (same failure class as aggregate_assemblies). statswrapper
+	#   prints a header per invocation, so keep it to ONE call by passing the
+	#   list on stdin-built argv and stripping duplicate headers afterwards.
+	find "${input_dir%/}" -maxdepth 1 -name '*.fna' -print0 \
+		| xargs -0 -r statswrapper.sh \
+		> assemblies_all.stats.bbmap.txt \
+		|| { echo "ERROR: statswrapper.sh failed" >&2 ; exit 1 ; }
+
 	# Convert bbmap output to format expected by filter function
 	# bbmap columns: #file n_scaffolds scaf_bp ... n50 ... gc_avg
 	# Expected format matches checkM: acc lineage ... duplication_ratio completeness contamination GC GC_std Genome-size #scaffs scaff_N50
@@ -793,17 +800,45 @@ get_asm_stats () {
 	echo "acc lineage #markerGenes #genomes_based_on missing 1copy 2copy 3copy 4copy 5+copy duplication_ratio completeness contamination GC GC_std Genome-size #scaffs scaff_N50" \
 		> $wd/assemblies_all.stats.txt
 	
-	# Parse bbmap output and reformat
-	# bbmap columns: n_scaffolds(1) scaf_bp(3) scaf_N50(6) gc_avg(18) filename(20)
-	# Target CheckM format: acc(1) ... GC(14) GC_std(15) Genome-size(16) #scaffs(17) scaff_N50(18)
-	cat assemblies_all.stats.bbmap.txt | \
-		grep -v "^#" | \
-		awk 'NR>1 {print $20,$1,$3,$6,$18}' | \
+	# Parse bbmap output and reformat.
+	# bbmap columns: n_scaffolds(1) scaf_bp(3) scaf_N50(6) scaf_L50(7)
+	#                gc_avg(18) filename(20)
+	# Target CheckM format: acc(1) ... GC(14) GC_std(15) Genome-size(16)
+	#                       #scaffs(17) scaff_N50(18)
+	#
+	# NOTE the N50 column choice. bbmap's "scaf_N50" (col 6) is the scaffold
+	#   COUNT at which 50% of the assembly is reached (values ~1-105); the
+	#   corresponding LENGTH is "scaf_L50" (col 7, ~10^5-10^6). CheckM2 puts
+	#   Contig_N50 -- a LENGTH -- in target column 18, and filter_asm_by_stats
+	#   compares that column against MIN_N50. Using col 6 here put a count where
+	#   a length belongs, which made the N50 filter a silent no-op: MIN_N50
+	#   defaults to mean-3*sd of the same column, and on 60 real Pseudomonas
+	#   genomes that evaluates to -29.7, so no assembly could ever fail it.
+	#   Use scaf_L50 (col 7) so bbmap and CheckM2 mean the same thing.
+	#
+	# Drop statswrapper's header line(s). The header does NOT start with '#' --
+	#   it begins with the literal "n_scaffolds" -- and it has the same 20 fields
+	#   as a data row, so it must be matched by name. There is one header per
+	#   statswrapper invocation, and xargs may split a very large file list
+	#   across several, so filter every occurrence rather than just the first.
+	grep -v '^#' assemblies_all.stats.bbmap.txt | \
+		awk '$1 != "n_scaffolds" && NF>=20 {print $20,$1,$3,$7,$18}' | \
 		sed 's|.*/||; s/.fna//g' | \
 		awk '{print $1,"bbmap","NA","NA","NA","NA","NA","NA","NA","NA","0.00","100","0",$5,"NA",$3,$2,$4}' \
 		>> $wd/assemblies_all.stats.txt
-	
-	echo "Stats collection complete using bbmap"
+
+	# Sanity check: every input assembly must have a stats row, mirroring the
+	#   CheckM2 path. A mismatch means statswrapper silently skipped genomes.
+	n_input=$(find "${input_dir%/}" -maxdepth 1 -name '*.fna' | wc -l)
+	n_stats=$(( $(wc -l < $wd/assemblies_all.stats.txt) - 1 ))
+	echo "Stats collection complete using bbmap: $n_stats rows for $n_input assemblies"
+	if [ "$n_stats" -ne "$n_input" ]; then
+		echo "WARNING: bbmap produced $n_stats stats rows for $n_input assemblies" >&2
+	fi
+	if [ "$n_stats" -eq 0 ]; then
+		echo "ERROR: bbmap produced no stats rows" >&2
+		exit 1
+	fi
 	echo "Note: Completeness, contamination, and duplication set to placeholders (100, 0, 0)"
 	echo "      Filtering will only use: genome size, N50, and GC content"
 }
