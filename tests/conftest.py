@@ -134,6 +134,14 @@ def megatree_graft_module():
 
 
 @pytest.fixture(scope="session")
+def metadata_parser_module():
+    return load_module(
+        REPO_ROOT / "python_scripts" / "parse_asm_metadata.py",
+        name="parse_asm_metadata",
+    )
+
+
+@pytest.fixture(scope="session")
 def add_releaf_version_module():
     return load_module(
         REPO_ROOT / "assembly_router" / "add_releaf_version.py",

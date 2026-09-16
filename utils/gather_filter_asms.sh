@@ -23,6 +23,19 @@ checkm2 database --download
 fi
 
 
+# Resolve the repo root from this script's own location (utils/), so the helper
+#   python scripts can be found regardless of the caller's cwd. Resolved before
+#   any `cd` happens below. Deliberately NOT named $script_home -- that variable
+#   belongs to OrthoPhyl.sh/ReLeaf.sh and this script is exec'd, not sourced.
+gather_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+gather_repo_root="$(dirname "$gather_script_dir")"
+metadata_parser="${gather_repo_root}/python_scripts/parse_asm_metadata.py"
+if [ ! -f "$metadata_parser" ]; then
+	echo "ERROR: helper not found: $metadata_parser" >&2
+	echo "  (expected at <repo>/python_scripts/ relative to $gather_script_dir)" >&2
+	exit 1
+fi
+
 export taxon="$1"
 # deal with WD below
 threads=$3
@@ -471,9 +484,14 @@ get_non_datasets_assemblies () {
 
 	#get info for assemblies not in datasets
 	#  Uses All-${taxon_safe}.assembly.BS_to_meta to identify asm accessions
-	cat All-${taxon_safe}.assembly.BS_to_meta | \
-	grep -vf assemblies_datasets_uniq.names \
-	> assemblies_not_in_datasets.BS_to_meta
+	#  Set-difference in python: the old `grep -vf assemblies_datasets_uniq.names`
+	#    matched ~100k accessions as regexes against every line. This checks the
+	#    RefSeq/GenBank columns against a set instead.
+	python3 "$metadata_parser" exclude-downloaded \
+		--meta All-${taxon_safe}.assembly.BS_to_meta \
+		--downloaded assemblies_datasets_uniq.names \
+		--out assemblies_not_in_datasets.BS_to_meta \
+		|| { echo "ERROR: get_non_datasets_assemblies filter failed" >&2 ; exit 1 ; }
 
 	mkdir assemblies_additional
 	cd assemblies_additional
@@ -577,41 +595,39 @@ merge_metadata_geoloc () {
 	echo "################################################"
 	echo "#####  add Geoloc data to metadata file   ######"
 	echo "################################################"
-	# this is super duper dumb
-	#   there is probably a builtin way to merge files by column falue
-	#   oh well, files arnt huge
-	:> All-${taxon_safe}.BS_to_all_meta
-	cat All-${taxon_safe}.assembly.BS_to_meta |
-	while read BS BLAH
-	do
-		cat All-${taxon_safe}.biosample.BS_to_Geoloc |
-		while read BS1 BLAH1
-		do
-			if [ $BS = $BS1 ]
-			then
-				echo -e $BS'\t'$BLAH'\t'$BLAH1
-			fi
-		done
-	done >> All-${taxon_safe}.BS_to_all_meta
+	# Hash join on the BioSample accession, in python.
+	#   The old bash version was a nested `while read` loop that re-`cat`ed the
+	#   ENTIRE geoloc file once per assembly row -- O(n*m) shell iterations plus a
+	#   fork per row. On a 100k-assembly taxon that is ~1e10 iterations and it
+	#   dominated the whole gather runtime. python_scripts/parse_asm_metadata.py
+	#   does the same INNER join in one linear pass with a dict.
+	python3 "$metadata_parser" merge-geoloc \
+		--meta All-${taxon_safe}.assembly.BS_to_meta \
+		--geoloc All-${taxon_safe}.biosample.BS_to_Geoloc \
+		--out All-${taxon_safe}.BS_to_all_meta \
+		|| { echo "ERROR: merge_metadata_geoloc failed" >&2 ; exit 1 ; }
 }
 
 all_sample_metadata () {
 	echo "################################################"
         echo "##### Filter all_metadata for assemblies  ######"
 	echo "################################################"
-	cat all_asm_acc | grep GCF > all_asm_acc.GCF
-        cat all_asm_acc | grep GCA > all_asm_acc.GCA
-
-	:> all_asm_acc_metadata
-	cat All-${taxon_safe}.BS_to_all_meta |\
-	grep -f all_asm_acc.GCF |\
-	awk '{print $2,$4,$4"."$5,$1,$8,$9,$10,$11}' \
-	>> all_asm_acc_metadata
-
-        cat All-${taxon_safe}.BS_to_all_meta |\
-        grep -f all_asm_acc.GCA |\
-        awk '{print $3,$4,$4"."$5,$1,$8,$9,$10,$11}' \
-	>> all_asm_acc_metadata
+	# Set-membership filter + column projection, in python.
+	#   The old version piped through `grep -f all_asm_acc.GCF` (and .GCA), which
+	#   compiles ~100k accessions as REGEXES and matches every one against every
+	#   line -- twice over the whole table. Set lookup on the accession column is
+	#   O(1) per row. It also fixes two `grep -f` false positives: an accession
+	#   matching inside an FTP path column, and GCF_000123456.1 matching
+	#   GCF_000123456.10 (substring, not exact).
+	#   --out-gcf/--out-gca reproduce the intermediate accession lists the bash
+	#   version left behind, so all_asm_acc.GCF/.GCA still exist for inspection.
+	python3 "$metadata_parser" filter-by-acc \
+		--meta All-${taxon_safe}.BS_to_all_meta \
+		--acc-list all_asm_acc \
+		--out all_asm_acc_metadata \
+		--out-gcf all_asm_acc.GCF \
+		--out-gca all_asm_acc.GCA \
+		|| { echo "ERROR: all_sample_metadata failed" >&2 ; exit 1 ; }
 }
 
 aggregate_assemblies () {
