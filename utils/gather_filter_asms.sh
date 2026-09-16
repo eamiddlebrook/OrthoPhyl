@@ -628,17 +628,28 @@ aggregate_assemblies () {
         echo "#####################################"
 	cd $wd
 	out_dir=$1
-	mkdir $out_dir
-	for I in $(ls $wd/assemblies_additional/*.gz)
+	mkdir -p $out_dir
+	# Use `find | xargs`, NOT `for I in $(ls DIR/*.gz)`.
+	#   The old form expanded every path onto one command line, which blows the
+	#   ARG_MAX limit on large taxa: at 70,951 assemblies `ls` dies with
+	#   "Argument list too long" AND the surrounding for-loop still exits 0, so
+	#   the run silently continued with ZERO decompressed genomes. find streams
+	#   the list instead, and -P parallelises the gunzip across cores.
+	for src in assemblies_additional assemblies_datasets_uniq
 	do
-                base=$(basename	${I%.*.*})
-                cat $I | gunzip > $out_dir/${base}.fna
+		[ -d "$wd/$src" ] || continue
+		find "$wd/$src" -maxdepth 1 -name '*.gz' -print0 \
+			| xargs -0 -r -P "${threads:-1}" -I '{}' \
+				bash -c 'f="$1"; b="$(basename "${f%.*.*}")"; \
+					gunzip -c "$f" > "'"$out_dir"'/${b}.fna"' _ '{}'
 	done
-	for I in $(ls $wd/assemblies_datasets_uniq/*.gz)
-        do
-                base=$(basename	${I%.*.*})
-                cat $I | gunzip > $out_dir/${base}.fna
-        done
+
+	n_out=$(find "$out_dir" -maxdepth 1 -name '*.fna' | wc -l)
+	echo "aggregate_assemblies: $n_out decompressed genomes in $out_dir"
+	if [ "$n_out" -eq 0 ]; then
+		echo "ERROR: aggregate_assemblies produced no genomes" >&2
+		exit 1
+	fi
 }
 
 filter_asm_by_taxCheck () {
