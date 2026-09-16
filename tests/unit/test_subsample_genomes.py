@@ -7,6 +7,7 @@ layer (subsample/find_genomes/manifest) is tested with the mash calls mocked.
 
 import json
 import math
+import os
 
 import pytest
 
@@ -159,3 +160,29 @@ class TestSubsampleOrchestration:
         gdir.mkdir()
         with pytest.raises(SystemExit):
             ss.subsample(str(gdir), str(tmp_path / "out"), target=5, threads=1)
+
+    def test_sketch_uses_file_of_filenames_not_bare_argv(self, ss, tmp_path, monkeypatch):
+        # mash sketch must take -l <filelist>, not one argv entry per genome --
+        # bare argv overflows execve's ARG_MAX at tens of thousands of genomes.
+        gdir = tmp_path / "genomes"
+        self._make_genomes(gdir, 6)
+        out = tmp_path / "out"
+
+        seen_cmd = {}
+        def fake_run_mash(cmd, stdout_path=None):
+            seen_cmd["cmd"] = cmd
+        monkeypatch.setattr(ss, "_run_mash", fake_run_mash)
+        monkeypatch.setattr(ss, "_mash_dist_row",
+                            lambda q, m: {f"g{i}.fna": 0.1 for i in range(6)})
+
+        ss.subsample(str(gdir), str(out), target=3, threads=1)
+
+        cmd = seen_cmd["cmd"]
+        assert "-l" in cmd
+        filelist = cmd[cmd.index("-l") + 1]
+        assert os.path.exists(filelist)
+        listed = set(open(filelist).read().split())
+        assert len(listed) == 6
+        # None of the genome paths should appear as bare positional argv entries.
+        for i in range(6):
+            assert str(gdir / f"g{i}.fna") not in cmd

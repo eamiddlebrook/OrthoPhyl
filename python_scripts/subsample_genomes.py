@@ -211,12 +211,20 @@ def subsample(genome_dir, out_dir, target, threads, must_keep=None):
         return manifest
 
     combined = os.path.join(out_dir, "combined")
+    # Pass genome paths via a file-of-filenames (-l), not as bare argv: at tens
+    # of thousands of genomes the combined path list overflows execve's
+    # ARG_MAX (confirmed: 74707 paths fails with "Argument list too long").
+    filelist = os.path.join(out_dir, "sketch_input.txt")
+    with open(filelist, "w") as fh:
+        for f in genome_files:
+            fh.write(f + "\n")
     cmd = [
         "mash", "sketch",
         "-k", MASH_K, "-s", MASH_S,
         "-p", str(threads),
         "-o", combined,
-    ] + list(genome_files)
+        "-l", filelist,
+    ]
     _run_mash(cmd)
     combined_msh = combined + ".msh"
 
