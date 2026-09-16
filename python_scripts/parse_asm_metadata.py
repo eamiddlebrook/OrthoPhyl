@@ -25,6 +25,22 @@ What was slow, and why:
       The bash version ran `grep -vf assemblies_datasets_uniq.names`, again ~100k
       regex patterns, to drop already-downloaded assemblies.
 
+...and two subcommands that fix a CORRECTNESS bug rather than a speed one:
+
+  parse-assembly-xml  <- get_asm_metadata()'s `xtract -element ...` pipeline
+      xtract emits one whitespace-separated token per matched element, so a
+      REPEATED element silently shifts every later column right. `Sub_value` is
+      repeated whenever an assembly has more than one Infraspecie entry (e.g.
+      both a culture-collection and a strain designation), which pushes
+      taxonomy-check-status into the geolocation column -- the "geolocation is
+      OK" bug. Measured on a real 75,155-row Pseudomonas run: 2,150 rows (2.9%)
+      had extra columns. Parsing by ELEMENT NAME removes the whole bug class.
+
+  parse-biosample-xml  <- get_biosample_GEOdata()'s xtract + 7-`sed` pipeline
+      Same idea for the geolocation table, and it drops the fragile
+      `sed 's/Missing.*$/Unknown/g'`-style normalisation in favour of explicit
+      value matching.
+
 Behaviour is preserved bit-for-bit against the bash it replaces, including two
 quirks that are load-bearing downstream:
 
@@ -43,13 +59,16 @@ accession anywhere on the line (including inside the FTP path columns) and, bein
 a substring match, `GCF_000123456.1` also matched `GCF_000123456.10`. Exact
 column matching is both faster and removes that false positive.
 
-Field layout of All-<taxon>.assembly.BS_to_meta (from xtract, 1-based):
+Field layout of All-<taxon>.assembly.BS_to_meta (1-based). parse-assembly-xml
+guarantees EXACTLY these 10 columns per row, one line per DocumentSummary:
     1 BioSampleAccn  2 RefSeq  3 Genbank  4 SpeciesName  5 Sub_value
     6 FtpPath_GenBank  7 FtpPath_RefSeq  8 Taxid  9 taxonomy-check-status
     10 ExclFromRefSeq
 ...and after merge-geoloc appends the geolocation: 11 geo_loc_name.
 
 Usage:
+    parse_asm_metadata.py parse-assembly-xml --xml F --out F
+    parse_asm_metadata.py parse-biosample-xml --xml F --out F
     parse_asm_metadata.py merge-geoloc --meta F --geoloc F --out F
     parse_asm_metadata.py filter-by-acc --meta F --acc-list F --out F \\
         [--out-gcf F] [--out-gca F]
@@ -59,6 +78,192 @@ Usage:
 import argparse
 import os
 import sys
+import xml.etree.ElementTree as ET
+
+
+# Value used for an absent field, matching xtract's `-def "NA"`.
+MISSING = "NA"
+
+# BS_to_meta must have exactly this many columns. Anything else means the row was
+#   produced by the old xtract pipeline and a repeated element shifted the
+#   columns; see the module docstring and the merge-geoloc recurrence guard.
+#   Checking the width catches the shift directly, and is strictly better than
+#   sniffing for taxcheck tokens in the geolocation column: "NA" is a legitimate
+#   geolocation value, so a token-based guard would false-positive.
+EXPECTED_META_COLUMNS = 10
+
+# geo_loc_name values that mean "no real location". The bash pipeline matched
+#   these with `sed 's/Missing.*$/Unknown/g'` and friends -- a prefix match on a
+#   lowercased-or-not spelling. Compared case-insensitively against the value
+#   prefix to reproduce that without the regex fragility.
+UNKNOWN_GEOLOC_PREFIXES = (
+    "missing",
+    "unknown",
+    "not collected",
+    "not_collected",
+    "not applicable",
+    "not_applicable",
+    "none",
+    "not determined",
+    "not_determined",
+    "not provided",
+    "not_provided",
+)
+
+
+# --------------------------------------------------------------------------- #
+# XML parsing -- replaces the xtract pipelines (fixes the column-shift bug)    #
+# --------------------------------------------------------------------------- #
+
+def iter_document_summaries(path):
+    """Stream <DocumentSummary> elements from an NCBI esummary XML file.
+
+    This deliberately does NOT use a strict whole-document parser, because these
+    files are NOT single XML documents. `esearch | esummary` appends one
+    <DocumentSummarySet> root per fetched batch, so a real file is a CONCATENATION
+    of many roots (the 75k-assembly Pseudomonas run has 76 of them, plus a repeated
+    <?xml?>/<!DOCTYPE> preamble). ET.iterparse() stops at the end of the first root
+    with "junk after document element" -- which silently yielded only the first
+    1,000 of 75,155 records when this was first written.
+
+    So: scan for <DocumentSummary>...</DocumentSummary> spans textually and parse
+    each one on its own with ET.fromstring(). That is still real XML parsing per
+    record (attributes, nesting and entities all handled by ET), it tolerates the
+    multi-root layout and a truncated tail, and memory stays flat -- only one
+    record is held at a time, which matters at 380-555 MB per file.
+
+    A record that fails to parse is skipped with a warning rather than aborting
+    the run; one bad record should not discard the other 75,154.
+    """
+    if not path or not os.path.exists(path):
+        return
+
+    open_tag = "<DocumentSummary>"
+    open_tag_attr = "<DocumentSummary "   # e.g. <DocumentSummary uid="...">
+    close_tag = "</DocumentSummary>"
+    n_bad = 0
+
+    with open(path, "r", errors="replace") as fh:
+        buf = []
+        inside = False
+        for line in fh:
+            if not inside and (open_tag in line or open_tag_attr in line):
+                inside = True
+                buf = []
+            if inside:
+                buf.append(line)
+                if close_tag in line:
+                    inside = False
+                    chunk = "".join(buf)
+                    buf = []
+                    try:
+                        yield ET.fromstring(chunk)
+                    except ET.ParseError:
+                        n_bad += 1
+
+    if n_bad:
+        sys.stderr.write(
+            "WARNING: skipped {} malformed <DocumentSummary> record(s) in "
+            "{}.\n".format(n_bad, path)
+        )
+
+
+def first_text(elem, tag, default=MISSING):
+    """Return the text of the FIRST descendant <tag>, or default if absent/empty.
+
+    Taking the first occurrence is what makes the output positionally stable:
+    `Sub_value` repeats when an assembly has several Infraspecie entries, and
+    xtract emitted one token per occurrence, shifting all later columns. One
+    element name -> exactly one column, always.
+    """
+    for node in elem.iter(tag):
+        text = (node.text or "").strip()
+        if text:
+            return text
+        return default
+    return default
+
+
+def sanitize_field(value):
+    """Collapse whitespace inside a field value to underscores.
+
+    The bash pipeline ran `sed 's/ /_/g'` over the whole xtract output for exactly
+    this reason: a species name like "Pseudomonas aeruginosa" would otherwise
+    become two whitespace-separated columns. Tabs/newlines get the same treatment
+    so a field can never split a row.
+    """
+    if value is None:
+        return MISSING
+    value = " ".join(str(value).split())
+    if not value:
+        return MISSING
+    return value.replace(" ", "_")
+
+
+def assembly_row(elem):
+    """Extract the 10 BS_to_meta columns from one assembly <DocumentSummary>.
+
+    Column order matches what get_asm_metadata()'s xtract emitted, so every
+    downstream consumer keeps working -- but each column is now keyed by element
+    name, so a repeated element cannot shift the row.
+    """
+    fields = [
+        first_text(elem, "BioSampleAccn"),
+        first_text(elem, "RefSeq"),
+        first_text(elem, "Genbank"),
+        first_text(elem, "SpeciesName"),
+        first_text(elem, "Sub_value"),
+        first_text(elem, "FtpPath_GenBank"),
+        first_text(elem, "FtpPath_RefSeq"),
+        first_text(elem, "Taxid"),
+        first_text(elem, "taxonomy-check-status"),
+        first_text(elem, "ExclFromRefSeq"),
+    ]
+    return [sanitize_field(f) for f in fields]
+
+
+def normalize_geoloc(value):
+    """Normalize a raw geo_loc_name to the form the old sed chain produced.
+
+    - "India: Chhatrapati Sambhajinagar" -> "India"  (the bash split on ':' and
+      kept the first field via awk; 75,609 values in the Pseudomonas run have a
+      colon, so this matters).
+    - missing/unknown/not-collected spellings -> "Unknown".
+    - empty -> "NA" (the bash `awk '{if ($2 == "") print $1,"NA"}'`).
+    - spaces -> underscores, so the value is one column.
+    """
+    if value is None:
+        return MISSING
+    value = " ".join(str(value).split())
+    if not value:
+        return MISSING
+
+    low = value.lower()
+    for prefix in UNKNOWN_GEOLOC_PREFIXES:
+        if low.startswith(prefix):
+            return "Unknown"
+
+    # Keep only the country part, before the first colon.
+    country = value.split(":", 1)[0].strip()
+    if not country:
+        return MISSING
+    return country.replace(" ", "_")
+
+
+def biosample_geoloc(elem):
+    """Return (accession, normalized_geoloc) for a biosample <DocumentSummary>.
+
+    Finds the Attribute whose harmonized_name is geo_loc_name, mirroring the
+    xtract `-if Attribute@harmonized_name -equals geo_loc_name` selector. Returns
+    ("", ...) if the record has no accession (skipped by the caller).
+    """
+    accession = first_text(elem, "Accession", default="")
+    raw = None
+    for attr in elem.iter("Attribute"):
+        if attr.get("harmonized_name") == "geo_loc_name":
+            raw = attr.text
+            break
+    return sanitize_field(accession) if accession else "", normalize_geoloc(raw)
 
 
 # --------------------------------------------------------------------------- #
@@ -205,14 +410,79 @@ def exclude_downloaded(rows, downloaded):
 # Subcommands                                                                 #
 # --------------------------------------------------------------------------- #
 
+def cmd_parse_assembly_xml(args):
+    n_records = 0
+    n_multi_subvalue = 0
+    with open(args.out, "w") as out:
+        for elem in iter_document_summaries(args.xml):
+            # Count records that would have shifted columns under xtract, so the
+            #   log shows how much the old pipeline was corrupting.
+            if len(list(elem.iter("Sub_value"))) > 1:
+                n_multi_subvalue += 1
+            row = assembly_row(elem)
+            out.write("\t".join(row) + "\n")
+            n_records += 1
+
+    sys.stderr.write(
+        "parse-assembly-xml: {} records -> {} (10 columns each)\n".format(
+            n_records, args.out
+        )
+    )
+    if n_multi_subvalue:
+        sys.stderr.write(
+            "  {} record(s) had multiple <Sub_value> entries; under the old "
+            "xtract pipeline these shifted every later column right (putting "
+            "taxonomy-check-status where the geolocation belongs). Now keyed by "
+            "element name, so columns stay aligned.\n".format(n_multi_subvalue)
+        )
+    if n_records == 0:
+        sys.stderr.write(
+            "WARNING: no DocumentSummary records parsed from {}; "
+            "{} is empty.\n".format(args.xml, args.out)
+        )
+    return 0
+
+
+def cmd_parse_biosample_xml(args):
+    n_records = n_written = 0
+    with open(args.out, "w") as out:
+        for elem in iter_document_summaries(args.xml):
+            n_records += 1
+            accession, geoloc = biosample_geoloc(elem)
+            if not accession:
+                continue
+            out.write("{}\t{}\n".format(accession, geoloc))
+            n_written += 1
+
+    sys.stderr.write(
+        "parse-biosample-xml: {} records -> {} geolocation rows in {}\n".format(
+            n_records, n_written, args.out
+        )
+    )
+    if n_records == 0:
+        sys.stderr.write(
+            "WARNING: no DocumentSummary records parsed from {}; geolocation "
+            "table is empty (geolocation is decorative metadata).\n".format(
+                args.xml
+            )
+        )
+    return 0
+
+
 def cmd_merge_geoloc(args):
     geoloc_map = read_geoloc_map(args.geoloc)
     n_in = n_out = 0
+    n_wrong_width = 0
     with open(args.out, "w") as out:
         for _raw, fields in iter_rows(args.meta):
             if not fields:
                 continue
             n_in += 1
+            # Recurrence guard for the column-shift bug: BS_to_meta must be
+            #   exactly 10 columns, or the geolocation lands in the wrong place
+            #   and taxonomy-check-status ("OK") gets read as a country.
+            if len(fields) != EXPECTED_META_COLUMNS:
+                n_wrong_width += 1
             bs = fields[0]
             rest = " ".join(fields[1:])
             locs = geoloc_map.get(bs)
@@ -221,6 +491,17 @@ def cmd_merge_geoloc(args):
             for loc in locs:
                 out.write("{}\t{}\t{}\n".format(bs, rest, loc))
                 n_out += 1
+
+    if n_wrong_width:
+        sys.stderr.write(
+            "WARNING: {} of {} metadata rows did not have the expected {} "
+            "columns. Downstream column indices (taxonomy-check-status, "
+            "geolocation) will be wrong for those rows. Regenerate {} with "
+            "`parse_asm_metadata.py parse-assembly-xml` instead of the old "
+            "xtract pipeline.\n".format(
+                n_wrong_width, n_in, EXPECTED_META_COLUMNS, args.meta
+            )
+        )
 
     sys.stderr.write(
         "merge-geoloc: {} metadata rows, {} biosamples with geolocation, "
@@ -303,6 +584,26 @@ def build_parser():
     sub = parser.add_subparsers(dest="command")
     # Python 3.6 compatibility: `required=` on add_subparsers is 3.7+.
     sub.required = True
+
+    p = sub.add_parser(
+        "parse-assembly-xml",
+        help="Assembly esummary XML -> BS_to_meta (10 stable columns).",
+    )
+    p.add_argument("--xml", required=True,
+                   help="All-<taxon>-info.assembly.xml")
+    p.add_argument("--out", required=True,
+                   help="Output All-<taxon>.assembly.BS_to_meta")
+    p.set_defaults(func=cmd_parse_assembly_xml)
+
+    p = sub.add_parser(
+        "parse-biosample-xml",
+        help="Biosample esummary XML -> accession<TAB>geolocation table.",
+    )
+    p.add_argument("--xml", required=True,
+                   help="All-<taxon>-info.biosample.xml")
+    p.add_argument("--out", required=True,
+                   help="Output All-<taxon>.biosample.BS_to_Geoloc")
+    p.set_defaults(func=cmd_parse_biosample_xml)
 
     p = sub.add_parser(
         "merge-geoloc",

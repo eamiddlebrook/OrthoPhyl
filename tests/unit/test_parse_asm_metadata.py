@@ -1,13 +1,19 @@
 """Tests for python_scripts/parse_asm_metadata.py.
 
-This module replaces three slow bash constructs in utils/gather_filter_asms.sh
-(a nested O(n*m) `while read` join and two ~100k-pattern `grep -f` filters). The
-tests therefore focus on *behavioural equivalence* with the bash they replace,
-including the quirks that downstream column indices depend on:
+This module replaces slow and/or incorrect bash in utils/gather_filter_asms.sh:
+a nested O(n*m) `while read` join, two ~100k-pattern `grep -f` filters, and two
+`xtract` pipelines that shifted columns. The tests therefore focus on
+*behavioural equivalence* with the bash they replace, including the quirks that
+downstream column indices depend on:
 
   - merge-geoloc is an INNER join (unmatched metadata rows are dropped),
   - it emits one row per matching geoloc entry,
   - it collapses the metadata tabs to single spaces (the old unquoted echo did).
+
+The XML tests pin the column-shift bug that motivated parse-assembly-xml: a
+repeated <Sub_value> element made xtract emit extra tokens, pushing
+taxonomy-check-status into the geolocation column ("geolocation == OK"). They
+also cover the multi-root layout of real esearch output.
 
 The transforms are pure functions over (line, fields) tuples, so they are tested
 directly; the CLI layer is tested through tmp_path files.
@@ -39,6 +45,313 @@ def rows(*lines):
 META_A = "SAMN001\tGCF_000000001.1\tGCA_000000001.1\tEscherichia_coli\tK12\tftp://gb/A\tftp://rs/A\t562\tOK\tna"
 META_B = "SAMN002\tGCF_000000002.1\tGCA_000000002.1\tEscherichia_coli\tW3110\tftp://gb/B\tftp://rs/B\t562\tInconclusive\tna"
 META_C = "SAMN003\tNA\tGCA_000000003.1\tShigella_flexneri\t2a\tftp://gb/C\tNA\t623\tOK\tna"
+
+
+# --------------------------------------------------------------------------- #
+# XML parsing -- the column-shift fix                                          #
+# --------------------------------------------------------------------------- #
+
+def asm_record(biosample="SAMN001", refseq="GCF_1.1", genbank="GCA_1.1",
+               species="Pseudomonas aeruginosa", sub_values=("K12",),
+               taxid="287", taxcheck="OK", excl=None, ftp=True):
+    """Build one assembly <DocumentSummary>, mirroring real esummary layout.
+
+    sub_values may hold several entries -- that is the bug trigger: the real XML
+    nests one <Infraspecie> per entry (e.g. culture-collection + strain).
+    """
+    parts = ["  <DocumentSummary>"]
+    parts.append("    <BioSampleAccn>%s</BioSampleAccn>" % biosample)
+    parts.append("    <Synonym>")
+    if refseq:
+        parts.append("      <RefSeq>%s</RefSeq>" % refseq)
+    parts.append("      <Genbank>%s</Genbank>" % genbank)
+    parts.append("    </Synonym>")
+    parts.append("    <SpeciesName>%s</SpeciesName>" % species)
+    if sub_values:
+        parts.append("    <Biosource>")
+        parts.append("      <InfraspeciesList>")
+        for sv in sub_values:
+            parts.append("        <Infraspecie>")
+            parts.append("          <Sub_type>strain</Sub_type>")
+            parts.append("          <Sub_value>%s</Sub_value>" % sv)
+            parts.append("        </Infraspecie>")
+        parts.append("      </InfraspeciesList>")
+        parts.append("    </Biosource>")
+    if ftp:
+        parts.append("    <FtpPath_GenBank>ftp://gb/%s</FtpPath_GenBank>" % genbank)
+        if refseq:
+            parts.append("    <FtpPath_RefSeq>ftp://rs/%s</FtpPath_RefSeq>" % refseq)
+    parts.append("    <Taxid>%s</Taxid>" % taxid)
+    if excl:
+        parts.append("    <ExclFromRefSeq>%s</ExclFromRefSeq>" % excl)
+    parts.append("    <Meta>")
+    if taxcheck:
+        parts.append("      <taxonomy-check-status>%s</taxonomy-check-status>"
+                     % taxcheck)
+    parts.append("    </Meta>")
+    parts.append("  </DocumentSummary>")
+    return "\n".join(parts)
+
+
+def asm_xml(*records, **kw):
+    """Wrap records in <DocumentSummarySet> root(s).
+
+    n_roots>1 reproduces the real concatenated-batch layout: `esearch | esummary`
+    appends one root PER BATCH, so a 75k-assembly file has 76 roots and is not a
+    single XML document.
+    """
+    n_roots = kw.get("n_roots", 1)
+    chunks = []
+    per_root = max(1, len(records) // n_roots) if n_roots > 1 else len(records)
+    groups = [records[i:i + per_root] for i in range(0, len(records), per_root)] \
+        if records else [()]
+    for group in groups:
+        chunks.append('<?xml version="1.0" encoding="UTF-8" ?>')
+        chunks.append("<!DOCTYPE DocumentSummarySet>")
+        chunks.append('<DocumentSummarySet status="OK">')
+        chunks.append("  <DbBuild>Build260914-2040.1</DbBuild>")
+        chunks.extend(group)
+        chunks.append("</DocumentSummarySet>")
+    return "\n".join(chunks) + "\n"
+
+
+def bios_record(accession="SAMN001", geoloc="USA", other_attrs=True):
+    parts = ["  <DocumentSummary>"]
+    parts.append("    <Accession>%s</Accession>" % accession)
+    parts.append("    <SampleData>")
+    parts.append("      <BioSample accession=\"%s\">" % accession)
+    parts.append("        <Attributes>")
+    if other_attrs:
+        parts.append('          <Attribute attribute_name="strain" '
+                     'harmonized_name="strain">someStrain</Attribute>')
+    if geoloc is not None:
+        parts.append('          <Attribute attribute_name="geo_loc_name" '
+                     'harmonized_name="geo_loc_name">%s</Attribute>' % geoloc)
+    parts.append("        </Attributes>")
+    parts.append("      </BioSample>")
+    parts.append("    </SampleData>")
+    parts.append("  </DocumentSummary>")
+    return "\n".join(parts)
+
+
+class TestAssemblyRow:
+    def test_ten_columns_for_simple_record(self, mp):
+        import xml.etree.ElementTree as ET
+        row = mp.assembly_row(ET.fromstring(asm_record()))
+        assert len(row) == mp.EXPECTED_META_COLUMNS
+
+    def test_multi_subvalue_does_not_shift_columns(self, mp):
+        """THE BUG. Extra <Sub_value> entries must not move later columns."""
+        import xml.etree.ElementTree as ET
+        for n in (1, 2, 3, 4):
+            rec = asm_record(sub_values=tuple("s%d" % i for i in range(n)))
+            row = mp.assembly_row(ET.fromstring(rec))
+            assert len(row) == 10, "n=%d gave %d columns" % (n, len(row))
+            # taxcheck stays in column 9 and taxid in column 8 (1-based).
+            assert row[7] == "287"
+            assert row[8] == "OK"
+
+    def test_only_first_subvalue_is_kept(self, mp):
+        import xml.etree.ElementTree as ET
+        row = mp.assembly_row(ET.fromstring(
+            asm_record(sub_values=("ATCC:19660", "Xen5"))))
+        assert row[4] == "ATCC:19660"
+
+    def test_missing_fields_become_NA(self, mp):
+        import xml.etree.ElementTree as ET
+        row = mp.assembly_row(ET.fromstring(
+            asm_record(refseq=None, sub_values=(), taxcheck=None, ftp=False)))
+        assert len(row) == 10
+        assert row[1] == "NA"   # RefSeq
+        assert row[4] == "NA"   # Sub_value
+        assert row[8] == "NA"   # taxcheck
+
+    def test_species_spaces_become_underscores(self, mp):
+        """Otherwise a two-word species name would split into two columns."""
+        import xml.etree.ElementTree as ET
+        row = mp.assembly_row(ET.fromstring(asm_record()))
+        assert row[3] == "Pseudomonas_aeruginosa"
+
+    def test_row_never_contains_whitespace(self, mp):
+        import xml.etree.ElementTree as ET
+        row = mp.assembly_row(ET.fromstring(
+            asm_record(species="Genus species subsp thing",
+                       sub_values=("has space",))))
+        for field in row:
+            assert " " not in field and "\t" not in field
+
+
+class TestNormalizeGeoloc:
+    @pytest.mark.parametrize("raw,expected", [
+        ("USA", "USA"),
+        ("India: Chhatrapati Sambhajinagar", "India"),   # 75,609 real rows
+        ("United Kingdom", "United_Kingdom"),
+        ("USA: CA: San Diego", "USA"),
+        ("missing", "Unknown"),
+        ("Missing: control sample", "Unknown"),
+        ("unknown", "Unknown"),
+        ("not collected", "Unknown"),
+        ("not_collected", "Unknown"),
+        ("not applicable", "Unknown"),
+        ("NONE", "Unknown"),
+        ("not_provided", "Unknown"),   # the 296 rows the old seds missed
+        ("", "NA"),
+        (None, "NA"),
+    ])
+    def test_normalization(self, mp, raw, expected):
+        assert mp.normalize_geoloc(raw) == expected
+
+    def test_case_insensitive_unknown(self, mp):
+        for spelling in ("MISSING", "Unknown", "uNkNoWn", "Not Collected"):
+            assert mp.normalize_geoloc(spelling) == "Unknown"
+
+
+class TestBiosampleGeoloc:
+    def test_extracts_geoloc_attribute(self, mp):
+        import xml.etree.ElementTree as ET
+        acc, geo = mp.biosample_geoloc(ET.fromstring(bios_record()))
+        assert (acc, geo) == ("SAMN001", "USA")
+
+    def test_picks_geoloc_not_other_attributes(self, mp):
+        """Must select by harmonized_name, not by position."""
+        import xml.etree.ElementTree as ET
+        acc, geo = mp.biosample_geoloc(
+            ET.fromstring(bios_record(geoloc="China", other_attrs=True)))
+        assert geo == "China"
+
+    def test_absent_geoloc_is_NA(self, mp):
+        import xml.etree.ElementTree as ET
+        acc, geo = mp.biosample_geoloc(ET.fromstring(bios_record(geoloc=None)))
+        assert (acc, geo) == ("SAMN001", "NA")
+
+
+class TestIterDocumentSummaries:
+    def test_reads_single_root(self, mp, tmp_path):
+        f = tmp_path / "a.xml"
+        f.write_text(asm_xml(asm_record("SAMN001"), asm_record("SAMN002")))
+        assert len(list(mp.iter_document_summaries(str(f)))) == 2
+
+    def test_reads_concatenated_roots(self, mp, tmp_path):
+        """Real esearch output is many <DocumentSummarySet> roots concatenated.
+
+        A strict whole-document parser stops after the first root -- that bug
+        silently returned 1,000 of 75,155 records on the real Pseudomonas file.
+        """
+        f = tmp_path / "a.xml"
+        recs = [asm_record("SAMN%03d" % i) for i in range(10)]
+        f.write_text(asm_xml(*recs, n_roots=5))
+        got = list(mp.iter_document_summaries(str(f)))
+        assert len(got) == 10
+
+    def test_missing_file_yields_nothing(self, mp, tmp_path):
+        assert list(mp.iter_document_summaries(str(tmp_path / "nope"))) == []
+
+    def test_truncated_tail_keeps_earlier_records(self, mp, tmp_path):
+        """A dropped connection truncates mid-record; keep what parsed."""
+        f = tmp_path / "a.xml"
+        text = asm_xml(asm_record("SAMN001"), asm_record("SAMN002"))
+        f.write_text(text[:len(text) - 40])
+        assert len(list(mp.iter_document_summaries(str(f)))) >= 1
+
+    def test_memory_flat_over_many_records(self, mp, tmp_path):
+        """Generator must not accumulate: only one record held at a time."""
+        f = tmp_path / "a.xml"
+        f.write_text(asm_xml(*[asm_record("SAMN%04d" % i) for i in range(500)]))
+        n = sum(1 for _ in mp.iter_document_summaries(str(f)))
+        assert n == 500
+
+
+class TestXMLCLI:
+    def test_parse_assembly_xml_end_to_end(self, tmp_path):
+        xml = tmp_path / "asm.xml"
+        xml.write_text(asm_xml(
+            asm_record("SAMN001", sub_values=("K12",)),
+            asm_record("SAMN002", sub_values=("ATCC:19660", "Xen5")),
+            asm_record("SAMN003", sub_values=("a", "b", "c")),
+            n_roots=2,
+        ))
+        out = tmp_path / "BS_to_meta"
+        r = run_cli("parse-assembly-xml", "--xml", str(xml), "--out", str(out))
+        assert r.returncode == 0, r.stderr
+
+        lines = out.read_text().strip().split("\n")
+        assert len(lines) == 3
+        # Every row has exactly 10 columns regardless of Sub_value count.
+        for ln in lines:
+            assert len(ln.split("\t")) == 10
+            assert len(ln.split()) == 10
+        # The multi-Sub_value records are reported so the log shows the impact.
+        assert "2 record(s) had multiple <Sub_value>" in r.stderr
+
+    def test_parsed_output_feeds_merge_geoloc_correctly(self, tmp_path):
+        """End-to-end: the fixed columns must survive the join.
+
+        This is the actual bug's blast radius -- a shifted row put "OK" where the
+        geolocation belongs. Chain both stages and assert the geolocation column
+        really holds the country.
+        """
+        xml = tmp_path / "asm.xml"
+        xml.write_text(asm_xml(
+            asm_record("SAMN001", sub_values=("a", "b", "c"), taxcheck="OK")))
+        meta = tmp_path / "BS_to_meta"
+        assert run_cli("parse-assembly-xml", "--xml", str(xml),
+                       "--out", str(meta)).returncode == 0
+
+        geo = tmp_path / "geo"
+        geo.write_text("SAMN001\tSweden\n")
+        merged = tmp_path / "merged"
+        r = run_cli("merge-geoloc", "--meta", str(meta),
+                    "--geoloc", str(geo), "--out", str(merged))
+        assert r.returncode == 0, r.stderr
+
+        fields = merged.read_text().strip().split()
+        assert len(fields) == 11
+        assert fields[8] == "OK"       # taxcheck stayed in column 9
+        assert fields[10] == "Sweden"  # geolocation is a country, not "OK"
+        assert "WARNING" not in r.stderr
+
+    def test_merge_geoloc_warns_on_shifted_legacy_input(self, tmp_path):
+        """Recurrence guard: an 11-column legacy row must be flagged."""
+        meta = tmp_path / "BS_to_meta"
+        meta.write_text(
+            "SAMN001\tGCF_1.1\tGCA_1.1\tSp\tsv1\tEXTRA\tftp://gb\tftp://rs"
+            "\t287\tOK\tna\n")
+        geo = tmp_path / "geo"
+        geo.write_text("SAMN001\tSweden\n")
+        r = run_cli("merge-geoloc", "--meta", str(meta),
+                    "--geoloc", str(geo), "--out", str(tmp_path / "m"))
+        assert r.returncode == 0
+        assert "did not have the expected 10 columns" in r.stderr
+
+    def test_parse_biosample_xml_end_to_end(self, tmp_path):
+        xml = tmp_path / "bios.xml"
+        # Reuse the biosample root wrapper via asm_xml (same envelope).
+        xml.write_text(asm_xml(
+            bios_record("SAMN001", "USA"),
+            bios_record("SAMN002", "India: Pune"),
+            bios_record("SAMN003", "missing"),
+            bios_record("SAMN004", None),
+        ))
+        out = tmp_path / "geo"
+        r = run_cli("parse-biosample-xml", "--xml", str(xml), "--out", str(out))
+        assert r.returncode == 0, r.stderr
+
+        got = dict(ln.split("\t") for ln in out.read_text().strip().split("\n"))
+        assert got == {
+            "SAMN001": "USA",
+            "SAMN002": "India",
+            "SAMN003": "Unknown",
+            "SAMN004": "NA",
+        }
+
+    def test_empty_xml_warns_and_succeeds(self, tmp_path):
+        xml = tmp_path / "empty.xml"
+        xml.write_text("")
+        out = tmp_path / "out"
+        r = run_cli("parse-assembly-xml", "--xml", str(xml), "--out", str(out))
+        assert r.returncode == 0
+        assert out.read_text() == ""
+        assert "WARNING" in r.stderr
 
 
 # --------------------------------------------------------------------------- #

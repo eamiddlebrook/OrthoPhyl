@@ -455,7 +455,6 @@ run_esearch_with_retry () {
 	return 1
 }
 
-# need to fix the problem with "Sub_value" having multiple values screwing up the column numbers
 get_asm_metadata () {
         echo "################################################"
         echo "##### mapping biosample to GB accesstions ######"
@@ -469,11 +468,19 @@ get_asm_metadata () {
 		:> All-${taxon_safe}.assembly.BS_to_meta
 		return 0
 	fi
-	cat All-${taxon_safe}-info.assembly.xml \
-		| xtract -pattern DocumentSummary \
-			-def "NA" -element BioSampleAccn RefSeq Genbank SpeciesName Sub_value FtpPath_GenBank FtpPath_RefSeq Taxid taxonomy-check-status ExclFromRefSeq | \
-			sed 's/ /_/g' \
-			> All-${taxon_safe}.assembly.BS_to_meta
+	# Parse the XML by ELEMENT NAME, not by column position.
+	#   The old `xtract -element A B C ...` emitted one whitespace-separated
+	#   token per MATCHED element, so a repeated element silently shifted every
+	#   later column right. <Sub_value> repeats whenever an assembly has more
+	#   than one Infraspecie entry (e.g. both a culture-collection ID and a
+	#   strain name), which pushed taxonomy-check-status into the geolocation
+	#   column -- the long-standing "geolocation shows up as OK" bug. On a real
+	#   75,155-row Pseudomonas run, 2,150 rows (2.9%) were corrupted this way.
+	#   Keying on element names guarantees exactly 10 columns per record.
+	python3 "$metadata_parser" parse-assembly-xml \
+		--xml All-${taxon_safe}-info.assembly.xml \
+		--out All-${taxon_safe}.assembly.BS_to_meta \
+		|| { echo "ERROR: get_asm_metadata XML parse failed" >&2 ; exit 1 ; }
 }
 
 get_non_datasets_assemblies () {
@@ -565,30 +572,14 @@ get_biosample_GEOdata () {
 		:> All-${taxon_safe}.biosample.BS_to_Geoloc
 		return 0
 	fi
-	#Tried to capture most cases of unknown value with sed. Super messy and dumb
-	#   Rewrote to use the ATTR@subATTR syntax
-	#   The "if" statement stuff is really dumb, cant figure out how to use "def" value
-	#   still need sed cmds to change stuff to "Unknown"
-        cat All-${taxon_safe}-info.biosample.xml |\
-		xtract -pattern DocumentSummary -def "NA" \
-			-element Accession  \
-			-def "NA" \
-			-block Attribute  \
-			-if Attribute@harmonized_name \
-			-equals geo_loc_name \
-			-element Attribute | \
-			sed 's/ /_/g' | \
-			sed 's/Missing.*$/Unknown/g'|\
-	                sed 's/missing.*$/Unknown/g' |\
-	                sed 's/unknown.*$/Unknown/g' |\
-	                sed 's/not_collected.*$/Unknown/g' |\
-	                sed 's/not_applicable.*$/Unknown/g' |\
-	                sed 's/NONE.*$/Unknown/g' |\
-			awk  '{if ($2 == "") print $1,"NA" ;else print $0}' | \
-			sed 's/ /\t/g' | \
-                       	sed 's/:/\t/g' | \
-			awk '{print $1"\t"$2}'  \
-			> All-${taxon_safe}.biosample.BS_to_Geoloc
+	# Extract the geo_loc_name Attribute by name and normalize it in python,
+	#   replacing the xtract + 7-`sed` + 2-`awk` pipeline. Same output contract
+	#   (accession<TAB>location): "India: Pune" -> "India", missing/unknown/
+	#   not-collected spellings -> "Unknown", absent -> "NA", spaces -> "_".
+	python3 "$metadata_parser" parse-biosample-xml \
+		--xml All-${taxon_safe}-info.biosample.xml \
+		--out All-${taxon_safe}.biosample.BS_to_Geoloc \
+		|| { echo "ERROR: get_biosample_GEOdata XML parse failed" >&2 ; exit 1 ; }
 }
 
 merge_metadata_geoloc () {
