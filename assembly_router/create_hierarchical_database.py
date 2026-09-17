@@ -325,7 +325,9 @@ def create_database_for_run(
     clade_name: str,
     output_dir: Path,
     force: bool = False,
-    subclade_meta: Optional[Dict] = None
+    subclade_meta: Optional[Dict] = None,
+    taxonomy_source: str = "ncbi",
+    qc_applied: bool = True,
 ) -> Path:
     """
     Create a database directory for a single OrthoPhyl run.
@@ -335,6 +337,13 @@ def create_database_for_run(
         sketch_file, members_file, built, source_genome_dir) are written to the
         config, and any source sketch/members files are copied into the DB dir.
         A plain (non-subclade) DB is created byte-identically when this is None.
+
+    taxonomy_source: "ncbi" (default) or "user_supplied" -- provenance of
+        clade_taxonomy, surfaced for the local-genome-ingest mode where the
+        taxon name/lineage is not NCBI-assigned.
+
+    qc_applied: whether CheckM2 QC was run on the genomes before tree-building.
+        Defaults to True; the local-genome-ingest mode's --skip-qc sets it False.
 
     Returns:
         Path to created database directory
@@ -419,6 +428,10 @@ def create_database_for_run(
         "source_taxon_name": None,
         "source_taxid": None,
         "source_rank": None,
+        # Provenance: was clade_taxonomy NCBI-derived, or user-supplied (local-genome-
+        #   ingest mode)? And was CheckM2 QC applied to the input genomes?
+        "taxonomy_source": taxonomy_source,
+        "qc_applied": qc_applied,
         "assembly_accessions": [],
         "n_assemblies_at_creation": validation['n_genomes'],
         "quality_filters": {
@@ -611,6 +624,8 @@ def create_master_index(databases: List[Dict], output_dir: Path):
             entry['is_subclade'] = db['is_subclade']
         if 'built' in db:
             entry['built'] = db['built']
+        if 'taxonomy_source' in db:
+            entry['taxonomy_source'] = db['taxonomy_source']
         index["databases"].append(entry)
     
     with open(index_file, 'w') as f:
@@ -761,6 +776,14 @@ Input Format (TSV):
                         help='Directory holding the subclade raw member FASTAs.')
     parser.add_argument('--n-genomes', type=int, default=0,
                         help='Member count to record for the subclade.')
+    parser.add_argument('--taxonomy-source', choices=['ncbi', 'user_supplied'],
+                        default='ncbi',
+                        help='Provenance of clade_taxonomy (default: ncbi). '
+                             'user_supplied marks a taxonomy that was not '
+                             'NCBI-assigned (e.g. local-genome-ingest mode).')
+    parser.add_argument('--qc-not-applied', action='store_true',
+                        help='Record that CheckM2 QC was NOT run on the input '
+                             'genomes (default: QC is assumed applied).')
 
     args = parser.parse_args()
 
@@ -791,6 +814,8 @@ Input Format (TSV):
             db_dir = create_database_for_run(
                 Path(op_dir), taxonomy, name, output_dir,
                 force=args.force, subclade_meta=subclade_meta,
+                taxonomy_source=args.taxonomy_source,
+                qc_applied=not args.qc_not_applied,
             )
         except FileExistsError:
             logger.info("Database already exists; nothing to do (use --force to rebuild)")
@@ -807,6 +832,7 @@ Input Format (TSV):
                     'clade_taxonomy': c['clade_taxonomy'],
                     'database_dir': d,
                     'n_genomes': c['n_genomes'],
+                    'taxonomy_source': c.get('taxonomy_source', 'ncbi'),
                 })
         if all_dbs:
             create_master_index(all_dbs, output_dir)
@@ -870,7 +896,8 @@ Input Format (TSV):
                         'clade_name': config['clade_name'],
                         'clade_taxonomy': config['clade_taxonomy'],
                         'database_dir': db_dir,
-                        'n_genomes': config['n_genomes']
+                        'n_genomes': config['n_genomes'],
+                        'taxonomy_source': config.get('taxonomy_source', 'ncbi'),
                     })
             if all_dbs:
                 create_master_index(all_dbs, output_dir)
@@ -892,7 +919,9 @@ Input Format (TSV):
                 run['clade_name'],
                 output_dir,
                 force=args.force,
-                subclade_meta=subclade_meta
+                subclade_meta=subclade_meta,
+                taxonomy_source=args.taxonomy_source,
+                qc_applied=not args.qc_not_applied,
             )
             
             # Read back config
@@ -903,7 +932,8 @@ Input Format (TSV):
                 'clade_name': run['clade_name'],
                 'clade_taxonomy': run['clade_taxonomy'],
                 'database_dir': db_dir,
-                'n_genomes': config['n_genomes']
+                'n_genomes': config['n_genomes'],
+                'taxonomy_source': config.get('taxonomy_source', 'ncbi'),
             })
             
         except FileExistsError:
@@ -927,7 +957,8 @@ Input Format (TSV):
                         'clade_name': config['clade_name'],
                         'clade_taxonomy': config['clade_taxonomy'],
                         'database_dir': db_dir,
-                        'n_genomes': config['n_genomes']
+                        'n_genomes': config['n_genomes'],
+                        'taxonomy_source': config.get('taxonomy_source', 'ncbi'),
                     })
     
     # Create master index

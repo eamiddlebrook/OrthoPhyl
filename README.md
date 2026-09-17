@@ -183,6 +183,14 @@ python orthophyl_pipeline_wrapper.py \
     --output-dir results/ \
     --orthophyl-runs orthophyl_runs.tsv \
     --threads 32
+
+# Build a database from genomes already on disk (QC runs by default)
+python orthophyl_pipeline_wrapper.py \
+    --genome-dir /data/my_isolates/ \
+    --clade-name MyIsolates \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --threads 32
 ```
 
 ### Input File Format
@@ -254,6 +262,23 @@ python orthophyl_pipeline_wrapper.py \
 
 **Use case**: Running on systems with limited RAM (<64 GB)
 
+### Example 5: Build a Database from Genomes Already on Disk
+
+```bash
+python orthophyl_pipeline_wrapper.py \
+    --genome-dir /data/my_isolates/ \
+    --clade-name Pseudomonas \
+    --database-dir databases/ \
+    --output-dir results/ \
+    --gather-script utils/gather_filter_asms.sh \
+    --threads 32
+```
+
+**Use case**: You have your own assemblies (unpublished isolates, a curated set) and want
+a searchable, routable OrthoPhyl database out of them, without going through NCBI. See the
+**[Local Genome-Ingest Mode Guide](readmes/LOCAL_GENOME_MODE_GUIDE.md)** for QC-skipping,
+naming clades that aren't formally assigned by NCBI, and taxonomy-routability details.
+
 **📝 For 8 more detailed examples, see [Usage Examples Documentation](readmes/README_USAGE_EXAMPLES.md)**
 
 ---
@@ -264,10 +289,12 @@ python orthophyl_pipeline_wrapper.py \
 
 | Argument | Required | Description | Default |
 |----------|----------|-------------|---------|
-| `--input` | ✅ | Path to assemblies.tsv | - |
+| `--input` | one of `--input`/`--taxon`/`--genome-dir` | Path to assemblies.tsv (batch mode) | - |
+| `--taxon` | one of `--input`/`--taxon`/`--genome-dir` | Taxon name for NCBI auto-gather mode | - |
+| `--genome-dir` | one of `--input`/`--taxon`/`--genome-dir` | Directory of genomes already on disk (local mode; requires `--clade-name`) | - |
 | `--database-dir` | ✅ | Directory containing taxonomy databases | - |
 | `--output-dir` | ❌ | Output directory for results | `<database-dir>/.pipeline_runs/<taxon>_<timestamp>` |
-| `--threads` | ❌ | Number of CPU threads | 1 |
+| `--threads` | ❌ | Number of CPU threads | 8 |
 | `--resume` | ❌ | Resume from checkpoint | False |
 
 ### Pipeline Control
@@ -463,6 +490,11 @@ ls databases/MyDatabase_db/orthophyl_run/OG_alignmentsToHMM/hmms_final/
   - Create databases from taxon names
   - Update existing databases
   - Batch taxon processing
+
+- **[Local Genome-Ingest Mode Guide](readmes/LOCAL_GENOME_MODE_GUIDE.md)** - Build a database from genomes already on disk
+  - QC by default, skippable with `--skip-qc`
+  - Naming a clade that isn't formally assigned by NCBI (`--clade-name`, `--clade-taxonomy`)
+  - Taxonomy provenance and routability
 
 ### 🐳 Containers & Testing
 

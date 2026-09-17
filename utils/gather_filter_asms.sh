@@ -35,6 +35,12 @@ if [ ! -f "$metadata_parser" ]; then
 	echo "  (expected at <repo>/python_scripts/ relative to $gather_script_dir)" >&2
 	exit 1
 fi
+redundancy_filter="${gather_repo_root}/python_scripts/filter_redundant_genomes.py"
+if [ ! -f "$redundancy_filter" ]; then
+	echo "ERROR: helper not found: $redundancy_filter" >&2
+	echo "  (expected at <repo>/python_scripts/ relative to $gather_script_dir)" >&2
+	exit 1
+fi
 
 export taxon="$1"
 # deal with WD below
@@ -1062,12 +1068,17 @@ filter_for_redundancy () {
 	cd $wd || exit
 	mkdir genomes_to_keep/
 	ls assemblies_all.TMP > genome_list
-	# this removes multiple versions of assemblies (i.e. GCA_XXXX.1 and GCA_XXXX.2)
-	cat genome_list | sed 's/GC._//g' | sed 's/\..*fna//g' | sort | uniq | sed 's/^ *//g' > genome_list.accNum
-	for I in $(cat genome_list.accNum)
-	do 
-		cat genome_list | grep $I | sort | tail -n 1 | sed 's/.fna//g'
-	done | sort > genome_list.nunRedundant
+	# this removes multiple versions of assemblies (i.e. GCA_XXXX.1 and GCA_XXXX.2).
+	#   Only names that look like NCBI accessions are de-versioned; everything else
+	#   (e.g. a user's own filename stem) passes through untouched -- the previous
+	#   sed+unanchored-grep approach silently collapsed distinct non-accession
+	#   filenames that happened to share a numeric substring, and did so
+	#   locale-dependently.
+	sed 's/\.fna$//' genome_list > genome_list.stems
+	# `comm` below requires both inputs sorted in the *shell's* collation order;
+	#   Python's sorted() uses plain codepoint order, which can disagree with it
+	#   (e.g. case interleaving under en_US.UTF-8) -- re-sort with `sort` to match.
+	python3 "$redundancy_filter" --stems-file genome_list.stems | sort > genome_list.nunRedundant
 	# iterate over acc that are in genome_list.nunRedundant but not final_assemblies_to_remove
 	for I in $(comm -23 genome_list.nunRedundant final_assemblies_to_remove)
 	do

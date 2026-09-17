@@ -8,7 +8,7 @@ OrthoPhyl is an orthology-based phylogenomics pipeline for bacteria (and other d
 
 1. **`OrthoPhyl.sh`** — the core pipeline. Annotates genomes (Prodigal), runs OrthoFinder, aligns/trims orthogroups, identifies single-copy orthologs, and infers species trees (FastTree / IQ-TREE / RAxML / ASTRAL). This is bash driving external bioinformatics tools.
 2. **`ReLeaf.sh`** — "adds leaves" to an existing OrthoPhyl run: places new assemblies into a pre-computed phylogeny using saved HMM profiles instead of rebuilding from scratch. Reuses much of the same function library.
-3. **`orthophyl_pipeline_wrapper.py`** — Python orchestrator that routes each input assembly to either ReLeaf (matches an existing database) or OrthoPhyl (novel taxon → download related genomes from NCBI → build new tree → create new database). This is the newest layer and the focus of the unit/integration test suite.
+3. **`orthophyl_pipeline_wrapper.py`** — Python orchestrator with three modes: batch (`--input`, routes each assembly to either ReLeaf if it matches an existing database, or OrthoPhyl to download related genomes from NCBI and build a new one), taxon (`--taxon`, same NCBI-download-and-build path for a single named clade), and local-genome (`--genome-dir`, builds a database from genomes already on disk under a user-supplied clade name). This is the newest layer and the focus of the unit/integration test suite.
 
 `README.md` documents the Python wrapper; `README_OrthoPhyl_ReLeaf.md` documents the two shell pipelines. Extended docs live in `readmes/`.
 
@@ -34,6 +34,10 @@ bash test.sh <threads> <num_for_OrthoFinder>
 
 # Python wrapper (routing + DB management)
 python orthophyl_pipeline_wrapper.py --input assemblies.tsv --database-dir databases/ --output-dir results/ --threads 32
+
+# Python wrapper: build a database from genomes already on disk (QC runs by default)
+python orthophyl_pipeline_wrapper.py --genome-dir path/to/fastas --clade-name MyIsolates \
+  --database-dir databases/ --output-dir results/ --threads 32
 ```
 
 Run `bash OrthoPhyl.sh -h` for the full flag list (defined in `script_lib/arg_parse.sh`).
@@ -94,6 +98,13 @@ The **partition/megatree** path is opt-in via `--megatree`. Instead of subsampli
 - **Total-genome guardrail** (`--max-total-genomes`, default 5000): the *partitioner* builds a DENSE `NxN` MASH distance matrix, O(n²) in time and memory (~20 GB at n=50k). `_enforce_total_genome_ceiling` hard-stops the megatree path above the ceiling rather than OOM-killing the node. The **default subsample path never builds this matrix and is not subject to this check** — it handles arbitrarily large taxa.
 - **Routing** (`assembly_router.py`) has two decisions again: **ReLeaf** (matches an existing DB) or **OrthoPhyl** (novel taxon). The old lazy-build third decision (`OrthoPhyl_subclade_build`, `--register-only`, on-demand subclade build) has been removed — every subclade in a megatree is built up front.
 - Subclade metadata fields (`is_subclade`, `parent_taxon`, `subclade_id`, `built`, `sketch_file`, `members_file`, `source_genome_dir`) load via `config.get()` defaults, so pre-existing databases stay backward-compatible; megatree subclade DBs are always `built=true`.
+
+**Local-genome ingest** (`--genome-dir DIR --clade-name NAME`): builds a routable database from genomes the user already has, instead of downloading from NCBI. `_run_local_genomes_mode` in `orthophyl_pipeline_wrapper.py`:
+- **QC runs by default**, skippable with `--skip-qc` (the request explicitly wanted QC on, not off, by default). Skipping sets `qc_applied=false` in the database config and is only ever honored on this path — `_qc_subclade`/the NCBI download path always QC.
+- **Taxonomy resolution** (`_resolve_local_taxonomy`) tries, in order: (1) `--clade-taxonomy` verbatim (an escape hatch for a full GTDB string), (2) resolving `--clade-name` against the local NCBI taxdump to render a full lineage, (3) falling back to a bare `<rank>__<name>` (default rank `g`, `--clade-rank`) with a logged warning and a paste-ready `--clade-taxonomy` hint. A name-only fallback taxonomy is **not routable** — `GTDBTaxonomy.is_within_clade` (`assembly_router.py`) compares every rank down to the query's, so upstream `None` ranks never match a fully-specified query. This is why resolution against the taxdump matters, not just cosmetic padding.
+- Every input FASTA is normalized to `<stem>.fna` (gunzip `.gz`, symlink otherwise) into a wrapper-owned staging dir — originals in `--genome-dir` are never touched or renamed, because OrthoPhyl.sh rewrites contig names in its `-g` input in place.
+- `taxonomy_source` (`"ncbi"` | `"user_supplied"`) and `qc_applied` (bool) are written to every `database_config.json`, both read with `.get()` defaults (`"ncbi"`/`True`) so pre-existing databases stay valid. `assembly_router.py`'s startup log appends `[user-supplied taxonomy: not NCBI-assigned]` for `user_supplied` DBs — provenance is surfaced, not used to gate routing.
+- `--genome-dir` + `--megatree` together is rejected by `main()` — the local path doesn't (yet) support per-subclade taxonomy/backbone DB creation.
 
 ## Repo hygiene warnings
 

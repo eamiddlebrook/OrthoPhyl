@@ -133,6 +133,33 @@ class TestCreateDatabaseForRun:
         assert config["clade_rank"] == "g"
         assert config["clade_rank_name"] == "genus"
 
+    def test_taxonomy_source_defaults_to_ncbi(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        """Every existing caller omits taxonomy_source/qc_applied; the config
+        must still default to 'ncbi'/True so they stay byte-identical."""
+        run = orthophyl_run_skeleton()
+        out = tmp_path / "databases"
+        db_dir = db_creator_module.create_database_for_run(
+            run, ESCHERICHIA_TAX, "Escherichia", out
+        )
+        config = json.loads((db_dir / "database_config.json").read_text())
+        assert config["taxonomy_source"] == "ncbi"
+        assert config["qc_applied"] is True
+
+    def test_taxonomy_source_user_supplied_and_qc_not_applied(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        run = orthophyl_run_skeleton()
+        out = tmp_path / "databases"
+        db_dir = db_creator_module.create_database_for_run(
+            run, ESCHERICHIA_TAX, "Escherichia", out,
+            taxonomy_source="user_supplied", qc_applied=False,
+        )
+        config = json.loads((db_dir / "database_config.json").read_text())
+        assert config["taxonomy_source"] == "user_supplied"
+        assert config["qc_applied"] is False
+
 
 class TestParseInputTable:
     def test_parses_three_columns(self, db_creator_module, tmp_path):
@@ -170,3 +197,37 @@ class TestMasterIndex:
         assert index["n_databases"] == 1
         assert index["databases"][0]["clade_rank"] == "g"
         assert (out / "database_summary.txt").exists()
+
+    def test_taxonomy_source_surfaced_when_present(self, db_creator_module, tmp_path):
+        out = tmp_path / "databases"
+        out.mkdir()
+        databases = [
+            {
+                "clade_name": "Blorptaxon",
+                "clade_taxonomy": "g__Blorptaxon",
+                "database_dir": out / "Blorptaxon_db",
+                "n_genomes": 12,
+                "taxonomy_source": "user_supplied",
+            }
+        ]
+        db_creator_module.create_master_index(databases, out)
+        index = json.loads((out / "database_index.json").read_text())
+        assert index["databases"][0]["taxonomy_source"] == "user_supplied"
+
+    def test_taxonomy_source_absent_when_not_provided(self, db_creator_module, tmp_path):
+        """Mirrors the is_subclade/built conditional-key pattern: omitting the
+        key from the caller's dict must omit it from the index entry too, not
+        default it to 'ncbi' (that .get() default belongs to the readers)."""
+        out = tmp_path / "databases"
+        out.mkdir()
+        databases = [
+            {
+                "clade_name": "Escherichia",
+                "clade_taxonomy": ESCHERICHIA_TAX,
+                "database_dir": out / "Escherichia_db",
+                "n_genomes": 42,
+            }
+        ]
+        db_creator_module.create_master_index(databases, out)
+        index = json.loads((out / "database_index.json").read_text())
+        assert "taxonomy_source" not in index["databases"][0]

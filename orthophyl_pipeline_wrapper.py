@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import json
+import gzip
 import argparse
 import subprocess
 import shutil
@@ -46,7 +47,14 @@ logger = logging.getLogger(__name__)
 
 class PipelineWrapper:
     """Main wrapper class for OrthoPhyl/ReLeaf pipeline."""
-    
+
+    # Valid GTDB rank letters, domain -> species.
+    _GTDB_RANK_LETTERS = ('d', 'p', 'c', 'o', 'f', 'g', 's')
+
+    # Accepted genome FASTA extensions for --genome-dir, gzip variants included.
+    # Longest/most-specific first so a "*.fna.gz" file is never mistaken for "*.gz".
+    _GENOME_EXTENSIONS = ('.fna.gz', '.fa.gz', '.fasta.gz', '.fna', '.fa', '.fasta')
+
     def __init__(
         self,
         input_file: Optional[Path] = None,
@@ -75,21 +83,33 @@ class PipelineWrapper:
         megatree: bool = False,
         backbone_reps: int = 5,
         subclade_size: int = 150,
-        conflict_min_support: int = 90
+        conflict_min_support: int = 90,
+        # NEW: local genome-ingest mode (build a DB from genomes already on disk,
+        #   under a user-supplied clade name that was not assigned by NCBI)
+        genome_dir: Optional[Path] = None,
+        clade_name: Optional[str] = None,
+        clade_rank: str = 'g',
+        clade_taxonomy: Optional[str] = None,
+        skip_qc: bool = False,
     ):
-        # Validate mutually exclusive flags
-        if input_file and taxon:
-            raise ValueError("Cannot specify both --input and --taxon. Use one or the other.")
-        
+        # Validate mutually exclusive mode flags (--input / --taxon / --genome-dir)
+        modes_given = sum(bool(x) for x in (input_file, taxon, genome_dir))
+        if modes_given > 1:
+            if input_file and taxon:
+                raise ValueError("Cannot specify both --input and --taxon. Use one or the other.")
+            raise ValueError(
+                "Cannot specify more than one of --input, --taxon, --genome-dir. "
+                "Use exactly one.")
+
         self.input_file = Path(input_file) if input_file else None
         self.database_dir = Path(database_dir) if database_dir else None
-        
+
         # Default output_dir to database_dir/.pipeline_runs/<name>_<timestamp> if not provided
         if output_dir:
             self.output_dir = Path(output_dir)
         else:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            run_name = self._default_run_name(taxon)
+            run_name = self._default_run_name(taxon or clade_name)
             self.output_dir = self.database_dir / '.pipeline_runs' / f'{run_name}_{timestamp}'
             logger.info(f"No --output-dir provided, using: {self.output_dir}")
         
@@ -115,6 +135,28 @@ class PipelineWrapper:
         self.taxon_rank = taxon_rank
         self.update_existing = update_existing
         self.taxon_mode = taxon is not None
+
+        # NEW: Local genome-ingest mode. Builds a tree + database from genomes
+        #   already on disk under a user-supplied clade name/taxonomy that was
+        #   NOT assigned by NCBI (unless --clade-name happens to resolve against
+        #   the local taxdump -- see _resolve_local_taxonomy).
+        self.local_mode = genome_dir is not None
+        if self.local_mode:
+            self.genome_dir = Path(genome_dir)
+            if not self.genome_dir.exists():
+                raise ValueError(f"--genome-dir does not exist: {self.genome_dir}")
+            if not clade_name or not clade_name.strip():
+                raise ValueError("--clade-name is required with --genome-dir.")
+            if clade_rank not in self._GTDB_RANK_LETTERS:
+                raise ValueError(
+                    f"--clade-rank must be one of {self._GTDB_RANK_LETTERS}, "
+                    f"got: {clade_rank!r}")
+        else:
+            self.genome_dir = None
+        self.clade_name = clade_name
+        self.clade_rank = clade_rank
+        self.clade_taxonomy = clade_taxonomy
+        self.skip_qc = skip_qc
 
         # NEW: large-taxon handling. When a taxon's RAW downloaded genome set
         #   exceeds max_tree_genomes, the DEFAULT behavior is to build ONE tree from
@@ -194,6 +236,100 @@ class PipelineWrapper:
         safe = re.sub(r'[^A-Za-z0-9._-]+', '_', taxon).strip('_')
         return safe or 'run'
 
+    @staticmethod
+    def _validate_clade_taxonomy(taxonomy: str, clade_name: str) -> str:
+        """Validate a verbatim --clade-taxonomy string.
+
+        Must be semicolon-separated rank__name tokens (e.g. "d__Bacteria;p__...")
+        using only the GTDB rank letters, and must actually mention clade_name
+        somewhere in it (a copy-paste of the wrong taxon's string is otherwise a
+        silent, hard-to-notice mistake). Raises ValueError on malformed input.
+        """
+        taxonomy = taxonomy.strip()
+        if not taxonomy:
+            raise ValueError("--clade-taxonomy must not be empty.")
+        tokens = taxonomy.split(';')
+        for tok in tokens:
+            if '__' not in tok:
+                raise ValueError(
+                    f"--clade-taxonomy token {tok!r} is not in 'rank__name' form. "
+                    f"Expected e.g. 'd__Bacteria;p__Pseudomonadota;...;g__{clade_name}'.")
+            prefix, _, _name = tok.partition('__')
+            if prefix not in PipelineWrapper._GTDB_RANK_LETTERS:
+                raise ValueError(
+                    f"--clade-taxonomy token {tok!r} has an invalid rank letter "
+                    f"{prefix!r}; must be one of {PipelineWrapper._GTDB_RANK_LETTERS}.")
+        if clade_name.lower() not in taxonomy.lower():
+            raise ValueError(
+                f"--clade-taxonomy {taxonomy!r} does not mention --clade-name "
+                f"{clade_name!r}. Double-check it's the right string.")
+        return taxonomy
+
+    def _resolve_local_taxonomy(self) -> Tuple[str, bool]:
+        """Resolve the taxonomy string for local genome-ingest mode.
+
+        Returns (taxonomy, is_routable) by precedence:
+          1. --clade-taxonomy given: validated and used verbatim. Routable.
+          2. --clade-name resolves against the local taxdump (a real NCBI taxon):
+             render its full lineage. Routable.
+          3. Unresolvable: fall back to "<clade-rank>__<clade-name>" and warn
+             that the database will build but won't be matched by fully
+             specified queries.
+
+        Best-effort: taxdump absence/download failure falls back to step 3
+        rather than failing the run (an offline --clade-taxonomy user needs no
+        taxdump at all).
+        """
+        if self.clade_taxonomy:
+            taxonomy = self._validate_clade_taxonomy(self.clade_taxonomy, self.clade_name)
+            logger.info(f"  Using --clade-taxonomy verbatim: {taxonomy}")
+            return taxonomy, True
+
+        # Try resolving --clade-name against the local taxdump.
+        try:
+            sys.path.insert(0, str(self.script_dir / "utils"))
+            from taxon_assembly_gatherer import (
+                NCBITaxonomy, render_gtdb_lineage, TaxonAssemblyGatherer)
+
+            taxdump_dir = self.output_dir / "taxon_query" / "taxdump"
+            # Reuse the gatherer's download-if-missing logic without invoking its
+            # __init__ (which raises on an unresolvable taxon -- not an error here).
+            stub = TaxonAssemblyGatherer.__new__(TaxonAssemblyGatherer)
+            stub.output_dir = self.output_dir / "taxon_query"
+            stub.output_dir.mkdir(parents=True, exist_ok=True)
+            stub.taxdump_dir = taxdump_dir
+            stub._ensure_taxonomy_database()
+
+            taxonomy_db = NCBITaxonomy(taxdump_dir)
+            taxid = taxonomy_db.resolve_taxon(self.clade_name)
+            if taxid:
+                lineage = taxonomy_db.get_lineage(taxid)
+                rendered = render_gtdb_lineage(lineage)
+                if rendered:
+                    rank = taxonomy_db.get_rank(taxid)
+                    logger.info(
+                        f"  ✓ --clade-name '{self.clade_name}' resolved against NCBI "
+                        f"taxdump (TaxID {taxid}, rank {rank}): {rendered}")
+                    return rendered, True
+        except Exception as e:
+            logger.warning(f"  ⚠ Could not resolve --clade-name against local taxdump: {e}")
+
+        # Unresolvable: fall back to a name-only taxonomy at --clade-rank.
+        taxonomy = f"{self.clade_rank}__{self.clade_name}"
+        template = (
+            f'd__Bacteria;p__...;c__...;o__...;f__...;g__{self.clade_name}'
+            if self.clade_rank == 'g' else
+            f'd__...;...;{self.clade_rank}__{self.clade_name}')
+        logger.warning(
+            f"  ⚠ '{self.clade_name}' did not resolve to a known NCBI taxon. "
+            f"Falling back to name-only taxonomy: {taxonomy!r}")
+        logger.warning(
+            "  ⚠ This database WILL build, but will NOT be matched by "
+            "fully-specified taxonomy queries (routing compares every rank "
+            "from domain down). If you know the real lineage, pass it "
+            f'explicitly, e.g.: --clade-taxonomy "{template}"')
+        return taxonomy, False
+
     def run(self):
         """Main execution pipeline."""
         try:
@@ -203,6 +339,10 @@ class PipelineWrapper:
                 logger.info(f"*** TAXON MODE: {self.taxon} ***")
                 if self.update_existing:
                     logger.info("*** UPDATE MODE: Checking for new assemblies ***")
+            if self.local_mode:
+                logger.info(f"*** LOCAL GENOME-INGEST MODE: {self.clade_name} ***")
+                logger.info("*** NOTE: clade name/taxonomy is user-supplied, not "
+                            "assigned by NCBI ***")
             if self.dry_run:
                 logger.info("*** DRY RUN MODE - No commands will be executed ***")
             if self.verbose == 1:
@@ -235,6 +375,9 @@ class PipelineWrapper:
             if self.taxon_mode:
                 # NEW: Taxon mode workflow
                 return self._run_taxon_mode()
+            elif self.local_mode:
+                # NEW: Local genome-ingest mode workflow
+                return self._run_local_genomes_mode()
             else:
                 # Original: Batch mode workflow
                 return self._run_batch_mode()
@@ -319,8 +462,15 @@ class PipelineWrapper:
         self._validate_dependencies()
         logger.info("✓ Dependencies validated")
         
-        # Initialize or validate databases (skip in taxon create mode)
-        if self.taxon_mode and not self.update_existing:
+        # Initialize or validate databases (skip in taxon create mode / local mode)
+        if self.local_mode:
+            # Local genome-ingest mode: database directory will be created during
+            # workflow, same as taxon create mode. No database_index.json required.
+            logger.info(f"✓ Local genome-ingest mode: database will be created for "
+                        f"'{self.clade_name}'")
+            if self.database_dir:
+                self.database_dir.mkdir(parents=True, exist_ok=True)
+        elif self.taxon_mode and not self.update_existing:
             # Taxon create mode: database directory will be created during workflow
             logger.info(f"✓ Taxon create mode: database will be created for '{self.taxon}'")
             # Ensure database_dir exists as a directory (but may be empty)
@@ -1294,6 +1444,49 @@ class PipelineWrapper:
                 return [ln.strip() for ln in f if ln.strip()]
         return [s.strip() for s in self.must_keep.split(',') if s.strip()]
 
+    def _stage_local_genomes(self, dest: Path) -> Path:
+        """Normalize every FASTA in self.genome_dir into <dest>/<stem>.fna.
+
+        Mirrors gather_filter_asms.sh's stage_query_genomes normalization (the
+        QC/OrthoPhyl halves only ever glob "*.fna"), so any mix of
+        .fna/.fa/.fasta (optionally .gz) is accepted without silently dropping
+        files. Originals in self.genome_dir are never modified: gzip files are
+        decompressed into dest, plain files are symlinked (falling back to a
+        copy) so OrthoPhyl.sh's in-place contig-name sed never touches the
+        user's source directory.
+
+        Raises ValueError if two source files normalize to the same stem
+        (e.g. "foo.fna" and "foo.fasta" both present) -- silently picking one
+        would drop a genome without any indication to the user.
+        """
+        dest.mkdir(parents=True, exist_ok=True)
+        by_stem: Dict[str, Path] = {}
+        for ext in self._GENOME_EXTENSIONS:
+            for src in sorted(self.genome_dir.glob(f"*{ext}")):
+                stem = src.name[:-len(ext)]
+                if stem in by_stem:
+                    raise ValueError(
+                        f"--genome-dir has two files that normalize to the same "
+                        f"stem '{stem}': {by_stem[stem].name} and {src.name}. "
+                        f"Rename one so each genome has a unique stem.")
+                by_stem[stem] = src
+
+        for stem, src in by_stem.items():
+            dst = dest / f"{stem}.fna"
+            if dst.exists() or dst.is_symlink():
+                continue
+            if src.name.endswith('.gz'):
+                with gzip.open(src, 'rb') as fin, open(dst, 'wb') as fout:
+                    shutil.copyfileobj(fin, fout)
+            else:
+                try:
+                    os.symlink(os.path.abspath(src), dst)
+                except OSError:
+                    shutil.copy(src, dst)
+
+        logger.info(f"  Staged {len(by_stem)} genome(s) from {self.genome_dir} -> {dest}")
+        return dest
+
     def _subsample_genomes(self, taxon_name: str, raw_dir: Path,
                            target: int,
                            must_keep_stems: Optional[List[str]] = None) -> Path:
@@ -1569,7 +1762,9 @@ class PipelineWrapper:
         orthophyl_output: Path,
         taxonomy: str,
         subclade_meta: Optional[Dict] = None,
-        force: bool = False
+        force: bool = False,
+        taxonomy_source: str = 'ncbi',
+        qc_applied: bool = True,
     ):
         """Create new database entry from OrthoPhyl run.
 
@@ -1579,6 +1774,10 @@ class PipelineWrapper:
 
         force=True passes --force so an existing DB dir is overwritten (e.g.
         rebuilding a subclade); without it the DB creator refuses (FileExistsError).
+
+        taxonomy_source/qc_applied are provenance flags (default 'ncbi'/True keep
+        every existing caller byte-identical); the local-genome-ingest mode passes
+        'user_supplied' and the actual QC status.
         """
         logger.info(f"\n  Creating database entry for {taxon_name}...")
 
@@ -1590,7 +1789,10 @@ class PipelineWrapper:
                 '--output-dir', str(self.database_dir),
                 '--is-subclade',
                 '--parent-taxon', str(subclade_meta.get('parent_taxon')),
+                '--taxonomy-source', taxonomy_source,
             ]
+            if not qc_applied:
+                cmd.append('--qc-not-applied')
             if force:
                 cmd.append('--force')
             if subclade_meta.get('subclade_id') is not None:
@@ -1633,8 +1835,11 @@ class PipelineWrapper:
             'python', str(self.database_creator),
             '--input', str(tsv_file),
             '--output-dir', str(self.database_dir),
-            '--update'
+            '--update',
+            '--taxonomy-source', taxonomy_source,
         ]
+        if not qc_applied:
+            cmd.append('--qc-not-applied')
 
         if self.verbose:
             logger.info(f"    Command: {' '.join(cmd)}")
@@ -2164,7 +2369,175 @@ class PipelineWrapper:
 
         self._save_final_status()
         return 0
-    
+
+    def _run_local_genomes_mode(self) -> int:
+        """Build a tree + database from genomes already on disk (--genome-dir).
+
+        Order is cheap-checks-first so nothing expensive precedes a knowable
+        failure: DB-collision pre-flight, taxonomy resolution/validation,
+        pre-QC genome count, then (skippable) QC, subsampling if oversized,
+        OrthoPhyl, and database creation.
+        """
+        logger.info("\n" + "=" * 70)
+        logger.info("LOCAL GENOME-INGEST MODE")
+        logger.info("=" * 70)
+
+        safe = self._default_run_name(self.clade_name)
+
+        # ---- DB-collision pre-flight (before any compute) ----
+        sys.path.insert(0, str(self.script_dir / "assembly_router"))
+        try:
+            from create_hierarchical_database import database_exists
+        except ImportError as e:
+            raise ImportError(f"Failed to import database_exists: {e}")
+
+        existing = database_exists(self.clade_name, self.database_dir)
+        if existing:
+            logger.error(
+                f"\n✗ Database already exists for clade '{self.clade_name}': {existing}")
+            logger.error("  Use a different --clade-name, or remove the existing "
+                          "database directory to rebuild.")
+            return 1
+
+        # ---- Taxonomy resolution ----
+        taxonomy, is_routable = self._resolve_local_taxonomy()
+        if not is_routable:
+            logger.warning(f"  ⚠ Database '{self.clade_name}' will be created but is "
+                            f"NOT NCBI-assigned and will not be matched by fully "
+                            f"specified taxonomy queries.")
+
+        # ---- Pre-QC genome count (fail in seconds, not after QC/OrthoPhyl) ----
+        raw_candidates = []
+        for ext in self._GENOME_EXTENSIONS:
+            raw_candidates.extend(self.genome_dir.glob(f"*{ext}"))
+        if len(raw_candidates) < 4:
+            logger.error(
+                f"\n❌ ERROR: --genome-dir has only {len(raw_candidates)} genome "
+                f"file(s) (< 4 required for OrthoPhyl): {self.genome_dir}")
+            return 1
+        logger.info(f"  Found {len(raw_candidates)} genome file(s) in {self.genome_dir}")
+
+        # ---- QC requires the gather script, unless explicitly skipped ----
+        if not self.skip_qc and (not self.gather_script or not self.gather_script.exists()):
+            logger.error(f"\n❌ ERROR: QC is enabled by default but no genome "
+                          f"download/QC script is configured")
+            logger.error(f"  Please provide --gather-script utils/gather_filter_asms.sh, "
+                         f"or pass --skip-qc to skip QC")
+            return 1
+
+        local_dir = self.orthophyl_dir / "local_input" / safe
+
+        if self.dry_run:
+            logger.info(f"  [DRY RUN] Would stage genomes from {self.genome_dir}")
+            logger.info(f"  [DRY RUN] Would QC: {not self.skip_qc}")
+            logger.info(f"  [DRY RUN] Would build tree and create database "
+                        f"'{self.clade_name}_db' (taxonomy_source=user_supplied, "
+                        f"taxonomy={taxonomy!r})")
+            self._save_final_status()
+            return 0
+
+        # ---- Stage: normalize every input to <stem>.fna, originals untouched ----
+        if self._check_checkpoint(f"stage_local_{safe}") and self.resume:
+            logger.info(f"  ✓ Staging already complete for {safe} (resuming)")
+            staged_dir = local_dir / "assemblies_all.TMP"
+        else:
+            staged_dir = self._stage_local_genomes(local_dir / "assemblies_all.TMP")
+            self._write_checkpoint(f"stage_local_{safe}")
+
+        staged_files = (list(staged_dir.glob("*.fna")) + list(staged_dir.glob("*.fasta")))
+
+        # ---- Oversized: diverse-subsample before QC ----
+        qc_source_dir = local_dir
+        if len(staged_files) > self.max_tree_genomes:
+            logger.info(f"  Genome count {len(staged_files)} > max_tree_genomes "
+                        f"{self.max_tree_genomes}: diverse-subsampling to "
+                        f"{self.subsample_size} genomes")
+            staged_dir = self._subsample_genomes(
+                safe, staged_dir, self.subsample_size,
+                must_keep_stems=self._must_keep_stems())
+            staged_files = (list(staged_dir.glob("*.fna")) +
+                             list(staged_dir.glob("*.fasta")))
+            # Use a distinct qc/ dir -- reusing local_dir would re-stage the FULL
+            # (pre-subsample) set into assemblies_all.TMP and QC everything.
+            qc_source_dir = local_dir / "qc"
+
+        # ---- QC (default on; --skip-qc bypasses it entirely) ----
+        qc_applied = not self.skip_qc
+        if self.skip_qc:
+            logger.warning("  ⚠ --skip-qc: genomes will NOT be quality-checked "
+                            "(no CheckM2 completeness/contamination/N50 filtering)")
+            genomes_dir = staged_dir
+        else:
+            if self._check_checkpoint(f"qc_{safe}") and self.resume:
+                logger.info(f"  ✓ QC already complete for {safe} (resuming)")
+                genomes_dir = qc_source_dir / "genomes_to_keep"
+            else:
+                genomes_dir = self._qc_subclade(
+                    qc_source_dir, staged_files, taxon_label=safe)
+                self._write_checkpoint(f"qc_{safe}")
+
+        kept = list(genomes_dir.glob("*.fna")) + list(genomes_dir.glob("*.fasta"))
+        if len(kept) < 4:
+            logger.error(f"\n❌ ERROR: only {len(kept)} genomes remain "
+                         f"(< 4 required for OrthoPhyl)")
+            self._save_final_status()
+            return 1
+        logger.info(f"  Genomes proceeding to OrthoPhyl: {len(kept)}")
+
+        # ---- OrthoPhyl ----
+        orthophyl_output = self.output_dir / "orthophyl_run"
+        if self._check_checkpoint(f"orthophyl_{safe}") and self.resume:
+            logger.info(f"  ✓ OrthoPhyl already complete for {safe} (resuming)")
+        else:
+            self._run_orthophyl(
+                input_dir=genomes_dir, output_dir=orthophyl_output,
+                taxon_name=safe, assemblies=[])
+            self._write_checkpoint(f"orthophyl_{safe}")
+
+        # ---- Database ----
+        logger.info(f"\nCreating database for {self.clade_name}...")
+        if self._check_checkpoint(f"database_{safe}") and self.resume:
+            logger.info(f"  ✓ Database already created for {safe} (resuming)")
+        else:
+            self._create_local_database(
+                clade_name=self.clade_name,
+                orthophyl_output=orthophyl_output,
+                taxonomy=taxonomy,
+                taxonomy_source='user_supplied',
+                qc_applied=qc_applied,
+                genomes_to_keep=genomes_dir,
+                source_genome_dir=self.genome_dir)
+            self._write_checkpoint(f"database_{safe}")
+
+        # ---- Publish the tree into 03_results ----
+        tree_dir = self.results_dir / "trees" / "orthophyl"
+        tree_dir.mkdir(parents=True, exist_ok=True)
+        tree_file = self._locate_species_tree(orthophyl_output)
+        if tree_file.exists():
+            shutil.copy(tree_file, tree_dir / f"{safe}_phylogeny.nwk")
+            logger.info(f"  ✓ Published tree: {tree_dir / f'{safe}_phylogeny.nwk'}")
+        else:
+            logger.warning(f"  ⚠ Species tree not found at expected location: {tree_file}")
+
+        logger.info("=" * 70)
+        logger.info("LOCAL GENOME-INGEST MODE COMPLETE!")
+        logger.info("*** NOTE: clade name/taxonomy is user-supplied, not assigned "
+                     "by NCBI ***")
+        logger.info("=" * 70)
+        logger.info(f"  Database created: {self.clade_name}_db")
+        logger.info(f"  Assemblies: {len(kept)}")
+        logger.info(f"  QC applied: {qc_applied}")
+        logger.info(f"  Taxonomy routable: {is_routable}")
+        self._save_final_status()
+        return 0
+
+    @staticmethod
+    def _accessions_from_dir(d: Path) -> List[str]:
+        """Sorted list of genome stems (accessions) from a genomes_to_keep-style dir."""
+        return sorted(
+            p.stem for p in
+            list(d.glob("*.fna")) + list(d.glob("*.fasta")))
+
     def _create_taxon_database(
         self,
         taxon_name: str,
@@ -2181,14 +2554,14 @@ class PipelineWrapper:
         """
         # Get taxonomy from gatherer
         taxonomy = gatherer.get_taxonomy_string()
-        
+
         # Create database entry
         self._create_database_entry(
             taxon_name=taxon_name,
             orthophyl_output=orthophyl_output,
             taxonomy=taxonomy
         )
-        
+
         # Update database config with taxon metadata
         db_dir = self.database_dir / f"{taxon_name}_db"
         if db_dir.exists():
@@ -2196,12 +2569,9 @@ class PipelineWrapper:
             if config_file.exists():
                 with open(config_file, 'r') as f:
                     config = json.load(f)
-                
+
                 # Derive the accession list from the QC-filtered genomes.
-                accessions = sorted(
-                    p.stem for p in
-                    list(genomes_to_keep.glob("*.fna")) + list(genomes_to_keep.glob("*.fasta"))
-                )
+                accessions = self._accessions_from_dir(genomes_to_keep)
 
                 # Add taxon metadata
                 config['source_taxon_name'] = taxon_name
@@ -2210,12 +2580,60 @@ class PipelineWrapper:
                 config['assembly_accessions'] = accessions
                 config['n_assemblies_at_creation'] = len(accessions)
                 config['last_updated'] = datetime.now().isoformat()
-                
+
                 # Save updated config
                 with open(config_file, 'w') as f:
                     json.dump(config, f, indent=2)
-                
+
                 logger.info(f"  ✓ Updated database metadata with taxon info")
+
+    def _create_local_database(
+        self,
+        clade_name: str,
+        orthophyl_output: Path,
+        taxonomy: str,
+        taxonomy_source: str,
+        qc_applied: bool,
+        genomes_to_keep: Path,
+        source_genome_dir: Path,
+    ):
+        """Create database for local genome-ingest mode.
+
+        Unlike _create_taxon_database, there is no gatherer/taxid -- the clade
+        name/taxonomy is user-supplied (or resolved offline against the local
+        taxdump, see _resolve_local_taxonomy). source_taxon_name is still set to
+        clade_name so a later `--taxon <same name> --update-existing` run finds
+        this database (_check_existing_taxon_database matches on it).
+        """
+        self._create_database_entry(
+            taxon_name=clade_name,
+            orthophyl_output=orthophyl_output,
+            taxonomy=taxonomy,
+            taxonomy_source=taxonomy_source,
+            qc_applied=qc_applied,
+        )
+
+        db_dir = self.database_dir / f"{clade_name}_db"
+        config_file = db_dir / "database_config.json"
+        if not config_file.exists():
+            return
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+
+        accessions = self._accessions_from_dir(genomes_to_keep)
+
+        config['source_taxon_name'] = clade_name
+        config['source_taxid'] = None
+        config['source_rank'] = None
+        config['source_genome_dir'] = str(source_genome_dir.resolve())
+        config['assembly_accessions'] = accessions
+        config['n_assemblies_at_creation'] = len(accessions)
+        config['last_updated'] = datetime.now().isoformat()
+
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+
+        logger.info(f"  ✓ Updated database metadata with local genome-ingest info")
     
     def _update_taxon_database_metadata(
         self,
@@ -2300,9 +2718,19 @@ Examples:
       --database-dir databases/ \\
       --output-dir results/ \\
       --resume
+
+  # Build a database from genomes already on disk (QC runs by default; the
+  # clade name/taxonomy here is user-supplied, not assigned by NCBI, unless
+  # --clade-name happens to resolve against the NCBI taxdump)
+  python orthophyl_pipeline_wrapper.py \\
+      --genome-dir my_isolates/ \\
+      --clade-name MyNovelClade \\
+      --database-dir databases/ \\
+      --gather-script utils/gather_filter_asms.sh \\
+      --threads 32
         """
     )
-    
+
     # Mode selection: batch mode (--input) vs taxon mode (--taxon)
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument(
@@ -2313,7 +2741,13 @@ Examples:
         '--taxon',
         help='Taxon name for auto-gather mode (e.g., "Methylorubrum"). For taxon mode.'
     )
-    
+    mode_group.add_argument(
+        '--genome-dir',
+        help='Directory of genome FASTAs already on disk (.fna/.fa/.fasta, optionally '
+             '.gz). Builds a tree and database under --clade-name, QC-ing by default. '
+             'For local genome-ingest mode.'
+    )
+
     parser.add_argument(
         '--database-dir',
         required=True,
@@ -2457,12 +2891,46 @@ Examples:
              'UFBoot). Default 90.'
     )
 
+    # Local genome-ingest mode arguments (--genome-dir is in mutually_exclusive_group above)
+    parser.add_argument(
+        '--clade-name',
+        help='Required with --genome-dir. Names the clade/database. Auto-resolved '
+             'against the local NCBI taxdump when it is a real taxon; otherwise the '
+             'database is built under this name and NOTE: it was not assigned by '
+             'NCBI (use --clade-taxonomy for a full, routable lineage).'
+    )
+    parser.add_argument(
+        '--clade-taxonomy',
+        help='Optional escape hatch: a full GTDB taxonomy string '
+             '(e.g. "d__Bacteria;p__...;g__MyClade"), used verbatim. Needed only '
+             'when --clade-name does not resolve to a known NCBI taxon and you '
+             'know the real lineage.'
+    )
+    parser.add_argument(
+        '--clade-rank',
+        choices=list(PipelineWrapper._GTDB_RANK_LETTERS),
+        default='g',
+        help='Rank letter at which an unresolvable --clade-name is attached '
+             '(GTDB single-letter rank, d..s). Default: g (genus).'
+    )
+    parser.add_argument(
+        '--skip-qc',
+        action='store_true',
+        help='Skip CheckM2 QC on --genome-dir genomes (default: QC runs). Use this '
+             'only for genomes you have already quality-checked.'
+    )
+
     args = parser.parse_args()
-    
-    # Validate argument combinations (mutually_exclusive_group handles --input vs --taxon)
+
+    # Validate argument combinations (mutually_exclusive_group handles --input vs --taxon vs --genome-dir)
     if args.update_existing and not args.taxon:
         parser.error("--update-existing requires --taxon mode.")
-    
+    if args.genome_dir and not args.clade_name:
+        parser.error("--clade-name is required with --genome-dir.")
+    if args.genome_dir and args.megatree:
+        parser.error("--megatree is not supported with --genome-dir. Use "
+                      "--subsample-size / --max-tree-genomes for large local sets.")
+
     # Configure logging based on verbosity
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -2493,7 +2961,12 @@ Examples:
         megatree=args.megatree,
         backbone_reps=args.backbone_reps,
         subclade_size=args.subclade_size,
-        conflict_min_support=args.conflict_min_support
+        conflict_min_support=args.conflict_min_support,
+        genome_dir=args.genome_dir,
+        clade_name=args.clade_name,
+        clade_rank=args.clade_rank,
+        clade_taxonomy=args.clade_taxonomy,
+        skip_qc=args.skip_qc,
     )
 
     return wrapper.run()

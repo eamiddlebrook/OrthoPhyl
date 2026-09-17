@@ -54,6 +54,49 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# NCBI rank name -> GTDB single-letter prefix.
+GTDB_PREFIX = {
+    'superkingdom': 'd',
+    'domain': 'd',
+    'phylum': 'p',
+    'class': 'c',
+    'order': 'o',
+    'family': 'f',
+    'genus': 'g',
+    'species': 's',
+}
+GTDB_ORDER = ['d', 'p', 'c', 'o', 'f', 'g', 's']
+
+
+def render_gtdb_lineage(lineage: Dict[str, str]) -> str:
+    """Render an NCBI-rank-named lineage dict as a GTDB-format taxonomy string.
+
+    ``lineage`` maps NCBI rank names (e.g. ``"genus"``) to taxon names, as returned
+    by :meth:`NCBITaxonomy.get_lineage`. Ranks with no GTDB slot (e.g. NCBI's
+    "kingdom", "no rank") are ignored. Emits ranks from domain down to the deepest
+    one actually present; returns "" if nothing maps to a GTDB rank.
+    """
+    by_prefix = {}
+    for ncbi_rank, name in lineage.items():
+        prefix = GTDB_PREFIX.get(ncbi_rank)
+        if prefix:
+            by_prefix[prefix] = name
+
+    deepest = None
+    for prefix in GTDB_ORDER:
+        if prefix in by_prefix:
+            deepest = prefix
+    if deepest is None:
+        return ""
+
+    parts = []
+    for prefix in GTDB_ORDER:
+        name = by_prefix.get(prefix, "")
+        parts.append(f"{prefix}__{name}")
+        if prefix == deepest:
+            break
+    return ";".join(parts)
+
 
 class NCBITaxonomy:
     """Parse and query NCBI taxonomy database."""
@@ -576,19 +619,6 @@ class TaxonAssemblyGatherer:
         """
         return self.gather_assemblies()
 
-    # NCBI rank name -> GTDB single-letter prefix.
-    _GTDB_PREFIX = {
-        'superkingdom': 'd',
-        'domain': 'd',
-        'phylum': 'p',
-        'class': 'c',
-        'order': 'o',
-        'family': 'f',
-        'genus': 'g',
-        'species': 's',
-    }
-    _GTDB_ORDER = ['d', 'p', 'c', 'o', 'f', 'g', 's']
-
     def get_taxonomy_string(self) -> str:
         """Build a GTDB-format taxonomy string for the resolved taxon.
 
@@ -597,28 +627,7 @@ class TaxonAssemblyGatherer:
         NCBI name are rendered as empty (e.g. ``s__``).
         """
         lineage = self.taxonomy.get_lineage(self.taxid)
-
-        # Map NCBI-rank-named lineage onto GTDB prefixes.
-        by_prefix = {}
-        for ncbi_rank, name in lineage.items():
-            prefix = self._GTDB_PREFIX.get(ncbi_rank)
-            if prefix:
-                by_prefix[prefix] = name
-
-        # Emit ranks from domain down to the deepest one we actually have.
-        parts = []
-        deepest = None
-        for prefix in self._GTDB_ORDER:
-            if prefix in by_prefix:
-                deepest = prefix
-        if deepest is None:
-            return ""
-        for prefix in self._GTDB_ORDER:
-            name = by_prefix.get(prefix, "")
-            parts.append(f"{prefix}__{name}")
-            if prefix == deepest:
-                break
-        return ";".join(parts)
+        return render_gtdb_lineage(lineage)
 
     def download_assemblies(self, assemblies: List[Dict], download_dir: Path):
         """Download genome FASTAs for the given assemblies from the NCBI FTP site.

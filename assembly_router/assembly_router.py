@@ -135,7 +135,8 @@ class MultiDatabaseRouter:
         
         logger.info(f"Loaded {len(self.databases)} databases")
         for db in self.databases:
-            logger.info(f"  - {db['clade_name']} ({db['rank_name']}, {db['n_genomes']} genomes)")
+            note = " [user-supplied taxonomy: not NCBI-assigned]" if db['taxonomy_source'] == 'user_supplied' else ""
+            logger.info(f"  - {db['clade_name']} ({db['rank_name']}, {db['n_genomes']} genomes){note}")
         
         # Create output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -192,6 +193,8 @@ class MultiDatabaseRouter:
             'members_file': config.get('members_file'),
             'source_genome_dir': config.get('source_genome_dir'),
             'built': config.get('built', True),
+            'taxonomy_source': config.get('taxonomy_source', 'ncbi'),
+            'qc_applied': config.get('qc_applied', True),
         }
     
     def find_matching_databases(self, query_taxonomy: str) -> List[Dict]:

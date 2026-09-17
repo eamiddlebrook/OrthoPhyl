@@ -118,6 +118,14 @@ def subclade_partition_module():
 
 
 @pytest.fixture(scope="session")
+def filter_redundant_module():
+    return load_module(
+        REPO_ROOT / "python_scripts" / "filter_redundant_genomes.py",
+        name="filter_redundant_genomes",
+    )
+
+
+@pytest.fixture(scope="session")
 def subsample_module():
     return load_module(
         REPO_ROOT / "python_scripts" / "subsample_genomes.py",
@@ -213,6 +221,8 @@ def make_db_dir(tmp_path):
         built=True,
         sketch_members=None,
         source_genome_dir=None,
+        taxonomy_source=None,
+        qc_applied=None,
     ):
         base = Path(parent) if parent else (tmp_path / "databases")
         base.mkdir(parents=True, exist_ok=True)
@@ -234,6 +244,10 @@ def make_db_dir(tmp_path):
             "available_tree_methods": list(tree_methods),
             "available_data_types": list(data_types),
         }
+        if taxonomy_source is not None:
+            config["taxonomy_source"] = taxonomy_source
+        if qc_applied is not None:
+            config["qc_applied"] = qc_applied
         if is_subclade:
             # Write a dummy sketch + members file so router MASH tie-break has
             # concrete paths to work with (contents don't matter when mash is mocked).

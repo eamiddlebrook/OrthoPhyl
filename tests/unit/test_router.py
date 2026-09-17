@@ -54,6 +54,44 @@ class TestLoadDatabases:
             Router(database_dir=empty, output_dir=tmp_path / "out")
 
 
+class TestTaxonomySourceProvenance:
+    def test_defaults_to_ncbi_when_absent(self, Router, two_db_dir, tmp_path):
+        router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
+        by_name = {db["clade_name"]: db for db in router.databases}
+        assert by_name["Escherichia"]["taxonomy_source"] == "ncbi"
+        assert by_name["Escherichia"]["qc_applied"] is True
+
+    def test_user_supplied_is_loaded(self, Router, make_db_dir, tmp_path):
+        parent = tmp_path / "databases"
+        make_db_dir(
+            clade_name="Blorptaxon",
+            clade_taxonomy="g__Blorptaxon",
+            clade_rank="g",
+            clade_rank_name="genus",
+            n_genomes=12,
+            parent=parent,
+            taxonomy_source="user_supplied",
+            qc_applied=False,
+        )
+        router = Router(database_dir=parent, output_dir=tmp_path / "out")
+        db = router.databases[0]
+        assert db["taxonomy_source"] == "user_supplied"
+        assert db["qc_applied"] is False
+
+    def test_find_matching_unaffected_by_taxonomy_source(
+        self, Router, two_db_dir, tmp_path
+    ):
+        """taxonomy_source is provenance metadata only -- it must not gate
+        find_matching_databases, which matches purely on lineage/rank."""
+        router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
+        matches = router.find_matching_databases(
+            ESCHERICHIA_TAX + ";s__Escherichia_coli"
+        )
+        assert matches
+        assert matches[0]["database"]["clade_name"] == "Escherichia"
+        assert matches[0]["database"]["taxonomy_source"] == "ncbi"
+
+
 class TestFindMatching:
     def test_most_specific_first(self, Router, two_db_dir, tmp_path):
         router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
