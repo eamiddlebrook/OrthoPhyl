@@ -527,7 +527,20 @@ class PipelineWrapper:
             logger.warning(f"Genome download script not found: {self.gather_script}")
             logger.warning("  Will generate manual download instructions instead")
             self.gather_script = None
-    
+
+    def _log_command(self, cmd: List) -> None:
+        """Print a constructed command to real STDOUT, unconditionally.
+
+        Every subprocess the wrapper runs (or skips under --dry-run) is
+        announced here rather than via logger.info, because logger's default
+        StreamHandler writes to stderr and most call sites previously gated
+        this line behind --verbose. Call this right after `cmd` is fully
+        built, before the --dry-run branch, so dry runs show the same line
+        real runs do.
+        """
+        tag = "[DRY RUN] " if self.dry_run else ""
+        print(f"{tag}COMMAND: {' '.join(str(c) for c in cmd)}", flush=True)
+
     def _create_initial_databases(self):
         """Create initial databases from orthophyl_runs.tsv."""
         cmd = [
@@ -535,9 +548,9 @@ class PipelineWrapper:
             '--input', str(self.orthophyl_runs_tsv),
             '--output-dir', str(self.database_dir)
         ]
-        
-        logger.info(f"Running: {' '.join(cmd)}")
-        
+
+        self._log_command(cmd)
+
         if self.dry_run:
             logger.info("  [DRY RUN] Would create initial databases")
             return
@@ -570,13 +583,12 @@ class PipelineWrapper:
         
         if self.gather_script:
             cmd.extend(['--gather-filter-script', str(self.gather_script)])
-        
+
         logger.info(f"Running assembly router...")
-        if self.verbose:
-            logger.info(f"  Command: {' '.join(cmd)}")
+        self._log_command(cmd)
         logger.info(f"  Input: {self.input_file}")
         logger.info(f"  Database: {self.database_dir}")
-        
+
         if self.dry_run:
             logger.info("  [DRY RUN] Would run assembly routing")
             # In dry run, create mock routing results for preview
@@ -739,11 +751,10 @@ class PipelineWrapper:
         ]
         
         logger.info(f"  Running ReLeaf...")
-        if self.verbose:
-            logger.info(f"    Command: {' '.join(cmd)}")
+        self._log_command(cmd)
         logger.info(f"    Database: {database_dir}")
         logger.info(f"    Method: {tree_method}, Data: {tree_data}")
-        
+
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would run ReLeaf for {database_name}")
             return
@@ -839,9 +850,8 @@ class PipelineWrapper:
             '--releaf-output', str(releaf_output_dir)
         ]
         
-        if self.verbose:
-            logger.info(f"    Command: {' '.join(cmd)}")
-        
+        self._log_command(cmd)
+
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would create new database version")
             return
@@ -1053,24 +1063,24 @@ class PipelineWrapper:
         merged_tree = megatree_dir / f"{taxon_name}_megatree.nwk"
         conflict_report = megatree_dir / f"{taxon_name}_megatree_conflicts.json"
 
+        cmd = ['python', str(self.megatree_grafter),
+               '--backbone', str(backbone_tree),
+               '--out-tree', str(merged_tree),
+               '--out-report', str(conflict_report),
+               '--min-support', str(self.conflict_min_support)]
+        for sc_name, spec in sorted(subclade_specs.items()):
+            if not spec['reps']:
+                logger.warning(f"    Subclade {sc_name} contributed no backbone "
+                               f"reps; skipping its graft.")
+                continue
+            cmd.extend(['--subclade',
+                        f"{sc_name}:{spec['tree']}:{','.join(spec['reps'])}"])
+        self._log_command(cmd)
+
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would graft {len(subclade_specs)} subclades "
                         f"onto backbone -> {merged_tree}")
         else:
-            cmd = ['python', str(self.megatree_grafter),
-                   '--backbone', str(backbone_tree),
-                   '--out-tree', str(merged_tree),
-                   '--out-report', str(conflict_report),
-                   '--min-support', str(self.conflict_min_support)]
-            for sc_name, spec in sorted(subclade_specs.items()):
-                if not spec['reps']:
-                    logger.warning(f"    Subclade {sc_name} contributed no backbone "
-                                   f"reps; skipping its graft.")
-                    continue
-                cmd.extend(['--subclade',
-                            f"{sc_name}:{spec['tree']}:{','.join(spec['reps'])}"])
-            if self.verbose:
-                logger.info(f"    Command: {' '.join(cmd)}")
             log_file = self.logs_dir / f"megatree_{taxon_name}.log"
             with open(log_file, 'w') as f:
                 result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT,
@@ -1284,8 +1294,7 @@ class PipelineWrapper:
         mode_label = ("download-only" if download_only else
                       "qc-only" if qc_only else "download+QC")
         logger.info(f"  Running gather ({mode_label}) for {taxon_name}...")
-        if self.verbose:
-            logger.info(f"    Command: {' '.join(cmd)}")
+        self._log_command(cmd)
         logger.info(f"    Output: {output_dir}")
 
         if self.dry_run:
@@ -1521,8 +1530,7 @@ class PipelineWrapper:
         for stem in (must_keep_stems or []):
             cmd.extend(['--must-keep', stem])
 
-        if self.verbose:
-            logger.info(f"    Command: {' '.join(cmd)}")
+        self._log_command(cmd)
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would subsample {taxon_name} to {target} genomes")
             selected_dir.mkdir(parents=True, exist_ok=True)
@@ -1619,8 +1627,7 @@ class PipelineWrapper:
         for asm in query_assemblies:
             cmd.extend(['--query', Path(asm['assembly_path']).name])
 
-        if self.verbose:
-            logger.info(f"    Command: {' '.join(cmd)}")
+        self._log_command(cmd)
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would partition {taxon_name} into subclades")
             # Synthesize a trivial single-subclade manifest for dry-run flow.
@@ -1681,12 +1688,11 @@ class PipelineWrapper:
         ]
         
         logger.info(f"\n  Running OrthoPhyl for {taxon_name}...")
-        if self.verbose:
-            logger.info(f"    Command: {' '.join(cmd)}")
+        self._log_command(cmd)
         logger.info(f"    Input: {input_dir}")
         logger.info(f"    Output: {output_dir}")
         logger.info(f"    INCLUDES {len(assemblies)} query genomes!")
-        
+
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would run OrthoPhyl for {taxon_name}")
             return
@@ -1804,8 +1810,7 @@ class PipelineWrapper:
             if subclade_meta.get('source_genome_dir'):
                 cmd.extend(['--source-genome-dir', str(subclade_meta['source_genome_dir'])])
 
-            if self.verbose:
-                logger.info(f"    Command: {' '.join(cmd)}")
+            self._log_command(cmd)
             if self.dry_run:
                 logger.info(f"  [DRY RUN] Would create subclade database for {taxon_name}")
                 return
@@ -1841,8 +1846,7 @@ class PipelineWrapper:
         if not qc_applied:
             cmd.append('--qc-not-applied')
 
-        if self.verbose:
-            logger.info(f"    Command: {' '.join(cmd)}")
+        self._log_command(cmd)
 
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would create database for {taxon_name}")
