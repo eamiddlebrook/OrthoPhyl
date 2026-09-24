@@ -464,12 +464,16 @@ ls databases/MyDatabase_db/orthophyl_run/OG_alignmentsToHMM/hmms_final/
 
 ### 📖 Understanding the Pipeline
 
-- **[Pipeline Phases](readmes/README_PIPELINE_PHASES.md)** - Detailed walkthrough of all 4 pipeline phases
+- **[Pipeline Phases](readmes/README_PIPELINE_PHASES.md)** - Detailed walkthrough of all pipeline phases
   - Phase 1: Initialization
   - Phase 2: Assembly Routing
   - Phase 3a: ReLeaf Route (Matched Databases)
   - Phase 3b: OrthoPhyl Route (Novel Taxa)
+  - Phase 3c: Subclade-Build Route (Lazy Subclades)
   - Phase 4: Results Aggregation
+
+- **[Routing Workflow Diagram](readmes/ROUTING_WORKFLOW_DIAGRAM.md)** - Flowchart of `--taxon` create vs.
+  `--input` query routing across taxon scale (subsample / `--megatree` / `--megatree-lazy` / `--placement`)
 
 - **[Technical Reference](readmes/README_TECHNICAL_REFERENCE.md)** - Comprehensive technical documentation
   - Architecture & Component Interaction
