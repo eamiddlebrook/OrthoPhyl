@@ -328,15 +328,17 @@ def create_database_for_run(
     subclade_meta: Optional[Dict] = None,
     taxonomy_source: str = "ncbi",
     qc_applied: bool = True,
+    register_only: bool = False,
 ) -> Path:
     """
     Create a database directory for a single OrthoPhyl run.
 
     subclade_meta (optional): metadata for a MASH-partitioned subclade. When
         provided, extra fields (is_subclade, parent_taxon, subclade_id,
-        sketch_file, members_file, built, source_genome_dir) are written to the
-        config, and any source sketch/members files are copied into the DB dir.
-        A plain (non-subclade) DB is created byte-identically when this is None.
+        sketch_file, members_file, built, source_genome_dir, is_backbone) are
+        written to the config, and any source sketch/members files are copied
+        into the DB dir. A plain (non-subclade) DB is created byte-identically
+        when this is None.
 
     taxonomy_source: "ncbi" (default) or "user_supplied" -- provenance of
         clade_taxonomy, surfaced for the local-genome-ingest mode where the
@@ -344,6 +346,11 @@ def create_database_for_run(
 
     qc_applied: whether CheckM2 QC was run on the genomes before tree-building.
         Defaults to True; the local-genome-ingest mode's --skip-qc sets it False.
+
+    register_only (optional): register a subclade DB WITHOUT a built tree -- for
+        lazy build-on-demand. Skips OrthoPhyl-run validation, sets built=false /
+        has_trees=false, writes a placeholder tree, and skips the orthophyl_run
+        symlink. Requires subclade_meta.
 
     Returns:
         Path to created database directory
@@ -359,24 +366,41 @@ def create_database_for_run(
         logger.info(f"    Use --force to rebuild or --update to skip")
         raise FileExistsError(f"Database already exists: {existing_db}")
 
-    # Validate OrthoPhyl run
-    try:
-        validation = validate_orthophyl_run(orthophyl_dir)
-    except Exception as e:
-        logger.error(f"  ✗ Failed to validate: {e}")
-        raise
+    if register_only:
+        # Lazy registration: no OrthoPhyl run yet, so nothing to validate. Build a
+        #   minimal validation dict so the rest of the function can proceed.
+        validation = {
+            'valid': True,
+            'n_genomes': (subclade_meta or {}).get('n_genomes', 0),
+            'has_hmms': False,
+            'has_trees': False,
+            'tree_file': None,
+            'hmm_dir': None,
+            'tree_methods': set(),
+            'tree_data_types': set(),
+            'available_trees': [],
+            'validation_details': ['Registered lazily (built=false); tree not yet built'],
+            'warnings': [],
+        }
+    else:
+        # Validate OrthoPhyl run
+        try:
+            validation = validate_orthophyl_run(orthophyl_dir)
+        except Exception as e:
+            logger.error(f"  ✗ Failed to validate: {e}")
+            raise
 
-    if not validation['valid']:
-        error_msg = f"Invalid OrthoPhyl run: {orthophyl_dir}\n"
-        error_msg += "Validation details:\n"
-        for detail in validation['validation_details']:
-            error_msg += f"  - {detail}\n"
-        raise ValueError(error_msg)
+        if not validation['valid']:
+            error_msg = f"Invalid OrthoPhyl run: {orthophyl_dir}\n"
+            error_msg += "Validation details:\n"
+            for detail in validation['validation_details']:
+                error_msg += f"  - {detail}\n"
+            raise ValueError(error_msg)
 
-    if validation['warnings']:
-        for warning in validation['warnings']:
-            logger.warning(f"  ⚠ {warning}")
-    
+        if validation['warnings']:
+            for warning in validation['warnings']:
+                logger.warning(f"  ⚠ {warning}")
+
     # Parse taxonomy to determine clade rank
     tax = GTDBTaxonomy(clade_taxonomy)
     clade_rank = tax.get_most_specific_rank()
@@ -448,12 +472,16 @@ def create_database_for_run(
     config["is_subclade"] = bool(sm.get("is_subclade", False))
     config["parent_taxon"] = sm.get("parent_taxon")
     config["subclade_id"] = sm.get("subclade_id")
-    # All DBs created here carry a built tree.
-    config["built"] = True
+    # A DB is "built" (real tree) unless we're registering it lazily.
+    config["built"] = (not register_only)
     config["source_genome_dir"] = sm.get("source_genome_dir")
+    # Marks the megatree's sparse overview DB, distinct from its dense subclades.
+    config["is_backbone"] = bool(sm.get("is_backbone", False))
     # sketch_file / members_file are set to the in-DB copies below (if provided).
     config["sketch_file"] = None
     config["members_file"] = None
+    if register_only:
+        config["has_trees"] = False
 
     # Copy the subclade's MASH sketch + member list into the DB dir so the router
     #   can compare a query against them without reaching back to the run dir.
@@ -475,58 +503,70 @@ def create_database_for_run(
         json.dump(config, f, indent=2)
 
     logger.info(f"  ✓ Created config")
-    
+
     # Copy or link phylogeny
-    if validation['tree_file']:
-        dest_tree = db_dir / "phylogeny.nwk"
-        shutil.copy(validation['tree_file'], dest_tree)
-        logger.info(f"  ✓ Copied tree: {validation['tree_file'].name}")
+    if register_only:
+        # No tree yet -- lazy registration writes a placeholder and skips the symlink.
+        (db_dir / "phylogeny.nwk").write_text(
+            f"# Placeholder tree for {clade_name} (registered lazily, built=false)\n")
+        logger.info("  ⚠ Registered lazily: placeholder tree, no orthophyl_run symlink")
     else:
-        (db_dir / "phylogeny.nwk").write_text(f"# Placeholder tree for {clade_name}\n")
-        logger.info("  ⚠ Created placeholder tree (no tree file found)")
+        if validation['tree_file']:
+            dest_tree = db_dir / "phylogeny.nwk"
+            shutil.copy(validation['tree_file'], dest_tree)
+            logger.info(f"  ✓ Copied tree: {validation['tree_file'].name}")
+        else:
+            (db_dir / "phylogeny.nwk").write_text(f"# Placeholder tree for {clade_name}\n")
+            logger.info("  ⚠ Created placeholder tree (no tree file found)")
 
-    # Create symlink to OrthoPhyl run
-    orthophyl_link = db_dir / "orthophyl_run"
-    if orthophyl_link.exists():
-        orthophyl_link.unlink()
+        # Create symlink to OrthoPhyl run
+        orthophyl_link = db_dir / "orthophyl_run"
+        if orthophyl_link.exists():
+            orthophyl_link.unlink()
 
-    try:
-        orthophyl_link.symlink_to(orthophyl_dir.resolve())
-        logger.info(f"  ✓ Created symlink: orthophyl_run")
-    except OSError as e:
-        logger.warning(f"  ⚠ Could not create symlink: {e}")
-        logger.info("  → Copying essential files instead...")
-        orthophyl_link.mkdir(exist_ok=True)
+        try:
+            orthophyl_link.symlink_to(orthophyl_dir.resolve())
+            logger.info(f"  ✓ Created symlink: orthophyl_run")
+        except OSError as e:
+            logger.warning(f"  ⚠ Could not create symlink: {e}")
+            logger.info("  → Copying essential files instead...")
+            orthophyl_link.mkdir(exist_ok=True)
 
-        # Copy HMMs if found
-        if validation['hmm_dir']:
-            dest_hmm = orthophyl_link / "hmms"
-            shutil.copytree(validation['hmm_dir'], dest_hmm, dirs_exist_ok=True)
-            logger.info(f"  ✓ Copied HMMs")
+            # Copy HMMs if found
+            if validation['hmm_dir']:
+                dest_hmm = orthophyl_link / "hmms"
+                shutil.copytree(validation['hmm_dir'], dest_hmm, dirs_exist_ok=True)
+                logger.info(f"  ✓ Copied HMMs")
 
     # Create genome list
     genome_list_file = db_dir / "genome_list.txt"
     genome_names = []
 
-    # Try to extract genome names
-    for source in ['genome_list', 'all_input_list']:
-        for base_dir in [orthophyl_dir, orthophyl_dir / "store"]:
-            source_file = base_dir / source
-            if source_file.exists():
-                with open(source_file, 'r') as f:
-                    genome_names = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-                if genome_names:
-                    break
-        if genome_names:
-            break
+    if register_only:
+        # No OrthoPhyl run yet -- the genome list IS the subclade's member list.
+        if config.get("members_file") and os.path.exists(config["members_file"]):
+            with open(config["members_file"]) as f:
+                genome_names = [line.strip() for line in f if line.strip()]
+    else:
+        # Try to extract genome names
+        for source in ['genome_list', 'all_input_list']:
+            for base_dir in [orthophyl_dir, orthophyl_dir / "store"]:
+                source_file = base_dir / source
+                if source_file.exists():
+                    with open(source_file, 'r') as f:
+                        genome_names = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+                    if genome_names:
+                        break
+            if genome_names:
+                break
 
-    if not genome_names:
-        # Fallback to protein files
-        for prot_dir in [orthophyl_dir / "annots_prots", orthophyl_dir / "store" / "annots_prots"]:
-            if prot_dir.exists():
-                genome_names = [f.stem for f in prot_dir.glob("*.faa")]
-                if genome_names:
-                    break
+        if not genome_names:
+            # Fallback to protein files
+            for prot_dir in [orthophyl_dir / "annots_prots", orthophyl_dir / "store" / "annots_prots"]:
+                if prot_dir.exists():
+                    genome_names = [f.stem for f in prot_dir.glob("*.faa")]
+                    if genome_names:
+                        break
 
     with open(genome_list_file, 'w') as f:
         f.write(f"# Genomes in {clade_name} database\n")
@@ -763,19 +803,25 @@ Input Format (TSV):
         nargs=3,
         metavar=('NAME', 'TAXONOMY', 'ORTHOPHYL_DIR'),
         help='Register ONE clade directly (name, taxonomy, orthophyl_dir) instead '
-             'of parsing --input.'
+             'of parsing --input. With --register-only, ORTHOPHYL_DIR may be a '
+             'placeholder (unused).'
     )
     # Subclade metadata (MASH-partitioned oversized taxa).
     parser.add_argument('--is-subclade', action='store_true',
                         help='Mark this DB as a subclade of a larger taxon.')
+    parser.add_argument('--is-backbone', action='store_true',
+                        help="Mark this DB as a megatree's sparse backbone "
+                             '(overview) database, as opposed to a dense subclade.')
     parser.add_argument('--parent-taxon', help='Parent taxon name for a subclade.')
     parser.add_argument('--subclade-id', type=int, help='1-based subclade index.')
     parser.add_argument('--sketch-file', help='MASH .msh sketch for the subclade.')
     parser.add_argument('--members-file', help='Text file of subclade member basenames.')
     parser.add_argument('--source-genome-dir',
-                        help='Directory holding the subclade raw member FASTAs.')
+                        help='Directory holding the subclade raw member FASTAs '
+                             '(for lazy build re-staging).')
     parser.add_argument('--n-genomes', type=int, default=0,
-                        help='Member count to record for the subclade.')
+                        help='Member count to record for the subclade (also used '
+                             'for a lazily-registered subclade).')
     parser.add_argument('--taxonomy-source', choices=['ncbi', 'user_supplied'],
                         default='ncbi',
                         help='Provenance of clade_taxonomy (default: ncbi). '
@@ -784,6 +830,9 @@ Input Format (TSV):
     parser.add_argument('--qc-not-applied', action='store_true',
                         help='Record that CheckM2 QC was NOT run on the input '
                              'genomes (default: QC is assumed applied).')
+    parser.add_argument('--register-only', action='store_true',
+                        help='Register a subclade DB with built=false (no tree yet) '
+                             'for lazy build-on-demand. Requires --is-subclade.')
 
     args = parser.parse_args()
 
@@ -791,12 +840,15 @@ Input Format (TSV):
         parser.error("Cannot use --update and --force together")
     if not args.input and not args.single_clade:
         parser.error("Provide either --input <tsv> or --single-clade NAME TAX DIR")
+    if args.register_only and not args.is_subclade:
+        parser.error("--register-only requires --is-subclade")
 
     # Assemble subclade_meta once (passed to create_database_for_run below).
     subclade_meta = None
-    if args.is_subclade:
+    if args.is_subclade or args.is_backbone:
         subclade_meta = {
-            'is_subclade': True,
+            'is_subclade': args.is_subclade,
+            'is_backbone': args.is_backbone,
             'parent_taxon': args.parent_taxon,
             'subclade_id': args.subclade_id,
             'sketch_file': args.sketch_file,
@@ -816,6 +868,7 @@ Input Format (TSV):
                 force=args.force, subclade_meta=subclade_meta,
                 taxonomy_source=args.taxonomy_source,
                 qc_applied=not args.qc_not_applied,
+                register_only=args.register_only,
             )
         except FileExistsError:
             logger.info("Database already exists; nothing to do (use --force to rebuild)")
@@ -833,10 +886,15 @@ Input Format (TSV):
                     'database_dir': d,
                     'n_genomes': c['n_genomes'],
                     'taxonomy_source': c.get('taxonomy_source', 'ncbi'),
+                    # NOTE: is_subclade/built are intentionally NOT surfaced here --
+                    #   the router re-reads each DB's own database_config.json
+                    #   directly (assembly_router.py:_load_single_database) rather
+                    #   than trusting this index for anything but the directory
+                    #   path, so this loop does not need to populate them.
                 })
         if all_dbs:
             create_master_index(all_dbs, output_dir)
-        logger.info(f"✓ Created {db_dir}")
+        logger.info(f"✓ {'Registered' if args.register_only else 'Created'} {db_dir}")
         return 0
     
     output_dir = Path(args.output_dir)

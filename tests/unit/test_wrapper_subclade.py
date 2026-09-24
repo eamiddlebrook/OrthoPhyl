@@ -5,9 +5,10 @@ The DEFAULT large-taxon behavior is diverse subsampling to one tree:
   * raw set over the ceiling  -> diverse-subsample to --subsample-size, single build
   * create mode over ceiling  -> subsample, single taxon-flavored DB
   * gather split issues --download-only then --qc-only
-The router now emits only ReLeaf / OrthoPhyl decisions (the lazy-build
-OrthoPhyl_subclade_build path was removed); the opt-in --megatree path is
-covered by tests/unit/test_wrapper_megatree.py.
+The router emits ReLeaf / OrthoPhyl / OrthoPhyl_subclade_build decisions (the
+third for lazily registered megatree subclades a query has just matched); the
+opt-in --megatree build path itself is covered by
+tests/unit/test_wrapper_megatree.py.
 All heavy steps (mash, subsample, gather, OrthoPhyl, DB creator) are mocked.
 """
 
@@ -306,8 +307,10 @@ def _write_decision(routing_dir, idx, decision):
 
 
 class TestParseRoutingResults:
-    """After lazy-build removal the router emits only ReLeaf / OrthoPhyl decisions;
-    _parse_routing_results splits them two ways."""
+    """The router emits ReLeaf / OrthoPhyl / OrthoPhyl_subclade_build decisions;
+    _parse_routing_results splits them three ways (the third for lazily
+    registered megatree subclades a query has just matched -- see
+    tests/unit/test_wrapper_megatree.py for the --megatree build path itself)."""
 
     def test_mixed_decisions_split_two_ways(self, Wrapper, tmp_path):
         w = _make_wrapper(Wrapper, tmp_path)
@@ -327,4 +330,27 @@ class TestParseRoutingResults:
         results = w._parse_routing_results()
         assert len(results["releaf_batch"]) == 1
         assert list(results["orthophyl_batch"].keys()) == ["Bacillus"]
-        assert "subclade_build_batch" not in results
+        assert results["subclade_build_batch"] == {}
+
+    def test_subclade_build_decision_grouped_by_subclade(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path)
+        _write_decision(w.routing_dir, 0, {
+            "pipeline": "OrthoPhyl_subclade_build", "assembly_id": "q1",
+            "assembly": str(tmp_path / "q1.fna"),
+            "subclade_name": "Bacillus_2", "parent_taxon": "Bacillus",
+            "subclade_id": 2, "database_dir": str(tmp_path / "Bacillus_2_db"),
+            "subclade_taxonomy": "d__Bacteria;g__Bacillus",
+            "members_file": str(tmp_path / "Bacillus_2.members.txt"),
+            "sketch_file": str(tmp_path / "Bacillus_2.msh"),
+            "source_genome_dir": str(tmp_path / "raw"),
+            "query_taxonomy": "d__Bacteria;g__Bacillus",
+        })
+
+        results = w._parse_routing_results()
+        assert results["releaf_batch"] == []
+        assert results["orthophyl_batch"] == {}
+        assert list(results["subclade_build_batch"].keys()) == ["Bacillus_2"]
+        entry = results["subclade_build_batch"]["Bacillus_2"][0]
+        assert entry["assembly_id"] == "q1"
+        assert entry["parent_taxon"] == "Bacillus"
+        assert entry["subclade_taxonomy"] == "d__Bacteria;g__Bacillus"

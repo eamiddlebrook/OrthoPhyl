@@ -12,7 +12,8 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
 2. [Phase 2: Assembly Routing](#phase-2-assembly-routing)
 3. [Phase 3a: ReLeaf Route (Matched Databases)](#phase-3a-releaf-route-matched-databases)
 4. [Phase 3b: OrthoPhyl Route (Novel Taxa)](#phase-3b-orthophyl-route-novel-taxa)
-5. [Phase 4: Results Aggregation](#phase-4-results-aggregation)
+5. [Phase 3c: Subclade-Build Route (Lazy Subclades)](#phase-3c-subclade-build-route-lazy-subclades)
+6. [Phase 4: Results Aggregation](#phase-4-results-aggregation)
 
 ---
 
@@ -71,15 +72,27 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
 3. **Routing Logic**:
    ```python
    if assembly_taxonomy matches database_taxonomy:
-       → ReLeaf Route
-       - Use existing database
-       - Fast phylogenetic placement
+       if matched_database.is_subclade and not matched_database.built:
+           → OrthoPhyl_subclade_build Route
+           - Lazily-registered megatree subclade (--megatree-lazy); no tree yet
+           - Build it from its own raw members, then ReLeaf the query onto it
+       else:
+           → ReLeaf Route
+           - Use existing database
+           - Fast phylogenetic placement
    else:
        → OrthoPhyl Route
        - Download related genomes
        - Run full phylogenetic analysis
        - Create new database
    ```
+
+   A megatree's backbone and its subclades share one taxonomy string, so a
+   query can match several databases at the same specificity. That tie is
+   broken by `--placement` (`subclade` default, or `backbone`), then by MASH
+   distance among the tied subclades (nearest wins; ties broken by ascending
+   `clade_name`) — see `readmes/README_ADVANCED_FEATURES.md` § *Placing a
+   query*.
 
 4. **Output Files** (per assembly):
    - `routing_decision_{assembly_id}.json` - Machine-readable decision
@@ -117,6 +130,29 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
   "suggestion": "Create new database for genus 'NovelGenus'"
 }
 ```
+
+**Example Routing Decision (OrthoPhyl_subclade_build, `--megatree-lazy` only)**:
+```json
+{
+  "pipeline": "OrthoPhyl_subclade_build",
+  "reason": "Query nearest to subclade Andreesenella_2 (parent Andreesenella), which is registered but not yet built; build its tree then ReLeaf",
+  "assembly": "/path/to/genome.fna",
+  "assembly_id": "genome_id",
+  "query_taxonomy": "d__Bacteria;...;g__Andreesenella;s__",
+  "matched_database": "Andreesenella_2",
+  "parent_taxon": "Andreesenella",
+  "subclade_id": 2,
+  "subclade_name": "Andreesenella_2",
+  "subclade_taxonomy": "d__Bacteria;...;g__Andreesenella",
+  "members_file": "/path/to/databases/Andreesenella_2_db/subclade_members.txt",
+  "sketch_file": "/path/to/databases/Andreesenella_2_db/subclade_sketch.msh",
+  "source_genome_dir": "/path/to/raw/Andreesenella"
+}
+```
+Note `subclade_taxonomy` is the **subclade's own** recorded taxonomy, not the
+query's — the on-demand build (Phase 3c) uses this so a rebuild never
+overwrites the subclade's taxonomy with whatever a single query happened to
+carry.
 
 **Checkpoint**: `routing.flag`
 
@@ -226,11 +262,17 @@ merged tree. `python_scripts/subclade_partition.py` runs `mash triangle -k 17 -s
 5000 -E` on the raw set, clusters with average-linkage (UPGMA), and recursively
 splits so every subclade ≤ `--subclade-size`. It writes `partition_manifest.json`,
 a per-subclade `.msh` sketch, and a `.members.txt` list under
-`02_orthophyl_novel/partitions/{taxon}/`. **Every** subclade is then QC'd and built
-(Stage 1c → 3 → 4); a backbone tree is built from `--backbone-reps` diverse reps per
-subclade, and `python_scripts/megatree_graft.py` grafts each subclade tree onto its
+`02_orthophyl_novel/partitions/{taxon}/`. By default **every** subclade is then
+QC'd and built (Stage 1c → 3 → 4); with **`--megatree-lazy`**, a subclade holding
+no query is instead only *registered* — `create_hierarchical_database.py
+--register-only`, `built=false`, sketch/members/source-dir recorded, no tree —
+and built later on demand when a query MASH-matches it (Phase 3c, below). A
+backbone tree is built from `--backbone-reps` diverse reps per (built) subclade,
+and `python_scripts/megatree_graft.py` grafts each subclade tree onto its
 backbone reps into one merged tree (`03_results/trees/orthophyl/{taxon}_megatree.nwk`),
 flagging high-support topology conflicts to `{taxon}_megatree_conflicts.json`.
+The backbone database is written with `is_backbone=true` so the router can
+place a query into it directly with `--placement backbone`.
 
 **Checkpoint**: `partition_{taxon_name}` (resume re-reads the manifest, never
 re-runs mash, so subclade numbering is stable); `megatree_backbone_{taxon}` and
@@ -453,6 +495,42 @@ keeps a fallback copy step for the `--skip-download` path (no QC runs there).
    - Updates `database_summary.txt`
 
 **Checkpoint**: `database_{taxon_name}.flag`
+
+---
+
+## Phase 3c: Subclade-Build Route (Lazy Subclades)
+
+**Purpose**: Build a lazily-registered megatree subclade on demand, then
+ReLeaf the waiting queries onto it.
+
+**Only reachable when `--megatree-lazy` was used at partition time.** A
+subclade with no query at partition time is registered (`built=false`) rather
+than built; this phase runs when a *later* query's taxonomy/MASH match routes
+it to that unbuilt subclade (the `OrthoPhyl_subclade_build` routing decision
+from Phase 2).
+
+**Process** (`_phase_subclade_build` / `_process_subclade_build` in
+`orthophyl_pipeline_wrapper.py`), grouped by subclade so one build serves every
+query that landed there:
+
+1. **Locate the subclade's raw members** via its recorded `source_genome_dir`
+   (written at registration time) — the tree is built from the subclade's OWN
+   genomes, **not** the routing query.
+2. **QC + run OrthoPhyl** on those raw members (`_build_subclade`,
+   `force=True`), using the subclade's own `subclade_taxonomy` — not the
+   query's taxonomy, so a rebuild never overwrites the subclade's recorded
+   taxonomy with whatever a single query happened to carry.
+3. **Promote the database entry**: `create_hierarchical_database.py --force`
+   overwrites the `built=false` placeholder with a real built entry
+   (`built=true`, real tree, `orthophyl_run` symlink).
+4. **ReLeaf** the waiting query assemblies onto the freshly-built tree.
+
+**Checkpoints**: registration and build use *separate* keys —
+`register_{subclade_name}` (written by `_register_lazy_subclade` at partition
+time) vs `qc_{subclade_name}` / `orthophyl_{subclade_name}` /
+`database_{subclade_name}` (written during the on-demand build). Sharing one
+key between registration and build would let `--resume` mistake a placeholder
+for a finished build.
 
 ---
 

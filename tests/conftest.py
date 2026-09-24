@@ -216,6 +216,7 @@ def make_db_dir(tmp_path):
         data_types=("CDS",),
         parent=None,
         is_subclade=False,
+        is_backbone=False,
         parent_taxon=None,
         subclade_id=None,
         built=True,
@@ -248,7 +249,7 @@ def make_db_dir(tmp_path):
             config["taxonomy_source"] = taxonomy_source
         if qc_applied is not None:
             config["qc_applied"] = qc_applied
-        if is_subclade:
+        if is_subclade or is_backbone:
             # Write a dummy sketch + members file so router MASH tie-break has
             # concrete paths to work with (contents don't matter when mash is mocked).
             sketch_file = db_dir / "subclade_sketch.msh"
@@ -257,7 +258,8 @@ def make_db_dir(tmp_path):
             members = list(sketch_members or [f"{safe}_{i}.fna" for i in range(n_genomes)])
             members_file.write_text("\n".join(members) + "\n")
             config.update({
-                "is_subclade": True,
+                "is_subclade": is_subclade,
+                "is_backbone": is_backbone,
                 "parent_taxon": parent_taxon,
                 "subclade_id": subclade_id,
                 "built": built,

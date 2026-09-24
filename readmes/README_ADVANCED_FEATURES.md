@@ -472,9 +472,9 @@ mutually exclusive with subsampling — subsampling is simply the default when
    ≤ `--subclade-size` genomes (default **150**). Subclades are numbered
    deterministically: `Andreesenella_1`, `Andreesenella_2`, … A combined MASH sketch
    (`.msh`) and a member list are written per subclade.
-4. **Build every subclade.** For each subclade the wrapper QCs its raw members
-   (`gather_filter_asms.sh --qc-only`, CheckM2 runs here) and runs OrthoPhyl,
-   producing a full per-subclade tree.
+4. **Build every subclade** (or lazily register it — see below). For each subclade
+   the wrapper QCs its raw members (`gather_filter_asms.sh --qc-only`, CheckM2 runs
+   here) and runs OrthoPhyl, producing a full per-subclade tree.
 5. **Build the backbone.** From each subclade, `min(subclade_size, --backbone-reps)`
    (default **5**) diverse representatives are picked (that subclade's own MASH
    greedy max-min, seeded by any query genomes so they anchor the backbone). The
@@ -506,6 +506,69 @@ so all subclades and their reps are built).
   dense `N×N` MASH distance matrix (O(n²) in memory, ~20 GB at n=50k). The
   **default subsample path does not build this matrix and is unaffected** — it
   handles arbitrarily large taxa.
+
+#### Opt-in: lazy build-on-demand (`--megatree-lazy`)
+
+By default `--megatree` builds a full tree for **every** subclade immediately,
+even ones no query landed in. `--megatree-lazy` defers that: a subclade with no
+query at partition time is only *registered* — `built=false`, its MASH sketch +
+member list + source genome directory recorded — instead of QC'd and built. This
+lets an oversized taxon be partitioned once and have its subclades built
+incrementally, only as queries actually route to them.
+
+```bash
+python orthophyl_pipeline_wrapper.py \
+    --input assemblies.tsv \
+    --database-dir /data/databases/ \
+    --output-dir /data/runs/ \
+    --gather-script utils/gather_filter_asms.sh \
+    --megatree --megatree-lazy \
+    --max-tree-genomes 2000 \
+    --subclade-size 150 \
+    --threads 64
+```
+
+A later run whose query taxonomy-matches the registered (but unbuilt) subclade
+triggers an on-demand build: the wrapper QCs and runs OrthoPhyl on *that
+subclade's own raw members* (not the query), promotes the database entry from
+`built=false` to `built=true`, then ReLeafs the waiting query assemblies onto
+the freshly-built tree. This is the `OrthoPhyl_subclade_build` routing decision
+(Phase 3C) — see the pipeline-phases diagram in the main README.
+
+#### Placing a query: dense subclade or sparse backbone (`--placement`)
+
+A megatree's backbone and every one of its subclades are written with the
+**same parent-level taxonomy string** (they differ only by name/rank
+metadata), so a query can taxonomy-match several of them at once. `--placement`
+picks how that tie is broken:
+
+- **`subclade` (default)** — routes to the most MASH-similar dense subclade,
+  for the best local phylogenetic resolution. The query is sketched
+  (`mash sketch -k 17 -s 5000`, matching `subclade_partition.py`'s params) and
+  compared against each tied subclade's sketch; ties are broken deterministically
+  by ascending subclade name. If no subclade sketch is usable, this falls back
+  to the backbone with a warning rather than failing to route.
+- **`backbone`** — routes straight to the megatree's sparse overview tree, no
+  MASH call needed. Useful when you want a quick broad-context placement rather
+  than committing to one dense subclade.
+
+```bash
+python orthophyl_pipeline_wrapper.py \
+    --input assemblies.tsv \
+    --database-dir /data/databases/ \
+    --output-dir /data/runs/ \
+    --placement backbone \
+    --threads 64
+```
+
+The backbone database is distinguished from a dense subclade sharing the same
+taxonomy by an `is_backbone` flag in its `database_config.json` (written via
+`create_hierarchical_database.py --is-backbone`).
+
+**Note:** `MASH_K`/`MASH_S` in `assembly_router.py` must stay in lockstep with
+the sketch parameters in `subclade_partition.py` and `script_lib/functions.sh`
+— comparing sketches built with different `-k`/`-s` produces meaningless
+distances.
 
 ---
 

@@ -241,6 +241,9 @@ class TestRunMegatree:
         assert graft.count("--subclade") == 2  # one per subclade with reps
         assert len(rec["db"]) == 1
         assert rec["db"][0]["taxon_name"] == "Andreesenella"
+        # The backbone DB entry is marked is_backbone so the router can tell
+        # it apart from a dense subclade sharing the same parent taxonomy.
+        assert rec["db"][0]["subclade_meta"]["is_backbone"] is True
 
     def test_backbone_reps_threads_through(self, Wrapper, wrapper_module,
                                            tmp_path, monkeypatch):
@@ -259,3 +262,136 @@ class TestRunMegatree:
         w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
                         query_assemblies=[], taxonomy="d__Bacteria;g__Andreesenella")
         assert all(s["target"] == 3 for s in rec["subsample"])
+
+    def test_megatree_lazy_registers_subclades_with_no_query(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """--megatree-lazy: a subclade with NO query is only registered
+        (built=false), not built; a subclade WITH a query is still built
+        eagerly."""
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True,
+                          megatree_lazy=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2)
+        registered = []
+        monkeypatch.setattr(w, "_register_lazy_subclade",
+                            lambda **k: registered.append(k))
+
+        raw = w.orthophyl_dir / "downloads" / "Andreesenella" / "assemblies_all.TMP"
+        raw.mkdir(parents=True, exist_ok=True)
+        for i in range(8):
+            (raw / f"g{i}.fna").write_text(">c\nAC\n")
+        gtk = w.orthophyl_dir / "downloads" / "Andreesenella_1" / "genomes_to_keep"
+        gtk.mkdir(parents=True, exist_ok=True)
+        (gtk / "a.fna").write_text(">c\nAC\n")
+
+        # fake_partition assigns the query to subclade "Andreesenella_1" only,
+        # so "Andreesenella_2" has no query and must be lazily registered.
+        w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                        query_assemblies=[_query(tmp_path)],
+                        taxonomy="d__Bacteria;g__Andreesenella")
+
+        assert len(rec["build"]) == 1
+        assert rec["build"][0]["entry"]["name"] == "Andreesenella_1"
+        assert len(registered) == 1
+        assert registered[0]["entry"]["name"] == "Andreesenella_2"
+
+    def test_megatree_without_lazy_builds_every_subclade(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """Without --megatree-lazy (default), every subclade is built
+        eagerly regardless of whether it holds a query."""
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2)
+        registered = []
+        monkeypatch.setattr(w, "_register_lazy_subclade",
+                            lambda **k: registered.append(k))
+
+        raw = w.orthophyl_dir / "downloads" / "Andreesenella" / "assemblies_all.TMP"
+        raw.mkdir(parents=True, exist_ok=True)
+        for i in range(8):
+            (raw / f"g{i}.fna").write_text(">c\nAC\n")
+        for sc in ("Andreesenella_1", "Andreesenella_2"):
+            gtk = w.orthophyl_dir / "downloads" / sc / "genomes_to_keep"
+            gtk.mkdir(parents=True, exist_ok=True)
+            (gtk / f"{sc}_a.fna").write_text(">c\nAC\n")
+
+        w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                        query_assemblies=[_query(tmp_path)],
+                        taxonomy="d__Bacteria;g__Andreesenella")
+
+        assert len(rec["build"]) == 2
+        assert registered == []
+
+
+class TestSubcladeBuildPhase:
+    """Phase 3c: build a lazily-registered subclade on demand, then ReLeaf
+    the waiting queries onto it."""
+
+    def test_process_subclade_build_uses_subclade_taxonomy_not_query(
+            self, Wrapper, tmp_path, monkeypatch):
+        """Hazard 6: rebuilding a lazily-registered subclade must use the
+        subclade's OWN recorded taxonomy (subclade_taxonomy), not whatever
+        taxonomy the routing query happened to carry."""
+        w = _make_wrapper(Wrapper, tmp_path)
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+
+        build_calls = []
+        monkeypatch.setattr(w, "_build_subclade",
+                            lambda **k: build_calls.append(k))
+        releaf_calls = []
+        monkeypatch.setattr(w, "_run_releaf",
+                            lambda **k: releaf_calls.append(k))
+
+        query = _query(tmp_path, stem="GCF_query")
+        query.update({
+            "subclade_name": "Andreesenella_2",
+            "parent_taxon": "Andreesenella",
+            "subclade_id": 2,
+            "database_dir": str(tmp_path / "databases" / "Andreesenella_2_db"),
+            "subclade_taxonomy": "d__Bacteria;g__Andreesenella",
+            "members_file": str(tmp_path / "members.txt"),
+            "sketch_file": str(tmp_path / "sketch.msh"),
+            "source_genome_dir": str(raw_dir),
+            "taxonomy": "d__Bacteria;g__Andreesenella;s__some_query_species",
+        })
+
+        w._process_subclade_build("Andreesenella_2", [query])
+
+        assert len(build_calls) == 1
+        # Uses subclade_taxonomy, NOT the query's own (more specific) taxonomy.
+        assert build_calls[0]["taxonomy"] == "d__Bacteria;g__Andreesenella"
+        assert build_calls[0]["force"] is True
+        assert build_calls[0]["query_assemblies"] == []
+        assert len(releaf_calls) == 1
+
+    def test_process_subclade_build_requires_source_genome_dir(
+            self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path)
+        query = _query(tmp_path)
+        query.update({"subclade_name": "X", "database_dir": str(tmp_path / "X_db")})
+        with pytest.raises(RuntimeError, match="source_genome_dir"):
+            w._process_subclade_build("X", [query])
+
+
+class TestRegisterLazySubclade:
+    def test_writes_register_checkpoint_not_database_checkpoint(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """Hazard 1: registration must use its OWN register_<name> checkpoint,
+        distinct from _build_subclade's database_<name> key, so a later
+        on-demand build is not skipped by a checkpoint set at registration
+        time."""
+        w = _make_wrapper(Wrapper, tmp_path)
+
+        class FakeCompleted:
+            returncode = 0
+        monkeypatch.setattr(wrapper_module.subprocess, "run",
+                            lambda *a, **k: FakeCompleted())
+
+        entry = {"name": "Andreesenella_2", "subclade_id": 2, "n_genomes": 90,
+                 "sketch_file": str(tmp_path / "s.msh"),
+                 "members_file": str(tmp_path / "m.txt")}
+        w._register_lazy_subclade(
+            taxon_name="Andreesenella", entry=entry, raw_dir=tmp_path / "raw",
+            taxonomy="d__Bacteria;g__Andreesenella")
+
+        assert w._check_checkpoint("register_Andreesenella_2")
+        assert not w._check_checkpoint("database_Andreesenella_2")

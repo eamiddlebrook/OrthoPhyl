@@ -60,12 +60,16 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │   └─ Load/create databases
   │
   ├─► PHASE 2: ASSEMBLY ROUTING
-  │   └─ assembly_router.py
+  │   └─ assembly_router.py  (--placement subclade|backbone, default subclade)
   │       ├─ Query all databases
   │       ├─ Find best taxonomic match
+  │       │   └─ Megatree ties (backbone + its subclades share one taxonomy)
+  │       │       are broken by --placement, then MASH distance
   │       └─ Generate routing decisions
-  │           ├─► ReLeaf batch (matched)
-  │           └─► OrthoPhyl batch (novel)
+  │           ├─► ReLeaf batch (matched, built)
+  │           ├─► OrthoPhyl batch (novel taxon)
+  │           └─► Subclade-build batch (matched an unbuilt --megatree-lazy
+  │                                      subclade; build it, then ReLeaf)
   │
   ├─► PHASE 3A: RELEAF ROUTE (Matched Databases)
   │   └─ For each database:
@@ -85,6 +89,8 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │       ├─ subclade_partition.py + megatree_graft.py   (opt-in: --megatree)
   │       │   ├─ MASH-partition raw set into <Taxon>_1, <Taxon>_2, …
   │       │   ├─ Build a full tree per subclade + a backbone tree
+  │       │   │   (or, with --megatree-lazy, only build subclades holding a
+  │       │   │    query; register the rest as built=false placeholders)
   │       │   └─ Graft subclade trees onto backbone → one merged megatree
   │       ├─ gather_filter_asms.sh --qc-only   (per subclade)
   │       │   ├─ Run CheckM2/bbmap QC (subclade members + queries)
@@ -96,6 +102,13 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │       │   └─ Infer phylogeny
   │       └─ create_hierarchical_database.py
   │           └─ Create new database entry
+  │
+  ├─► PHASE 3C: SUBCLADE-BUILD ROUTE (Lazy Subclades, --megatree-lazy only)
+  │   └─ For each unbuilt subclade a query matched:
+  │       ├─ QC + OrthoPhyl.sh on the subclade's own raw members (no query)
+  │       ├─ create_hierarchical_database.py --force
+  │       │   └─ Promote the built=false placeholder to built=true
+  │       └─ ReLeaf.sh the waiting query assemblies onto the new tree
   │
   └─► PHASE 4: RESULTS AGGREGATION
       ├─ Collect all trees

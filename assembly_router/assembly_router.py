@@ -35,6 +35,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# MASH sketch parameters for subclade tie-break comparisons -- MUST match
+#   script_lib/functions.sh and python_scripts/subclade_partition.py, or
+#   distances between independently-produced sketches are meaningless.
+MASH_K = "17"
+MASH_S = "5000"
+
+
+def pick_nearest_subclade(candidates: List[Dict], dist_fn) -> Tuple[Optional[Dict], Optional[float]]:
+    """
+    Pick the candidate dict with the smallest dist_fn(candidate) value.
+
+    Pure function (no mash calls) so it is directly unit-testable by injecting
+    a distance oracle -- mirrors greedy_maxmin's dist_fn pattern in
+    python_scripts/subsample_genomes.py.
+
+    dist_fn(candidate) -> float distance, or None if that candidate is unusable
+    (e.g. missing/unreadable sketch) and should be skipped.
+
+    Ties are broken by ascending `clade_name` for determinism across
+    filesystems/runs (candidates are visited in that order and only a STRICT
+    improvement replaces the current best).
+
+    Returns (winner, distance), or (None, None) if no candidate is usable.
+    """
+    best = None
+    best_dist = None
+    for c in sorted(candidates, key=lambda c: c.get('clade_name') or ''):
+        d = dist_fn(c)
+        if d is None:
+            continue
+        if best is None or d < best_dist:
+            best = c
+            best_dist = d
+    return best, best_dist
+
 
 class GTDBTaxonomy:
     """Parse and manipulate GTDB taxonomy strings."""
@@ -120,13 +155,17 @@ class MultiDatabaseRouter:
         database_dir: Path,
         output_dir: Path,
         gather_filter_script: Optional[Path] = None,
-        threads: int = 8
+        threads: int = 8,
+        placement: str = 'subclade',
     ):
         self.database_dir = Path(database_dir)
         self.output_dir = Path(output_dir)
         self.gather_filter_script = Path(gather_filter_script) if gather_filter_script else None
         self.threads = threads
-        
+        # 'subclade' (default): prefer the dense per-subclade tree for best local
+        #   resolution. 'backbone': prefer the sparse megatree overview tree.
+        self.placement = placement
+
         # Load all databases
         self.databases = self._load_databases()
         
@@ -193,6 +232,7 @@ class MultiDatabaseRouter:
             'members_file': config.get('members_file'),
             'source_genome_dir': config.get('source_genome_dir'),
             'built': config.get('built', True),
+            'is_backbone': config.get('is_backbone', False),
             'taxonomy_source': config.get('taxonomy_source', 'ncbi'),
             'qc_applied': config.get('qc_applied', True),
         }
@@ -237,6 +277,37 @@ class MultiDatabaseRouter:
             # Use most specific match
             best_match = matches[0]['database']
 
+            # Megatree tie-break: several DBs can share the SAME taxonomy string
+            # -- the backbone plus its subclades <Taxon>_1, _2, ... -- so they all
+            # match at the same top specificity and taxonomy alone cannot tell
+            # them apart. Discriminate by --placement, then by MASH distance
+            # among same-parent subclades.
+            top_spec = matches[0]['specificity']
+            top_dbs = [m['database'] for m in matches if m['specificity'] == top_spec]
+            subclade_dbs = [d for d in top_dbs if d.get('is_subclade')]
+            backbone_dbs = [d for d in top_dbs if d.get('is_backbone')]
+
+            if subclade_dbs or backbone_dbs:
+                if self.placement == 'backbone' and backbone_dbs:
+                    best_match = backbone_dbs[0]
+                    logger.info(f"  --placement backbone: routing to backbone {best_match['clade_name']}")
+                elif subclade_dbs:
+                    if len(subclade_dbs) > 1:
+                        chosen, dist = self._route_subclade_by_mash(assembly_path, subclade_dbs)
+                        if chosen is not None:
+                            best_match = chosen
+                        elif backbone_dbs:
+                            logger.warning("  No subclade sketch usable for MASH tie-break; "
+                                            "falling back to backbone")
+                            best_match = backbone_dbs[0]
+                        else:
+                            best_match = subclade_dbs[0]
+                    else:
+                        best_match = subclade_dbs[0]
+                elif backbone_dbs:
+                    # placement=='subclade' but only a backbone is available.
+                    best_match = backbone_dbs[0]
+
             logger.info(f"✓ MATCH FOUND: {best_match['clade_name']}")
             logger.info(f"  Rank: {best_match['rank_name']}")
             logger.info(f"  Database: {best_match['db_dir'].name}")
@@ -244,6 +315,12 @@ class MultiDatabaseRouter:
 
             if len(matches) > 1:
                 logger.info(f"  (Also matches {len(matches)-1} other database(s) at broader levels)")
+
+            # An unbuilt subclade cannot serve ReLeaf yet -- its tree does not
+            # exist. Emit a build-then-releaf decision the wrapper will execute.
+            if best_match.get('is_subclade') and not best_match.get('built', True):
+                return self._route_to_subclade_build(
+                    assembly_path, assembly_id, taxonomy, best_match)
 
             return self._route_to_releaf(assembly_path, assembly_id, taxonomy, best_match)
         else:
@@ -316,6 +393,118 @@ class MultiDatabaseRouter:
             'available_data_types': available_data_types
         }
         
+        self._save_decision(decision)
+        return decision
+
+    # ------------------------------------------------------------------ #
+    # Subclade routing (MASH sequence distance among same-parent subclades)
+    # ------------------------------------------------------------------ #
+
+    def _run_mash(self, cmd) -> str:
+        """Run a mash command (shell=False) and return its stdout. Wrapped for mocking."""
+        import subprocess
+        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE,
+                                universal_newlines=True)
+        return result.stdout
+
+    def _route_subclade_by_mash(
+        self, assembly_path: Path, subclade_dbs: List[Dict]
+    ) -> Tuple[Optional[Dict], Optional[float]]:
+        """
+        Pick the subclade DB whose member set contains the query's NEAREST genome.
+
+        Sketches the query with the SAME params as the per-subclade sketches
+        (mash -k 17 -s 5000), then `mash dist query.msh <subclade sketch>` for each
+        candidate. Each sketch is multi-genome, so `mash dist` emits one line per
+        member; we take the MIN distance over members (nearest member) and choose
+        the subclade with the smallest such distance via pick_nearest_subclade.
+        Returns (None, None) if no distance could be computed (caller keeps its
+        default).
+        """
+        import tempfile
+        import shutil as _shutil
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="router_mash_"))
+        try:
+            query_prefix = tmp_dir / "query"
+            self._run_mash([
+                "mash", "sketch", "-k", MASH_K, "-s", MASH_S,
+                "-p", str(self.threads), "-o", str(query_prefix), str(assembly_path),
+            ])
+            query_msh = str(query_prefix) + ".msh"
+
+            def dist_fn(db):
+                sketch = db.get('sketch_file')
+                if not sketch or not Path(sketch).exists():
+                    logger.warning(f"  Subclade {db['clade_name']} has no sketch; skipping in MASH tie-break")
+                    return None
+                out = self._run_mash(["mash", "dist", query_msh, str(sketch)])
+                # Each line: <ref> <query> <dist> <p-value> <shared-hashes>
+                dmin = None
+                for line in out.splitlines():
+                    parts = line.split()
+                    if len(parts) < 3:
+                        continue
+                    try:
+                        d = float(parts[2])
+                    except ValueError:
+                        continue
+                    if dmin is None or d < dmin:
+                        dmin = d
+                if dmin is not None:
+                    logger.info(f"  MASH nearest-member dist to {db['clade_name']}: {dmin:.4f}")
+                return dmin
+
+            best_db, best_dist = pick_nearest_subclade(subclade_dbs, dist_fn)
+            if best_db is not None:
+                logger.info(f"  → Subclade selected by MASH: {best_db['clade_name']} (dist {best_dist:.4f})")
+            return best_db, best_dist
+        finally:
+            _shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def _route_to_subclade_build(
+        self,
+        assembly_path: Path,
+        assembly_id: str,
+        taxonomy: str,
+        database: Dict
+    ) -> Dict:
+        """
+        Emit a decision to lazily build an unbuilt subclade before ReLeaf.
+
+        The chosen subclade was registered at partition time (built=false) with a
+        member list + sketch but no tree. The wrapper executes this by QC-ing +
+        running OrthoPhyl on the subclade's raw members, then routing the query
+        through ReLeaf against the freshly-built database.
+        """
+        decision = {
+            'pipeline': 'OrthoPhyl_subclade_build',
+            'reason': (f"Query nearest to subclade {database['clade_name']} "
+                       f"(parent {database.get('parent_taxon')}), which is registered "
+                       f"but not yet built; build its tree then ReLeaf"),
+            'assembly': str(assembly_path),
+            'assembly_id': assembly_id,
+            'query_taxonomy': taxonomy,
+            'matched_database': database['clade_name'],
+            'matched_rank': database['rank_name'],
+            'database_dir': str(database['db_dir']),
+            'parent_taxon': database.get('parent_taxon'),
+            'subclade_id': database.get('subclade_id'),
+            'subclade_name': database['clade_name'],
+            # The subclade's OWN recorded taxonomy -- NOT the query's -- so a
+            # rebuild does not silently overwrite the subclade's taxonomy with
+            # whatever a single query happened to carry.
+            'subclade_taxonomy': database['clade_taxonomy'],
+            'members_file': database.get('members_file'),
+            'sketch_file': database.get('sketch_file'),
+            'source_genome_dir': database.get('source_genome_dir'),
+            'command': (
+                f"# This subclade is registered but not yet built.\n"
+                f"# The pipeline wrapper will QC + build its tree, then run ReLeaf.\n"
+                f"# Members: {database.get('members_file')}\n"
+                f"# Source genomes: {database.get('source_genome_dir')}"
+            ),
+        }
         self._save_decision(decision)
         return decision
 
@@ -478,6 +667,13 @@ class MultiDatabaseRouter:
                     f.write(f"  Available methods: {', '.join(decision['available_methods'])}\n")
                 if 'available_data_types' in decision:
                     f.write(f"  Available data types: {', '.join(decision['available_data_types'])}\n")
+            elif decision['pipeline'] == 'OrthoPhyl_subclade_build':
+                f.write("Match Details (unbuilt subclade):\n")
+                f.write(f"  Subclade: {decision.get('subclade_name')}\n")
+                f.write(f"  Parent taxon: {decision.get('parent_taxon')}\n")
+                f.write(f"  Database directory: {decision.get('database_dir')}\n")
+                f.write(f"  Members list: {decision.get('members_file')}\n")
+                f.write(f"  Source genomes: {decision.get('source_genome_dir')}\n")
             else:
                 f.write("Action Required:\n")
                 f.write(f"  {decision['suggestion']}\n")
@@ -530,6 +726,7 @@ class MultiDatabaseRouter:
         
         n_releaf = sum(1 for d in decisions if d['pipeline'] == 'ReLeaf')
         n_orthophyl = sum(1 for d in decisions if d['pipeline'] == 'OrthoPhyl')
+        n_subclade_build = sum(1 for d in decisions if d['pipeline'] == 'OrthoPhyl_subclade_build')
 
         # Group by database
         by_database = {}
@@ -552,8 +749,9 @@ class MultiDatabaseRouter:
             
             f.write(f"Total assemblies: {len(decisions)}\n")
             f.write(f"  → ReLeaf (matched): {n_releaf}\n")
-            f.write(f"  → OrthoPhyl (novel): {n_orthophyl}\n\n")
-            
+            f.write(f"  → OrthoPhyl (novel): {n_orthophyl}\n")
+            f.write(f"  → OrthoPhyl subclade build (unbuilt subclade): {n_subclade_build}\n\n")
+
             if n_releaf > 0:
                 f.write("ReLeaf Routing by Database:\n")
                 f.write("-" * 70 + "\n")
@@ -562,7 +760,7 @@ class MultiDatabaseRouter:
                     for asm in assemblies:
                         f.write(f"  - {asm}\n")
                 f.write("\n")
-            
+
             if n_orthophyl > 0:
                 f.write("OrthoPhyl Assemblies (novel taxa):\n")
                 f.write("-" * 70 + "\n")
@@ -571,8 +769,18 @@ class MultiDatabaseRouter:
                         f.write(f"  {d['assembly_id']:30s} - {d['download_rank']}: {d['download_value']}\n")
                 f.write("\n")
 
+            if n_subclade_build > 0:
+                f.write("OrthoPhyl Subclade Builds (unbuilt subclades to build then ReLeaf):\n")
+                f.write("-" * 70 + "\n")
+                for d in decisions:
+                    if d['pipeline'] == 'OrthoPhyl_subclade_build':
+                        f.write(f"  {d['assembly_id']:30s} - {d.get('subclade_name')} "
+                                f"(parent {d.get('parent_taxon')})\n")
+                f.write("\n")
+
         logger.info(f"\n→ Batch summary: {summary_file}")
-        print(f"\nRouting complete: {n_releaf} → ReLeaf, {n_orthophyl} → OrthoPhyl")
+        print(f"\nRouting complete: {n_releaf} → ReLeaf, {n_orthophyl} → OrthoPhyl, "
+              f"{n_subclade_build} → OrthoPhyl subclade build")
 
 
 def main():
@@ -626,18 +834,29 @@ Examples:
         help='Path to gather_filter_asms.sh for downloading genomes'
     )
     parser.add_argument('-t', '--threads', type=int, default=8, help='Threads')
-    
+    parser.add_argument(
+        '--placement',
+        choices=['subclade', 'backbone'],
+        default='subclade',
+        help=(
+            "For megatree databases with tied matches: 'subclade' (default) places the "
+            "query into the most MASH-similar dense subclade tree; 'backbone' places it "
+            "into the sparse backbone tree for a broad overview."
+        )
+    )
+
     args = parser.parse_args()
-    
+
     if args.assembly and not args.taxonomy:
         parser.error("--taxonomy required with --assembly")
-    
+
     try:
         router = MultiDatabaseRouter(
             database_dir=Path(args.database_dir),
             output_dir=Path(args.output_dir),
             gather_filter_script=Path(args.gather_filter_script) if args.gather_filter_script else None,
-            threads=args.threads
+            threads=args.threads,
+            placement=args.placement
         )
     except Exception as e:
         logger.error(f"Failed to initialize: {e}")
@@ -663,6 +882,9 @@ Examples:
             print(f"  Pipeline: {decision['pipeline']}")
             if decision['pipeline'] == 'ReLeaf':
                 print(f"  Database: {decision['matched_database']} ({decision['matched_rank']})")
+            elif decision['pipeline'] == 'OrthoPhyl_subclade_build':
+                print(f"  Subclade: {decision.get('subclade_name')} "
+                      f"(parent {decision.get('parent_taxon')}, build then ReLeaf)")
             else:
                 print(f"  Action: {decision['suggestion']}")
             print(f"\n  Commands saved to: routing_summary_{decision['assembly_id']}.txt")
