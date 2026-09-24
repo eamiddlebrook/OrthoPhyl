@@ -449,7 +449,7 @@ python orthophyl_pipeline_wrapper.py \
     --subclade-size 150 \
     --backbone-reps 5 \
     --conflict-min-support 90 \
-    --max-total-genomes 5000 \
+    --max-total-genomes 25000 \
     --threads 64
 ```
 
@@ -464,8 +464,8 @@ mutually exclusive with subsampling — subsampling is simply the default when
    with `gather_filter_asms.sh --download-only` — it stops *before* the expensive
    CheckM2 QC pass.
 2. **Enforce the guardrail.** The partitioner builds a dense `N×N` MASH matrix, so
-   `--max-total-genomes` (default 5000) is enforced here: a raw set larger than the
-   ceiling is refused rather than OOM-killing the node.
+   `--max-total-genomes` (default 25000) is enforced here: a raw set larger than
+   the ceiling is refused rather than running for hours or OOM-killing the node.
 3. **Partition.** `python_scripts/subclade_partition.py` runs `mash triangle`
    (all-vs-all, the same `-k 17 -s 5000` parameters OrthoPhyl uses), clusters with
    average-linkage (UPGMA), and recursively splits the tree so every subclade holds
@@ -502,10 +502,12 @@ so all subclades and their reps are built).
   is flagged `monophyletic: false` in the conflict report.
 - Partitioning is deterministic (sorted input + UPGMA + size-desc numbering), so
   subclade names are stable across runs — required for `--resume`.
-- **`--max-total-genomes` (default 5000)** guards this path only: it bounds the
-  dense `N×N` MASH distance matrix (O(n²) in memory, ~20 GB at n=50k). The
+- **`--max-total-genomes` (default 25000)** guards this path only: it bounds the
+  dense `N×N` MASH distance matrix, which is O(n²) in **both** time and memory
+  (measured ~8 hours wall-clock and ~45 GB RAM at n=75k, 12 threads). The
   **default subsample path does not build this matrix and is unaffected** — it
-  handles arbitrarily large taxa.
+  handles arbitrarily large taxa. A query-neighborhood-mode ToDo exists for
+  taxa too large even for this path.
 
 #### Opt-in: lazy build-on-demand (`--megatree-lazy`)
 
