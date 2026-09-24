@@ -1,13 +1,18 @@
 """Tests for python_scripts/subclade_partition.py (MASH subclade partitioning).
 
-Clustering (partition_matrix) is a pure function of (names, distance matrix), so
-it is tested directly by injecting a synthetic matrix -- no mash needed. The
-orchestration layer (partition/find_genomes/_matches_member) is tested with the
-mash calls monkeypatched.
+Clustering (partition_matrix) is a pure function of (names, condensed distance
+array), so it is tested directly by injecting a synthetic array -- no mash
+needed. partition_matrix consumes scipy's CONDENSED (1-D, upper-triangle-only)
+form directly (never a dense matrix -- see condensed_index), so tests build a
+dense matrix for readability (block patterns are easy to eyeball) and convert
+via squareform() immediately before calling partition_matrix. The orchestration
+layer (partition/find_genomes/_matches_member) is tested with the mash calls
+monkeypatched.
 """
 
 import numpy as np
 import pytest
+from scipy.spatial.distance import squareform
 
 
 @pytest.fixture
@@ -39,14 +44,16 @@ class TestPartitionMatrix:
     def test_passthrough_when_under_max(self, sp):
         names = [f"g{i}.fna" for i in range(5)]
         D = np.zeros((5, 5))
-        clusters = sp.partition_matrix(names, D, max_size=10, min_size=4)
+        condensed = squareform(D, checks=False)
+        clusters = sp.partition_matrix(names, condensed, max_size=10, min_size=4)
         assert len(clusters) == 1
         assert clusters[0] == sorted(names)
 
     def test_splits_two_clear_groups(self, sp):
         names = [f"g{i}.fna" for i in range(8)]
         D = self._two_group_matrix(names)
-        clusters = sp.partition_matrix(names, D, max_size=4, min_size=4)
+        condensed = squareform(D, checks=False)
+        clusters = sp.partition_matrix(names, condensed, max_size=4, min_size=4)
         assert len(clusters) == 2
         # Each cluster is one of the two blocks.
         as_sets = sorted([tuple(sorted(c)) for c in clusters])
@@ -61,7 +68,8 @@ class TestPartitionMatrix:
         D = rng.uniform(0.1, 0.9, size=(20, 20))
         D = (D + D.T) / 2
         np.fill_diagonal(D, 0.0)
-        clusters = sp.partition_matrix(names, D, max_size=5, min_size=1)
+        condensed = squareform(D, checks=False)
+        clusters = sp.partition_matrix(names, condensed, max_size=5, min_size=1)
         assert all(len(c) <= 5 for c in clusters)
         # Every genome appears exactly once.
         flat = sorted(x for c in clusters for x in c)
@@ -80,7 +88,8 @@ class TestPartitionMatrix:
         # g5 is somewhat close to group A but not part of it.
         for i in range(5):
             D[5, i] = D[i, 5] = 0.3
-        clusters = sp.partition_matrix(names, D, max_size=5, min_size=4)
+        condensed = squareform(D, checks=False)
+        clusters = sp.partition_matrix(names, condensed, max_size=5, min_size=4)
         # The lone outlier (< min_size) must be merged, not left alone.
         assert all(len(c) >= 4 for c in clusters)
         assert sum(len(c) for c in clusters) == 6
@@ -88,8 +97,9 @@ class TestPartitionMatrix:
     def test_deterministic(self, sp):
         names = [f"g{i}.fna" for i in range(8)]
         D = self._two_group_matrix(names)
-        a = sp.partition_matrix(names, D, max_size=4, min_size=4)
-        b = sp.partition_matrix(names, D, max_size=4, min_size=4)
+        condensed = squareform(D, checks=False)
+        a = sp.partition_matrix(names, condensed, max_size=4, min_size=4)
+        b = sp.partition_matrix(names, condensed, max_size=4, min_size=4)
         assert a == b
 
     def test_ordering_size_desc(self, sp):
@@ -103,8 +113,35 @@ class TestPartitionMatrix:
                 for j in g:
                     if i != j:
                         D[i, j] = 0.05
-        clusters = sp.partition_matrix(names, D, max_size=5, min_size=1)
+        condensed = squareform(D, checks=False)
+        clusters = sp.partition_matrix(names, condensed, max_size=5, min_size=1)
         assert len(clusters[0]) >= len(clusters[-1])
+
+
+# --------------------------------------------------------------------------- #
+# condensed_index -- cross-validated against scipy's own squareform            #
+# --------------------------------------------------------------------------- #
+
+class TestCondensedIndex:
+    def test_matches_scipy_squareform(self, sp):
+        n = 7
+        rng = np.random.RandomState(0)
+        D = rng.uniform(0.1, 0.9, size=(n, n))
+        D = (D + D.T) / 2
+        np.fill_diagonal(D, 0.0)
+        condensed = squareform(D, checks=False)
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                assert condensed[sp.condensed_index(i, j, n)] == pytest.approx(D[i, j])
+
+    def test_symmetric_in_i_j(self, sp):
+        assert sp.condensed_index(2, 5, 8) == sp.condensed_index(5, 2, 8)
+
+    def test_diagonal_rejected(self, sp):
+        with pytest.raises(ValueError):
+            sp.condensed_index(3, 3, 8)
 
 
 # --------------------------------------------------------------------------- #
@@ -117,11 +154,11 @@ class TestParseMashEdges:
         edges = tmp_path / "MASH_out"
         # Only a-b given; a-c and b-c missing -> default MASH_MAX_DIST.
         edges.write_text("/path/a.fna\t/path/b.fna\t0.10\t0\t100/1000\n")
-        D = sp.parse_mash_edges(str(edges), names)
-        assert D[0, 1] == pytest.approx(0.10)
-        assert D[1, 0] == pytest.approx(0.10)
-        assert D[0, 2] == pytest.approx(sp.MASH_MAX_DIST)
-        assert D[0, 0] == 0.0
+        condensed = sp.parse_mash_edges(str(edges), names)
+        n = len(names)
+        assert condensed[sp.condensed_index(0, 1, n)] == pytest.approx(0.10)
+        assert condensed[sp.condensed_index(0, 2, n)] == pytest.approx(sp.MASH_MAX_DIST)
+        assert condensed[sp.condensed_index(1, 2, n)] == pytest.approx(sp.MASH_MAX_DIST)
 
 
 # --------------------------------------------------------------------------- #

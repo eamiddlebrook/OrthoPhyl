@@ -170,13 +170,14 @@ class PipelineWrapper:
         self.subsample_size = subsample_size
 
         # Guardrail for the PARTITION/megatree path only: subclade_partition.py runs
-        #   an all-vs-all `mash triangle` and builds a DENSE NxN distance matrix,
-        #   which is O(n^2) in BOTH time and memory -- measured ~8 hours wall-clock
-        #   and ~45 GB RAM for the matrix alone at n=75k (12 threads, -k17 -s5000).
-        #   Above this ceiling we refuse to partition rather than run for hours or
-        #   OOM-kill the node. The default subsample path does NOT hit this (it
-        #   never builds the matrix); this only bounds the opt-in partition/megatree
-        #   route. See the query-neighborhood-mode ToDo for a sketch of avoiding
+        #   an all-vs-all `mash triangle` and builds a condensed (upper-triangle-only,
+        #   never dense) NxN distance array, which is O(n^2) in BOTH time and memory
+        #   -- measured ~8 hours wall-clock and ~22 GB RAM for the array alone at
+        #   n=75k (12 threads, -k17 -s5000). Above this ceiling we refuse to
+        #   partition rather than run for hours or OOM-kill the node. The default
+        #   subsample path does NOT hit this (it never builds the matrix); this only
+        #   bounds the opt-in partition/megatree route. See the query-neighborhood-
+        #   mode ToDo for a sketch of avoiding
         #   this matrix entirely at very large taxon sizes.
         self.max_total_genomes = max_total_genomes
 
@@ -1810,11 +1811,12 @@ class PipelineWrapper:
     def _enforce_total_genome_ceiling(self, taxon_name: str, raw_count: int):
         """Refuse to partition an over-large raw set (guardrail).
 
-        The partitioner's dense NxN MASH-distance matrix is O(n^2) in BOTH time
-        and memory -- measured ~8 hours wall-clock and ~45 GB RAM at n=75k (12
-        threads). Past this ceiling `mash triangle` either runs for hours or
-        OOM-kills the node. Rather than fail opaquely mid-run, stop here with
-        actionable guidance.
+        The partitioner's condensed MASH-distance array (subclade_partition.py
+        keeps it condensed, never dense -- see condensed_index there) is O(n^2)
+        in BOTH time and memory -- measured ~8 hours wall-clock and ~22 GB RAM
+        at n=75k (12 threads). Past this ceiling `mash triangle` either runs for
+        hours or OOM-kills the node. Rather than fail opaquely mid-run, stop
+        here with actionable guidance.
 
         This is a hard stop until one of the large-taxon strategies (--subsample
         to build one tree from a diverse subset, or --megatree to build per-
@@ -1823,16 +1825,18 @@ class PipelineWrapper:
         """
         if raw_count <= self.max_total_genomes:
             return
+        condensed_gb = (raw_count * (raw_count - 1) / 2 * 8) / 1e9
         raise RuntimeError(
             f"Taxon '{taxon_name}' has {raw_count} raw genomes, exceeding the "
             f"--max-total-genomes ceiling of {self.max_total_genomes}.\n"
             f"Partitioning builds an all-vs-all MASH distance matrix that grows "
-            f"as O(n^2) in memory (~{(raw_count ** 2 * 8) / 1e9:.1f} GB at this "
-            f"size) and would likely exhaust RAM.\n"
+            f"as O(n^2) in memory (~{condensed_gb:.1f} GB at this size, condensed "
+            f"form) and would likely exhaust RAM -- it also grows as O(n^2) in "
+            f"TIME (mash triangle), independent of memory.\n"
             f"Options:\n"
             f"  - Choose a more specific taxon/rank so fewer genomes are pulled.\n"
-            f"  - Raise --max-total-genomes if you have the memory for an "
-            f"{raw_count}x{raw_count} matrix.\n"
+            f"  - Raise --max-total-genomes if you have the memory (and time) for "
+            f"an {raw_count}x{raw_count} matrix.\n"
             f"  - Use a large-taxon strategy (--subsample / --megatree) once "
             f"available.")
 
@@ -3104,10 +3108,10 @@ Examples:
         type=int,
         default=25000,
         help='Guardrail for the opt-in per-subclade partition/megatree path only. '
-             'Partitioning builds an all-vs-all distance matrix that grows O(n^2) in '
-             'both time and memory (~8 hours and ~45 GB RAM at 75k genomes; '
+             'Partitioning builds an all-vs-all distance array that grows O(n^2) in '
+             'both time and memory (~8 hours and ~22 GB RAM at 75k genomes; '
              'measured), so it is refused above this ceiling. The default subsample '
-             'path never builds the matrix and is unaffected. Default 25000.'
+             'path never builds this array and is unaffected. Default 25000.'
     )
     parser.add_argument(
         '--megatree',

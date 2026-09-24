@@ -291,8 +291,8 @@ class TestTotalGenomeGuardrail:
         msg = str(exc.value)
         assert "50000" in msg
         assert "BigGenus" in msg
-        # ~20 GB matrix at 50k (50000^2 * 8 bytes = 20 GB)
-        assert "20.0 GB" in msg
+        # ~10 GB condensed array at 50k (50000*49999/2 * 8 bytes ~= 10 GB)
+        assert "10.0 GB" in msg
 
     def test_at_ceiling_is_allowed(self, Wrapper, tmp_path):
         w = _make_wrapper(Wrapper, tmp_path, max_total_genomes=10)

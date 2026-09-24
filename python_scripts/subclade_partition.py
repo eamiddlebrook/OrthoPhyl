@@ -23,9 +23,16 @@ functions.sh: `mash triangle -k 17 -s 5000`) so the per-subclade sketches this
 writes are directly comparable to a query sketched with the same params by the
 assembly router.
 
+The distance matrix is kept in scipy's CONDENSED (1-D, upper-triangle-only) form
+throughout -- parse_mash_edges builds it directly and partition_matrix/
+_merge_tiny_clusters consume it via condensed_index -- rather than ever
+materializing a dense n x n matrix. This roughly halves peak memory at large n
+(measured: ~45 GB dense vs ~22 GB condensed for a real 74,707-genome taxon).
+`mash triangle` itself is still O(n^2) in TIME regardless (unaffected by this).
+
 The clustering logic is separated from the mash calls (see partition_matrix) so
-it can be unit-tested by injecting a pre-parsed distance matrix without running
-mash.
+it can be unit-tested by injecting a pre-computed condensed distance array
+without running mash.
 
 Usage:
     subclade_partition.py --genome-dir DIR --taxon NAME --out-dir DIR \
@@ -40,7 +47,6 @@ import sys
 
 import numpy as np
 from scipy.cluster.hierarchy import linkage, to_tree
-from scipy.spatial.distance import squareform
 
 # MASH sketch parameters -- MUST match script_lib/functions.sh so distances and
 #   sketches are comparable across OrthoPhyl, this tool, and the router.
@@ -54,6 +60,25 @@ MASH_MAX_DIST = 1.0
 
 # FASTA extensions to consider as genomes.
 FASTA_GLOBS = ("*.fna", "*.fasta", "*.fa")
+
+
+def condensed_index(i, j, n):
+    """
+    Index into a scipy condensed distance array for pair (i, j), 0 <= i,j < n,
+    i != j. Matches scipy.spatial.distance.squareform's own ordering exactly --
+    the condensed array here is consumed directly by scipy.cluster.hierarchy.
+    linkage(), which requires that exact convention.
+    """
+    if i == j:
+        raise ValueError("condensed_index has no entry for the diagonal (i == j)")
+    if i > j:
+        i, j = j, i
+    return n * i - i * (i + 1) // 2 + (j - i - 1)
+
+
+def _pairwise_dist(condensed, i, j, n):
+    """Look up the distance between genome indices i and j in a condensed array."""
+    return condensed[condensed_index(i, j, n)]
 
 
 def find_genomes(genome_dir):
@@ -86,17 +111,19 @@ def run_mash_triangle(genome_files, out_path, threads):
 
 def parse_mash_edges(edge_path, names):
     """
-    Parse `mash triangle -E` output into a symmetric distance matrix.
+    Parse `mash triangle -E` output into a condensed distance array (scipy's
+    1-D upper-triangle-only form -- see condensed_index).
 
     Each edge line is: <seqA> <seqB> <dist> <p-value> <shared-hashes>
-    (seqA/seqB are the paths mash was given). Returns an (n x n) numpy matrix
-    indexed by the order of `names` (basenames). Pairs absent from the edge list
-    default to MASH_MAX_DIST; the diagonal is 0.
+    (seqA/seqB are the paths mash was given). Returns a 1-D numpy array of
+    length n*(n-1)/2, indexed via condensed_index(i, j, n) where i/j are
+    positions in `names` (basenames). Pairs absent from the edge list default
+    to MASH_MAX_DIST. There is no diagonal in condensed form (always 0,
+    never looked up).
     """
     idx = {name: i for i, name in enumerate(names)}
     n = len(names)
-    D = np.full((n, n), MASH_MAX_DIST, dtype=float)
-    np.fill_diagonal(D, 0.0)
+    condensed = np.full(n * (n - 1) // 2, MASH_MAX_DIST, dtype=float)
     with open(edge_path) as fh:
         for line in fh:
             parts = line.split()
@@ -111,9 +138,10 @@ def parse_mash_edges(edge_path, names):
             except ValueError:
                 continue
             i, j = idx[a], idx[b]
-            D[i, j] = dist
-            D[j, i] = dist
-    return D
+            if i == j:
+                continue
+            condensed[condensed_index(i, j, n)] = dist
+    return condensed
 
 
 def _split_tree(node, max_size):
@@ -128,12 +156,14 @@ def _split_tree(node, max_size):
     return _split_tree(node.left, max_size) + _split_tree(node.right, max_size)
 
 
-def _merge_tiny_clusters(clusters, D, min_size):
+def _merge_tiny_clusters(clusters, condensed, n, min_size):
     """
     Merge clusters smaller than min_size into the (non-tiny) cluster holding
     their single nearest member (min pairwise MASH distance). Iterates until no
     tiny cluster remains that can be merged. `clusters` is a list of index-lists.
-    Returns a new list of index-lists.
+    `condensed`/`n` are the condensed distance array and total genome count (see
+    condensed_index) used to look up pairwise distances. Returns a new list of
+    index-lists.
     """
     clusters = [list(c) for c in clusters]
     while True:
@@ -152,7 +182,7 @@ def _merge_tiny_clusters(clusters, D, min_size):
         best_big = None
         best_dist = None
         for c in big:
-            d = min(D[i, j] for i in t for j in c)
+            d = min(_pairwise_dist(condensed, i, j, n) for i in t for j in c)
             if best_dist is None or d < best_dist:
                 best_dist = d
                 best_big = c
@@ -162,23 +192,26 @@ def _merge_tiny_clusters(clusters, D, min_size):
     return clusters
 
 
-def partition_matrix(names, D, max_size, min_size):
+def partition_matrix(names, condensed, max_size, min_size):
     """
-    Cluster `names` (given their symmetric distance matrix D) into subclades of
-    <= max_size, merging clusters < min_size. Returns a list of subclades, each a
-    sorted list of names, ordered deterministically (size desc, then min name).
+    Cluster `names` (given their condensed distance array -- see condensed_index)
+    into subclades of <= max_size, merging clusters < min_size. Returns a list of
+    subclades, each a sorted list of names, ordered deterministically (size desc,
+    then min name).
 
-    Pure function of (names, D) -- no mash, so this is directly unit-testable.
+    Pure function of (names, condensed) -- no mash, so this is directly
+    unit-testable. `condensed` is scipy's condensed (1-D, upper-triangle-only)
+    form, consumed directly by linkage() -- never materialized as a dense
+    matrix, which would roughly double peak memory at large n.
     """
     n = len(names)
     if n <= max_size:
         return [sorted(names)]
 
-    condensed = squareform(D, checks=False)
     Z = linkage(condensed, method="average")
     tree = to_tree(Z)
     id_clusters = _split_tree(tree, max_size)
-    id_clusters = _merge_tiny_clusters(id_clusters, D, min_size)
+    id_clusters = _merge_tiny_clusters(id_clusters, condensed, n, min_size)
 
     name_clusters = [sorted(names[i] for i in c) for c in id_clusters]
     # Deterministic ordering: largest first, ties broken by lexical min member.
@@ -227,9 +260,9 @@ def partition(genome_dir, taxon, out_dir, max_size, min_size, threads, queries):
 
     mash_out = os.path.join(out_dir, "MASH_out")
     run_mash_triangle(genome_files, mash_out, threads)
-    D = parse_mash_edges(mash_out, names)
+    condensed = parse_mash_edges(mash_out, names)
 
-    clusters = partition_matrix(names, D, max_size, min_size)
+    clusters = partition_matrix(names, condensed, max_size, min_size)
 
     # If clustering could not produce any subclade meeting the min-size floor
     #   (e.g. a single genome set that all merged tiny), fall back to unpartitioned.
