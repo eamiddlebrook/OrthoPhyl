@@ -35,7 +35,7 @@ This document provides detailed information about each phase of the OrthoPhyl Pi
 
 2. Validates required scripts:
    - `assembly_router/assembly_router.py`
-   - `assembly_router/create_hierarchical_database.py`
+   - `assembly_router/OP_database_tool.py`
    - `assembly_router/add_releaf_version.py`
    - `OrthoPhyl.sh`
    - `ReLeaf.sh`
@@ -264,7 +264,7 @@ splits so every subclade ≤ `--subclade-size`. It writes `partition_manifest.js
 a per-subclade `.msh` sketch, and a `.members.txt` list under
 `02_orthophyl_novel/partitions/{taxon}/`. By default **every** subclade is then
 QC'd and built (Stage 1c → 3 → 4); with **`--megatree-lazy`**, a subclade holding
-no query is instead only *registered* — `create_hierarchical_database.py
+no query is instead only *registered* — `OP_database_tool.py
 --register-only`, `built=false`, sketch/members/source-dir recorded, no tree —
 and built later on demand when a query MASH-matches it (Phase 3c, below). A
 backbone tree is built from `--backbone-reps` diverse reps per (built) subclade,
@@ -444,7 +444,7 @@ keeps a fallback copy step for the `--skip-download` path (no QC runs there).
 
 ### Stage 4: Create Database Entry
 
-**Script**: `create_hierarchical_database.py`
+**Script**: `OP_database_tool.py`
 
 **Purpose**: Make OrthoPhyl output queryable for future runs
 
@@ -457,7 +457,7 @@ keeps a fallback copy step for the `--skip-download` path (no QC runs there).
 
 2. **Run Database Creator**
    ```bash
-   python create_hierarchical_database.py \
+   python OP_database_tool.py \
        --input orthophyl_runs.tsv \
        --output-dir {database_dir} \
        --update
@@ -520,7 +520,7 @@ query that landed there:
    `force=True`), using the subclade's own `subclade_taxonomy` — not the
    query's taxonomy, so a rebuild never overwrites the subclade's recorded
    taxonomy with whatever a single query happened to carry.
-3. **Promote the database entry**: `create_hierarchical_database.py --force`
+3. **Promote the database entry**: `OP_database_tool.py --force`
    overwrites the `built=false` placeholder with a real built entry
    (`built=true`, real tree, `orthophyl_run` symlink).
 4. **ReLeaf** the waiting query assemblies onto the freshly-built tree.

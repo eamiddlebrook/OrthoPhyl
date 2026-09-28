@@ -606,7 +606,7 @@ class MultiDatabaseRouter:
             f"{download_value}\t{self.output_dir / 'orthophyl_output'}\t{tax_string_for_download}\n"
             f"\n"
             f"# Then rebuild the database index:\n"
-            f"python create_hierarchical_database.py \\\n"
+            f"python OP_database_tool.py \\\n"
             f"    --input orthophyl_runs.tsv \\\n"
             f"    --output-dir {self.database_dir} \\\n"
             f"    --update"

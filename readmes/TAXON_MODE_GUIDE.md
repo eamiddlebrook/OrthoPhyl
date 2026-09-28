@@ -53,7 +53,7 @@ This will:
 ### Components
 
 1. **`utils/taxon_assembly_gatherer.py`** - NCBI query and assembly management
-2. **`assembly_router/create_hierarchical_database.py`** - Enhanced database creation with metadata
+2. **`assembly_router/OP_database_tool.py`** - Enhanced database creation with metadata
 3. **`orthophyl_pipeline_wrapper.py`** - Integrated workflow orchestration
 
 ### Database Metadata Structure

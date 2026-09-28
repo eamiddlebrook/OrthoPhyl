@@ -71,6 +71,7 @@ class PipelineWrapper:
         use_bbmap: bool = False,
         must_keep: Optional[str] = None,
         keep_failing_query: bool = False,
+        ani_shortlist: int = 20,
         # NEW: Taxon mode parameters
         taxon: Optional[str] = None,
         taxon_rank: Optional[str] = None,
@@ -131,6 +132,18 @@ class PipelineWrapper:
         #               warning instead of aborting.
         self.must_keep = must_keep
         self.keep_failing_query = keep_failing_query
+
+        # OrthoFinder shortlist ceiling passed to every OrthoPhyl.sh invocation as
+        #   -n/--num_OF_annots. OrthoPhyl.sh only builds OG_alignmentsToHMM/hmms_final/
+        #   (ANI_ORTHOFINDER_TO_ALL_SEQS) when the input genome count EXCEEDS this --
+        #   below it, OrthoFinder just runs directly on everything and no HMMs are
+        #   produced. ReLeaf hard-requires those HMMs (script_lib/functions_addem.sh's
+        #   HMM_search), so _run_orthophyl always passes -n low enough (relative to
+        #   the actual input size) to force that branch, regardless of how small the
+        #   input is -- otherwise any database built from <= ani_shortlist genomes
+        #   (a common case: default --subclade-size is 150, and plenty of ordinary
+        #   single-tree builds are small too) can never be ReLeaf'd onto.
+        self.ani_shortlist = ani_shortlist
 
         # NEW: Taxon mode
         self.taxon = taxon
@@ -213,7 +226,7 @@ class PipelineWrapper:
         # Script paths (relative to this wrapper)
         self.script_dir = Path(__file__).parent
         self.assembly_router = self.script_dir / "assembly_router" / "assembly_router.py"
-        self.database_creator = self.script_dir / "assembly_router" / "create_hierarchical_database.py"
+        self.database_creator = self.script_dir / "assembly_router" / "OP_database_tool.py"
         self.releaf_versioner = self.script_dir / "assembly_router" / "add_releaf_version.py"
         self.subclade_partitioner = self.script_dir / "python_scripts" / "subclade_partition.py"
         self.subsampler = self.script_dir / "python_scripts" / "subsample_genomes.py"
@@ -1178,7 +1191,7 @@ class PipelineWrapper:
 
         script_lib/functions.sh writes FINAL_SPECIES_TREES/iqtree.SCO_strict.CDS.tree
         while other code globs SCO_strict.CDS.iqtree.treefile; we match by pattern
-        (mirroring create_hierarchical_database.py) so grafting is not broken by the
+        (mirroring OP_database_tool.py) so grafting is not broken by the
         ordering. Prefers IQ-TREE trees, then any .treefile/.tree/.nwk.
         """
         tree_dirs = [
@@ -1926,15 +1939,24 @@ class PipelineWrapper:
         assemblies: List[Dict]
     ):
         """Run OrthoPhyl on combined genome set."""
+        # Force the MASH-shortlist/HMM-building branch of OrthoPhyl.sh's MAIN_PIPE
+        # (ANI_ORTHOFINDER_TO_ALL_SEQS) regardless of input size -- see ani_shortlist's
+        # docstring in __init__. n_genomes - 1 guarantees OrthoPhyl.sh's own
+        # `$(ls $ANI_dataset | wc -l) -gt $ANI_shortlist` check fires even for a run of
+        # exactly n_genomes; min(self.ani_shortlist, ...) keeps behavior byte-identical
+        # to before for any input already larger than the configured ceiling.
+        n_genomes = len(list(input_dir.glob("*.fna")) + list(input_dir.glob("*.fasta")))
+        ani_n = min(self.ani_shortlist, max(1, n_genomes - 1))
         cmd = [
             str(self.orthophyl_script),
             '-g', str(input_dir),
             '-s', str(output_dir),
             '-t', str(self.threads),
             '-p', 'iqtree',
-            '-o', 'CDS'
+            '-o', 'CDS',
+            '-n', str(ani_n),
         ]
-        
+
         logger.info(f"\n  Running OrthoPhyl for {taxon_name}...")
         self._log_command(cmd)
         logger.info(f"    Input: {input_dir}")
@@ -2645,7 +2667,7 @@ class PipelineWrapper:
         # ---- DB-collision pre-flight (before any compute) ----
         sys.path.insert(0, str(self.script_dir / "assembly_router"))
         try:
-            from create_hierarchical_database import database_exists
+            from OP_database_tool import database_exists
         except ImportError as e:
             raise ImportError(f"Failed to import database_exists: {e}")
 
@@ -3073,6 +3095,17 @@ Examples:
         help='Let query/input genomes that fail QC through with a loud warning instead '
              'of aborting (default: a query genome failing QC aborts the run).'
     )
+    parser.add_argument(
+        '--ani-shortlist',
+        type=int,
+        default=20,
+        help='Passed to every OrthoPhyl.sh run as -n/--num_OF_annots, capped to the '
+             'input genome count minus 1 so the MASH-shortlist/HMM-building branch '
+             '(ANI_ORTHOFINDER_TO_ALL_SEQS) always fires, even for small inputs -- '
+             'without it, a database built from too few genomes never gets HMMs and '
+             'can never be ReLeaf\'d onto. Matches OrthoPhyl.sh\'s own ANI_shortlist '
+             'default. Default 20.'
+    )
 
     # Taxon mode arguments (--taxon is in mutually_exclusive_group above)
     parser.add_argument(
@@ -3230,6 +3263,7 @@ Examples:
         use_bbmap=args.use_bbmap,
         must_keep=args.must_keep,
         keep_failing_query=args.keep_failing_query,
+        ani_shortlist=args.ani_shortlist,
         taxon=args.taxon,
         taxon_rank=args.taxon_rank,
         update_existing=args.update_existing,

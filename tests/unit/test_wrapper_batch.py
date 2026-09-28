@@ -270,3 +270,58 @@ class TestCheckpoints:
         w._save_final_status()
         status = json.loads((w.output_dir / "pipeline_status.json").read_text())
         assert "start_time" in status and "end_time" in status
+
+
+class TestRunOrthophylCommand:
+    """_run_orthophyl must always pass -n low enough to force OrthoPhyl.sh's
+    MASH-shortlist/HMM-building branch (ANI_ORTHOFINDER_TO_ALL_SEQS) -- otherwise
+    a database built from a small genome set never gets HMMs and can never be
+    ReLeaf'd onto later. See ani_shortlist's docstring in __init__."""
+
+    def _make_genome_dir(self, tmp_path, n, ext=".fna"):
+        d = tmp_path / "genomes_in"
+        d.mkdir(parents=True, exist_ok=True)
+        for i in range(n):
+            (d / f"g{i}{ext}").write_text(">c\nACGT\n")
+        return d
+
+    def test_small_input_capped_by_count_minus_one(
+            self, Wrapper, tmp_path, recording_run):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db", ani_shortlist=20)
+        w.logs_dir.mkdir(parents=True, exist_ok=True)
+        input_dir = self._make_genome_dir(tmp_path, 6)
+
+        w._run_orthophyl(
+            input_dir=input_dir, output_dir=tmp_path / "out_run",
+            taxon_name="Foo", assemblies=[])
+
+        cmd = recording_run[0]["cmd"]
+        assert "-n" in cmd
+        assert cmd[cmd.index("-n") + 1] == "5"  # min(20, 6-1)
+
+    def test_large_input_capped_by_ani_shortlist(
+            self, Wrapper, tmp_path, recording_run):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db", ani_shortlist=20)
+        w.logs_dir.mkdir(parents=True, exist_ok=True)
+        input_dir = self._make_genome_dir(tmp_path, 50)
+
+        w._run_orthophyl(
+            input_dir=input_dir, output_dir=tmp_path / "out_run",
+            taxon_name="Foo", assemblies=[])
+
+        cmd = recording_run[0]["cmd"]
+        assert "-n" in cmd
+        assert cmd[cmd.index("-n") + 1] == "20"  # min(20, 50-1)
+
+    def test_custom_ani_shortlist_threaded_through(
+            self, Wrapper, tmp_path, recording_run):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db", ani_shortlist=5)
+        w.logs_dir.mkdir(parents=True, exist_ok=True)
+        input_dir = self._make_genome_dir(tmp_path, 50)
+
+        w._run_orthophyl(
+            input_dir=input_dir, output_dir=tmp_path / "out_run",
+            taxon_name="Foo", assemblies=[])
+
+        cmd = recording_run[0]["cmd"]
+        assert cmd[cmd.index("-n") + 1] == "5"  # min(5, 50-1)

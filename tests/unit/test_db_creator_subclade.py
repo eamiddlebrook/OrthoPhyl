@@ -1,4 +1,4 @@
-"""Tests for subclade support in create_hierarchical_database.py.
+"""Tests for subclade support in OP_database_tool.py.
 
 Covers subclade_meta config fields + file copies for a built subclade, the
 is_backbone flag for a megatree's sparse overview DB, and the lazy

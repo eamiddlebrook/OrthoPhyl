@@ -276,7 +276,7 @@ class TestTaxonCreateMode:
         assert len(orthophyl_called) > 0, "_run_orthophyl was not called"
 
         # Should have called database creator
-        db_creator_calls = [c for c in recording_run if "create_hierarchical_database" in str(c['cmd'])]
+        db_creator_calls = [c for c in recording_run if "OP_database_tool" in str(c['cmd'])]
         assert len(db_creator_calls) > 0, "Database creator was not invoked"
     
     def test_create_db_metadata_derived_from_genomes_to_keep(

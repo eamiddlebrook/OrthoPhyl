@@ -63,7 +63,7 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │       │   ├─ Run OrthoFinder
   │       │   ├─ Build alignments
   │       │   └─ Infer phylogeny
-  │       └─ create_hierarchical_database.py
+  │       └─ OP_database_tool.py
   │           └─ Create new database entry
   │
   └─► PHASE 4: RESULTS AGGREGATION
@@ -95,7 +95,7 @@ orthophyl_pipeline_wrapper.py (Main Orchestrator)
     ├─► OrthoPhyl.sh
     │   └─ Runs: OrthoFinder, MAFFT, trimAl, IQ-TREE
     │
-    ├─► create_hierarchical_database.py
+    ├─► OP_database_tool.py
     │   └─ Creates: database_dir/*_db/
     │
     └─► add_releaf_version.py
@@ -161,7 +161,7 @@ def route_assembly(assembly, taxonomy):
 
 ---
 
-### 2. create_hierarchical_database.py
+### 2. OP_database_tool.py
 
 **Purpose**: Create/update hierarchical taxonomy databases from OrthoPhyl runs
 

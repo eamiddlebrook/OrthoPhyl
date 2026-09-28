@@ -100,13 +100,13 @@ INPUT: assemblies.tsv (assembly_path, taxonomy, [id])
   │       │   ├─ Run OrthoFinder
   │       │   ├─ Build alignments
   │       │   └─ Infer phylogeny
-  │       └─ create_hierarchical_database.py
+  │       └─ OP_database_tool.py
   │           └─ Create new database entry
   │
   ├─► PHASE 3C: SUBCLADE-BUILD ROUTE (Lazy Subclades, --megatree-lazy only)
   │   └─ For each unbuilt subclade a query matched:
   │       ├─ QC + OrthoPhyl.sh on the subclade's own raw members (no query)
-  │       ├─ create_hierarchical_database.py --force
+  │       ├─ OP_database_tool.py --force
   │       │   └─ Promote the built=false placeholder to built=true
   │       └─ ReLeaf.sh the waiting query assemblies onto the new tree
   │

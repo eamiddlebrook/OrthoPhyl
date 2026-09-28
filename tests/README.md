@@ -51,7 +51,7 @@ tests/
 ├── unit/
 │   ├── test_gtdb_taxonomy.py   # §1  GTDBTaxonomy (both copies, parametrized)
 │   ├── test_router.py          # §2  MultiDatabaseRouter routing decisions
-│   ├── test_db_creator.py      # §3  create_hierarchical_database
+│   ├── test_db_creator.py      # §3  OP_database_tool
 │   └── test_wrapper_batch.py   # §4  wrapper orchestration (subprocess mocked)
 └── fixtures/                   # static fixture data (added as suites grow)
 ```
@@ -59,7 +59,7 @@ tests/
 ## How target modules are imported
 
 The target scripts (`assembly_router.py`, `orthophyl_pipeline_wrapper.py`,
-`create_hierarchical_database.py`) live at the repo root and in `assembly_router/`,
+`OP_database_tool.py`) live at the repo root and in `assembly_router/`,
 which are not import packages. `conftest.py` provides a `load_module(path)` helper
 (via `importlib`) and exposes each target as a session-scoped fixture
 (`router_module`, `wrapper_module`, `db_creator_module`, …).

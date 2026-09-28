@@ -139,6 +139,109 @@ def releaf_script(project_root) -> Path:
 
 
 @pytest.fixture(scope="session")
+def wrapper_script(project_root) -> Path:
+    """Return the path to orthophyl_pipeline_wrapper.py."""
+    script = project_root / "orthophyl_pipeline_wrapper.py"
+    if not script.exists():
+        pytest.fail(f"orthophyl_pipeline_wrapper.py not found at {script}")
+    return script
+
+
+@pytest.fixture(scope="session")
+def gather_script(project_root) -> Path:
+    """Return the path to utils/gather_filter_asms.sh."""
+    script = project_root / "utils" / "gather_filter_asms.sh"
+    if not script.exists():
+        pytest.fail(f"gather_filter_asms.sh not found at {script}")
+    return script
+
+
+@pytest.fixture(scope="session")
+def chloroplast_genomes_dir(project_root) -> Path:
+    """Return the path to the chloroplast genomes directory."""
+    genomes_dir = project_root / "TESTER" / "genomes_chloroplast"
+    if not genomes_dir.exists():
+        pytest.fail(f"Chloroplast genomes not found at {genomes_dir}")
+    return genomes_dir
+
+
+# 20 raw Cymbidium chloroplast genomes + 1 "at-creation" query (lands in the
+# subclade built eagerly) + 1 "held-out" query routed later (MASH-matches an
+# unbuilt lazy subclade, triggering its on-demand build). Real, closely-related
+# species chosen so subclade_partition.py -- with the wrapper's real min-size=4
+# default -- reliably splits into 3 subclades (11/6/4 genomes) across a range of
+# --subclade-size, verified manually before writing this test. Hardcoded (not
+# derived by e.g. "first 22 alphabetically") so the partition/MASH-match behavior
+# stays deterministic even if TESTER/genomes_chloroplast/ gains/loses files.
+_CYMBIDIUM_RAW_20 = [
+    "MK820372.1_Cymbidium_nanulum.fasta",
+    "MK820373.1_Cymbidium_erythraeum.fasta",
+    "MK820374.1_Cymbidium_eburneum.fasta",
+    "MK848033.1_Cymbidium_aestivum.fasta",
+    "MK848034.1_Cymbidium_lancifolium.fasta",
+    "MK848035.1_Cymbidium_qiubeiense.fasta",
+    "MK848036.1_Cymbidium_maguanense.fasta",
+    "MK848037.1_Cymbidium_ensifolium.fasta",
+    "MK848038.1_Cymbidium_kanran.fasta",
+    "MK848039.1_Cymbidium_dayanum.fasta",
+    "MK848040.1_Cymbidium_daweishanense.fasta",
+    "MK848041.1_Cymbidium_maguanense.fasta",
+    "MK848042.1_Cymbidium_mastersii_isolate_Cyms021.fasta",
+    "MK848043.1_Cymbidium_floribundum_isolate_Cyms029.fasta",
+    "MK848044.1_Cymbidium_changningense_isolate_Cyms031.fasta",
+    "MK848045.1_Cymbidium_eburneum_var._longzhouense.fasta",
+    "MK848046.1_Cymbidium_aloifolium.fasta",
+    "MK848047.1_Cymbidium_haematodes.fasta",
+    "MK848048.1_Cymbidium_defoliatum.fasta",
+    "MK848049.1_Cymbidium_cochleare.fasta",
+]
+_CYMBIDIUM_AT_CREATION_QUERY = "MK848050.1_Cymbidium_cyperifolium.fasta"
+_CYMBIDIUM_HELD_OUT_QUERY = "MK848051.1_Cymbidium_wilsonii.fasta"
+
+
+@pytest.fixture(scope="session")
+def cymbidium_megatree_lazy_files(chloroplast_genomes_dir, tmp_path_factory) -> dict:
+    """Stage the 20 raw + 2 query Cymbidium genomes as .fna (not .fasta).
+
+    gather_filter_asms.sh's --qc-only guard hardcodes a `*.fna` glob, so a raw
+    member staged under its original `.fasta` name is invisible to it -- this
+    bit a manual reproduction of this exact scenario. Normalize here rather
+    than touching that glob (out of scope for this fix).
+
+    Returns a dict: {'raw_dir': Path, 'at_creation_query': Path, 'held_out_query': Path}.
+    """
+    dest = tmp_path_factory.mktemp("cymbidium_megatree_lazy")
+    raw_dir = dest / "raw20"
+    raw_dir.mkdir()
+
+    missing = [
+        f for f in (_CYMBIDIUM_RAW_20 + [_CYMBIDIUM_AT_CREATION_QUERY, _CYMBIDIUM_HELD_OUT_QUERY])
+        if not (chloroplast_genomes_dir / f).exists()
+    ]
+    if missing:
+        pytest.fail(f"Expected Cymbidium chloroplast files missing from "
+                    f"{chloroplast_genomes_dir}: {missing}")
+
+    for fasta_name in _CYMBIDIUM_RAW_20:
+        stem = fasta_name[:-len(".fasta")]
+        shutil.copy(chloroplast_genomes_dir / fasta_name, raw_dir / f"{stem}.fna")
+
+    at_creation_stem = _CYMBIDIUM_AT_CREATION_QUERY[:-len(".fasta")]
+    at_creation_dst = raw_dir / f"{at_creation_stem}.fna"
+    shutil.copy(chloroplast_genomes_dir / _CYMBIDIUM_AT_CREATION_QUERY, at_creation_dst)
+
+    held_out_stem = _CYMBIDIUM_HELD_OUT_QUERY[:-len(".fasta")]
+    held_out_dst = dest / f"{held_out_stem}.fna"
+    shutil.copy(chloroplast_genomes_dir / _CYMBIDIUM_HELD_OUT_QUERY, held_out_dst)
+
+    return {
+        'raw_dir': raw_dir,
+        'at_creation_query': at_creation_dst,
+        'held_out_query': held_out_dst,
+    }
+
+
+@pytest.fixture(scope="session")
 def fasttest_genomes(project_root) -> Path:
     """Return the path to the fasttest genomes directory."""
     genomes_dir = project_root / "TESTER" / "genomes_fasttest"

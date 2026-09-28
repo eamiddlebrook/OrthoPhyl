@@ -571,11 +571,11 @@ class TestCreateLocalDatabase:
         orthophyl_output.mkdir()
 
         # Fake the DB creator subprocess call to materialize a config file the
-        # way create_hierarchical_database.py's --update path would.
+        # way OP_database_tool.py's --update path would.
         db_dir = w.database_dir / "Blorptaxon_db"
 
         def fake_run(cmd, *args, **kwargs):
-            # Mirror create_hierarchical_database.py: taxonomy_source/qc_applied
+            # Mirror OP_database_tool.py: taxonomy_source/qc_applied
             # in the written config reflect the --taxonomy-source/--qc-not-applied
             # argv the wrapper passed, not a fixed default.
             cmd = [str(x) for x in cmd]

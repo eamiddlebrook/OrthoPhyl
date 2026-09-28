@@ -14,21 +14,32 @@ Input Format (TSV):
 
 Usage:
     # Initial creation
-    python create_hierarchical_database.py \
+    python OP_database_tool.py \
         --input orthophyl_runs.tsv \
         --output-dir taxonomy_databases/
     
     # Update with new entries (skips existing)
-    python create_hierarchical_database.py \
+    python OP_database_tool.py \
         --input orthophyl_runs.tsv \
         --output-dir taxonomy_databases/ \
         --update
     
     # Force rebuild all
-    python create_hierarchical_database.py \
+    python OP_database_tool.py \
         --input orthophyl_runs.tsv \
         --output-dir taxonomy_databases/ \
         --force
+
+    # Preview removing one or more clade databases (dry run, deletes nothing)
+    python OP_database_tool.py \
+        --output-dir taxonomy_databases/ \
+        --remove Gaiellales Escherichia
+
+    # Actually remove them and refresh the master index
+    python OP_database_tool.py \
+        --output-dir taxonomy_databases/ \
+        --remove Gaiellales Escherichia \
+        --yes
 
 Author: Generated for HGTool
 Date: 2024
@@ -634,6 +645,112 @@ def get_existing_databases(output_dir: Path) -> Set[str]:
     return existing
 
 
+def remove_databases(names: List[str], output_dir: Path, confirm: bool = False) -> Dict:
+    """
+    Remove one or more clade databases by name from output_dir.
+
+    Resolves each name via database_exists() (the same safe-name transform
+    used everywhere else in this file). Default (confirm=False) is a DRY
+    RUN: nothing is deleted, callers get back what WOULD be removed. With
+    confirm=True, each resolved _db directory is actually shutil.rmtree'd
+    (safe against its orthophyl_run symlink -- rmtree unlinks a symlink
+    entry rather than following it into the target), and the master index
+    is refreshed exactly once at the end from the post-removal directory
+    state (never once per name).
+
+    A name that does not resolve to an existing _db directory is reported
+    in 'not_found' and does not stop processing of the remaining names,
+    matching this file's existing --update-mode tone of warning and
+    continuing rather than hard-failing on one bad entry.
+
+    output_dir not existing at all means every name is 'not_found' -- no
+    directory is created as a side effect of a remove call.
+
+    Returns a dict: {'removed': [...], 'not_found': [...], 'dry_run': bool},
+    where each 'removed' entry is {'clade_name', 'database_dir',
+    'clade_taxonomy', 'n_genomes'} (taxonomy/n_genomes are None if the
+    config was missing or unreadable -- the directory is still resolved
+    and reported, just without that context).
+    """
+    output_dir = Path(output_dir)
+    removed = []
+    not_found = []
+
+    if not output_dir.exists():
+        return {'removed': [], 'not_found': list(names), 'dry_run': not confirm}
+
+    for name in names:
+        db_dir = database_exists(name, output_dir)
+        if db_dir is None:
+            logger.warning(f"  ⊙ No database found for clade '{name}'; skipping")
+            not_found.append(name)
+            continue
+
+        clade_taxonomy = None
+        n_genomes = None
+        config_file = db_dir / "database_config.json"
+        if config_file.exists():
+            try:
+                with open(config_file) as f:
+                    config = json.load(f)
+                clade_taxonomy = config.get('clade_taxonomy')
+                n_genomes = config.get('n_genomes')
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        if confirm:
+            shutil.rmtree(db_dir)
+            logger.info(f"  ✓ Removed {db_dir}")
+        else:
+            logger.info(f"  [DRY RUN] Would remove {db_dir} "
+                        f"(taxonomy={clade_taxonomy}, n_genomes={n_genomes})")
+
+        removed.append({
+            'clade_name': name,
+            'database_dir': db_dir,
+            'clade_taxonomy': clade_taxonomy,
+            'n_genomes': n_genomes,
+        })
+
+    if confirm and removed:
+        all_dbs = _scan_all_databases_for_index(output_dir)
+        create_master_index(all_dbs, output_dir)
+
+    return {'removed': removed, 'not_found': not_found, 'dry_run': not confirm}
+
+
+def _scan_all_databases_for_index(output_dir: Path) -> List[Dict]:
+    """
+    Scan every *_db directory under output_dir and read back the 5-key dict
+    shape create_master_index expects (clade_name, clade_taxonomy,
+    database_dir, n_genomes, taxonomy_source). Skips a _db dir whose config
+    is missing or unreadable rather than raising.
+
+    This is the read-only rescan used to refresh the master index after any
+    change to the set of databases on disk (add, update, or remove) -- kept
+    separate from get_existing_databases (which returns only a Set[str] of
+    names, for a different purpose).
+    """
+    all_dbs = []
+    for db_dir in output_dir.glob("*_db"):
+        config_file = db_dir / "database_config.json"
+        if not config_file.exists():
+            continue
+        try:
+            with open(config_file) as f:
+                config = json.load(f)
+            all_dbs.append({
+                'clade_name': config['clade_name'],
+                'clade_taxonomy': config['clade_taxonomy'],
+                'database_dir': db_dir,
+                'n_genomes': config['n_genomes'],
+                'taxonomy_source': config.get('taxonomy_source', 'ncbi'),
+            })
+        except (json.JSONDecodeError, KeyError, OSError):
+            continue
+    return all_dbs
+
+
 def create_master_index(databases: List[Dict], output_dir: Path):
     """
     Create master index of all databases.
@@ -752,18 +869,18 @@ def main():
         epilog="""
 Examples:
   # Initial creation
-  python create_hierarchical_database.py \\
+  python OP_database_tool.py \\
       --input orthophyl_runs.tsv \\
       --output-dir taxonomy_databases/
   
   # Add new entries (skip existing)
-  python create_hierarchical_database.py \\
+  python OP_database_tool.py \\
       --input orthophyl_runs.tsv \\
       --output-dir taxonomy_databases/ \\
       --update
   
   # Force rebuild all
-  python create_hierarchical_database.py \\
+  python OP_database_tool.py \\
       --input orthophyl_runs.tsv \\
       --output-dir taxonomy_databases/ \\
       --force
@@ -834,7 +951,31 @@ Input Format (TSV):
                         help='Register a subclade DB with built=false (no tree yet) '
                              'for lazy build-on-demand. Requires --is-subclade.')
 
+    # Remove one or more existing clade databases.
+    parser.add_argument('--remove', nargs='+', metavar='NAME',
+                        help='Remove one or more clade databases by name. Default is '
+                             'a DRY RUN (prints what would be removed, deletes '
+                             'nothing); pass --yes to actually delete. Cannot be '
+                             'combined with --input or --single-clade.')
+    parser.add_argument('--yes', action='store_true',
+                        help='Confirm --remove actually deletes the resolved '
+                             'database directories and refreshes the master index. '
+                             'Has no effect without --remove.')
+
     args = parser.parse_args()
+
+    if args.remove and (args.input or args.single_clade):
+        parser.error("--remove cannot be combined with --input or --single-clade")
+    if args.yes and not args.remove:
+        parser.error("--yes only applies to --remove")
+    if args.remove:
+        result = remove_databases(args.remove, Path(args.output_dir), confirm=args.yes)
+        for r in result['removed']:
+            action = "Removed" if args.yes else "[DRY RUN] Would remove"
+            logger.info(f"{action}: {r['clade_name']} ({r['database_dir']})")
+        for name in result['not_found']:
+            logger.warning(f"Not found, skipped: {name}")
+        return 0
 
     if args.update and args.force:
         parser.error("Cannot use --update and --force together")
@@ -874,24 +1015,12 @@ Input Format (TSV):
             logger.info("Database already exists; nothing to do (use --force to rebuild)")
             return 0
         # Refresh the master index across all DBs present.
-        all_dbs = []
-        for d in output_dir.glob("*_db"):
-            cfg = d / "database_config.json"
-            if cfg.exists():
-                with open(cfg) as f:
-                    c = json.load(f)
-                all_dbs.append({
-                    'clade_name': c['clade_name'],
-                    'clade_taxonomy': c['clade_taxonomy'],
-                    'database_dir': d,
-                    'n_genomes': c['n_genomes'],
-                    'taxonomy_source': c.get('taxonomy_source', 'ncbi'),
-                    # NOTE: is_subclade/built are intentionally NOT surfaced here --
-                    #   the router re-reads each DB's own database_config.json
-                    #   directly (assembly_router.py:_load_single_database) rather
-                    #   than trusting this index for anything but the directory
-                    #   path, so this loop does not need to populate them.
-                })
+        # NOTE: is_subclade/built are intentionally NOT surfaced by the scan --
+        #   the router re-reads each DB's own database_config.json directly
+        #   (assembly_router.py:_load_single_database) rather than trusting
+        #   this index for anything but the directory path, so it doesn't
+        #   need to populate them.
+        all_dbs = _scan_all_databases_for_index(output_dir)
         if all_dbs:
             create_master_index(all_dbs, output_dir)
         logger.info(f"✓ {'Registered' if args.register_only else 'Created'} {db_dir}")
@@ -944,19 +1073,7 @@ Input Format (TSV):
         if not runs:
             logger.info("No new databases to create")
             # Still update index
-            all_dbs = []
-            for db_dir in output_dir.glob("*_db"):
-                config_file = db_dir / "database_config.json"
-                if config_file.exists():
-                    with open(config_file) as f:
-                        config = json.load(f)
-                    all_dbs.append({
-                        'clade_name': config['clade_name'],
-                        'clade_taxonomy': config['clade_taxonomy'],
-                        'database_dir': db_dir,
-                        'n_genomes': config['n_genomes'],
-                        'taxonomy_source': config.get('taxonomy_source', 'ncbi'),
-                    })
+            all_dbs = _scan_all_databases_for_index(output_dir)
             if all_dbs:
                 create_master_index(all_dbs, output_dir)
             return 0
@@ -1002,23 +1119,14 @@ Input Format (TSV):
             failed.append(run['clade_name'])
             logger.info("")
     
-    # In update mode, also load existing databases for index
+    # In update mode, also load existing databases for index (skip any
+    # clade already present from the runs we just processed above).
     if args.update:
-        for db_dir in output_dir.glob("*_db"):
-            config_file = db_dir / "database_config.json"
-            if config_file.exists():
-                with open(config_file) as f:
-                    config = json.load(f)
-                # Only add if not already in our new list
-                if not any(d['clade_name'] == config['clade_name'] for d in databases):
-                    databases.append({
-                        'clade_name': config['clade_name'],
-                        'clade_taxonomy': config['clade_taxonomy'],
-                        'database_dir': db_dir,
-                        'n_genomes': config['n_genomes'],
-                        'taxonomy_source': config.get('taxonomy_source', 'ncbi'),
-                    })
-    
+        existing_names = {d['clade_name'] for d in databases}
+        for scanned in _scan_all_databases_for_index(output_dir):
+            if scanned['clade_name'] not in existing_names:
+                databases.append(scanned)
+
     # Create master index
     if databases:
         logger.info("Creating master index...")

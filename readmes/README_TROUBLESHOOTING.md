@@ -21,7 +21,7 @@ python orthophyl_pipeline_wrapper.py \
     --orthophyl-runs orthophyl_runs.tsv
 
 # Option B: Manually create databases first
-python assembly_router/create_hierarchical_database.py \
+python assembly_router/OP_database_tool.py \
     --input orthophyl_runs.tsv \
     --output-dir databases/
 ```
@@ -177,7 +177,7 @@ cat output_dir/logs/database_{taxon}.log
 ls output_dir/02_orthophyl_novel/orthophyl_runs/{taxon}/FINAL_SPECIES_TREES/
 
 # Test database creation manually
-python assembly_router/create_hierarchical_database.py \
+python assembly_router/OP_database_tool.py \
     --input test_runs.tsv \
     --output-dir databases/ \
     --update

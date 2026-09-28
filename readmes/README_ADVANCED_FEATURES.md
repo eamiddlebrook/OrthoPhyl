@@ -567,7 +567,7 @@ python orthophyl_pipeline_wrapper.py \
 
 The backbone database is distinguished from a dense subclade sharing the same
 taxonomy by an `is_backbone` flag in its `database_config.json` (written via
-`create_hierarchical_database.py --is-backbone`).
+`OP_database_tool.py --is-backbone`).
 
 **Note:** `MASH_K`/`MASH_S` in `assembly_router.py` must stay in lockstep with
 the sketch parameters in `subclade_partition.py` and `script_lib/functions.sh`

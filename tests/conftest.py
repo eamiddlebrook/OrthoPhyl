@@ -96,7 +96,7 @@ def router_module():
 @pytest.fixture(scope="session")
 def db_creator_module():
     return load_module(
-        REPO_ROOT / "assembly_router" / "create_hierarchical_database.py",
+        REPO_ROOT / "assembly_router" / "OP_database_tool.py",
         name="create_hierarchical_database_v2",
     )
 

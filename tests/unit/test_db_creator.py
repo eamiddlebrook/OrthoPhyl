@@ -1,4 +1,4 @@
-"""Tests for create_hierarchical_database.py (plan section 3)."""
+"""Tests for OP_database_tool.py (plan section 3)."""
 
 import json
 from pathlib import Path
@@ -231,3 +231,94 @@ class TestMasterIndex:
         db_creator_module.create_master_index(databases, out)
         index = json.loads((out / "database_index.json").read_text())
         assert "taxonomy_source" not in index["databases"][0]
+
+
+class TestRemoveDatabases:
+    """remove_databases(names, output_dir, confirm=False) -- dry-run by
+    default, deletes + refreshes the master index only with confirm=True."""
+
+    def test_dry_run_does_not_delete(self, db_creator_module, make_db_dir, tmp_path):
+        out = tmp_path / "databases"
+        db_dir = make_db_dir(
+            clade_name="Alpha", clade_taxonomy="d__Bacteria;g__Alpha",
+            clade_rank="g", clade_rank_name="genus", n_genomes=5, parent=out,
+        )
+        result = db_creator_module.remove_databases(["Alpha"], out, confirm=False)
+        assert result["dry_run"] is True
+        assert db_dir.exists()
+        assert [r["clade_name"] for r in result["removed"]] == ["Alpha"]
+        assert result["not_found"] == []
+        # Dry run must not touch the index at all.
+        assert not (out / "database_index.json").exists()
+
+    def test_confirm_removes_directory(self, db_creator_module, make_db_dir, tmp_path):
+        out = tmp_path / "databases"
+        db_dir = make_db_dir(
+            clade_name="Alpha", clade_taxonomy="d__Bacteria;g__Alpha",
+            clade_rank="g", clade_rank_name="genus", n_genomes=5, parent=out,
+        )
+        result = db_creator_module.remove_databases(["Alpha"], out, confirm=True)
+        assert result["dry_run"] is False
+        assert not db_dir.exists()
+        assert [r["clade_name"] for r in result["removed"]] == ["Alpha"]
+
+    def test_not_found_name_warns_and_continues(
+            self, db_creator_module, make_db_dir, tmp_path):
+        out = tmp_path / "databases"
+        alpha_dir = make_db_dir(
+            clade_name="Alpha", clade_taxonomy="d__Bacteria;g__Alpha",
+            clade_rank="g", clade_rank_name="genus", n_genomes=5, parent=out,
+        )
+        result = db_creator_module.remove_databases(
+            ["Alpha", "NoSuchClade"], out, confirm=True)
+        assert not alpha_dir.exists()
+        assert [r["clade_name"] for r in result["removed"]] == ["Alpha"]
+        assert result["not_found"] == ["NoSuchClade"]
+
+    def test_refreshes_index_after_removal(
+            self, db_creator_module, make_db_dir, tmp_path):
+        out = tmp_path / "databases"
+        make_db_dir(
+            clade_name="Alpha", clade_taxonomy="d__Bacteria;g__Alpha",
+            clade_rank="g", clade_rank_name="genus", n_genomes=5, parent=out,
+        )
+        make_db_dir(
+            clade_name="Beta", clade_taxonomy="d__Bacteria;g__Beta",
+            clade_rank="g", clade_rank_name="genus", n_genomes=7, parent=out,
+        )
+        db_creator_module.remove_databases(["Alpha"], out, confirm=True)
+        index = json.loads((out / "database_index.json").read_text())
+        names = [d["clade_name"] for d in index["databases"]]
+        assert names == ["Beta"]
+
+    def test_removing_last_database_writes_empty_index(
+            self, db_creator_module, make_db_dir, tmp_path):
+        out = tmp_path / "databases"
+        make_db_dir(
+            clade_name="Alpha", clade_taxonomy="d__Bacteria;g__Alpha",
+            clade_rank="g", clade_rank_name="genus", n_genomes=5, parent=out,
+        )
+        db_creator_module.remove_databases(["Alpha"], out, confirm=True)
+        index = json.loads((out / "database_index.json").read_text())
+        assert index["n_databases"] == 0
+        assert index["databases"] == []
+
+    def test_missing_output_dir_is_all_not_found(self, db_creator_module, tmp_path):
+        out = tmp_path / "does_not_exist"
+        result = db_creator_module.remove_databases(["Alpha"], out, confirm=True)
+        assert result["removed"] == []
+        assert result["not_found"] == ["Alpha"]
+        assert not out.exists()
+
+    def test_dry_run_reports_context_even_with_unreadable_config(
+            self, db_creator_module, make_db_dir, tmp_path):
+        out = tmp_path / "databases"
+        db_dir = make_db_dir(
+            clade_name="Alpha", clade_taxonomy="d__Bacteria;g__Alpha",
+            clade_rank="g", clade_rank_name="genus", n_genomes=5, parent=out,
+        )
+        (db_dir / "database_config.json").write_text("{not valid json")
+        result = db_creator_module.remove_databases(["Alpha"], out, confirm=False)
+        assert [r["clade_name"] for r in result["removed"]] == ["Alpha"]
+        assert result["removed"][0]["clade_taxonomy"] is None
+        assert result["removed"][0]["n_genomes"] is None
