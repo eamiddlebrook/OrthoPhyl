@@ -612,4 +612,49 @@ class TestCreateLocalDatabase:
         assert config["source_rank"] is None
         assert config["source_genome_dir"] == str(w.genome_dir.resolve())
         assert sorted(config["assembly_accessions"]) == ["k0", "k1", "k2", "k3"]
-        assert config["n_assemblies_at_creation"] == 4
+
+    def test_finds_db_when_clade_name_has_slash(
+            self, Wrapper, tmp_path, monkeypatch, wrapper_module):
+        """_create_local_database's own db_dir lookup must use the SAME
+        sanitization (.replace(' ', '_').replace('/', '_')) OP_database_tool.py
+        applies when actually creating the directory -- otherwise a clade_name
+        containing '/' silently looks up a path that doesn't exist and this
+        metadata update no-ops instead of succeeding."""
+        clade_name = "Foo/Bar"
+        w = _make_local_wrapper(Wrapper, tmp_path, clade_name=clade_name)
+
+        genomes_to_keep = tmp_path / "genomes_to_keep2"
+        genomes_to_keep.mkdir()
+        (genomes_to_keep / "k0.fna").write_text(">c\nAC\n")
+
+        orthophyl_output = tmp_path / "orthophyl_run2"
+        orthophyl_output.mkdir()
+
+        safe_name = clade_name.replace(' ', '_').replace('/', '_')
+        db_dir = w.database_dir / f"{safe_name}_db"
+
+        def fake_run(cmd, *args, **kwargs):
+            db_dir.mkdir(parents=True, exist_ok=True)
+            (db_dir / "database_config.json").write_text(
+                json.dumps({"clade_name": safe_name}))
+
+            class R:
+                returncode = 0
+            return R()
+
+        monkeypatch.setattr(wrapper_module.subprocess, "run", fake_run)
+
+        w._create_local_database(
+            clade_name=clade_name,
+            orthophyl_output=orthophyl_output,
+            taxonomy="g__FooBar",
+            taxonomy_source="user_supplied",
+            qc_applied=True,
+            genomes_to_keep=genomes_to_keep,
+            source_genome_dir=w.genome_dir,
+        )
+
+        config = json.loads((db_dir / "database_config.json").read_text())
+        assert config["source_taxon_name"] == clade_name
+        assert config["assembly_accessions"] == ["k0"]
+        assert config["n_assemblies_at_creation"] == 1

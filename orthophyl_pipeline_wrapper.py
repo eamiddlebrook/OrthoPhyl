@@ -45,6 +45,32 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def sanitize_path_component(s: str) -> str:
+    """Sanitize a string for safe use as a single filesystem path component.
+
+    Taxon names, clade names, and assembly IDs ultimately come from
+    user-controlled data (a batch --input TSV's taxonomy/assembly_id
+    columns, --clade-name, etc.) and get path-joined all over this module
+    and assembly_router.py -- e.g. self.orthophyl_dir / "downloads" /
+    taxon_name. GTDBTaxonomy._parse_taxonomy's regex places NO restriction
+    on the rank value it captures, so a taxonomy string like
+    "g__../../../../tmp/evil" flows straight through to a real
+    Path.mkdir/subprocess/shutil.copy call, escaping the intended output
+    tree entirely.
+
+    Uses the same allowlist regex as _default_run_name (already proven
+    safe there): strip everything but alphanumerics/dot/underscore/hyphen,
+    collapsing runs into a single underscore. This neutralizes '/' and '..'
+    (a '..' segment can only traverse via an adjacent '/', which this always
+    removes) while leaving ordinary taxon/accession names (which are
+    virtually always alphanumeric plus '._-') byte-identical.
+    """
+    if not s:
+        return 'unnamed'
+    safe = re.sub(r'[^A-Za-z0-9._-]+', '_', s).strip('_')
+    return safe or 'unnamed'
+
+
 class PipelineWrapper:
     """Main wrapper class for OrthoPhyl/ReLeaf pipeline."""
 
@@ -683,10 +709,19 @@ class PipelineWrapper:
             with open(json_file, 'r') as f:
                 decision = json.load(f)
 
+            # Defense in depth: assembly_router.py already sanitizes assembly_id/
+            # download_value before writing this JSON, but this file could in
+            # principle be hand-edited or produced by a differently-versioned
+            # router -- don't trust it blindly, since every value read here
+            # becomes taxon_name/sc_name/assembly_id in real Path joins
+            # (self.orthophyl_dir / "downloads" / taxon_name, input_dir /
+            # f"{assembly_id}.fna", etc.) throughout this module.
+            assembly_id = sanitize_path_component(decision['assembly_id'])
+
             pipeline = decision['pipeline']
             if pipeline == 'ReLeaf':
                 releaf_batch.append({
-                    'assembly_id': decision['assembly_id'],
+                    'assembly_id': assembly_id,
                     'assembly_path': decision['assembly'],
                     'database': decision['matched_database'],
                     'database_dir': decision['database_dir'],
@@ -698,12 +733,14 @@ class PipelineWrapper:
                 # never built because no query landed there then. This query is
                 # the first to route here, so the wrapper builds its tree, then
                 # ReLeafs.
-                sc_name = decision['subclade_name']
+                sc_name = sanitize_path_component(decision['subclade_name'])
+                raw_parent_taxon = decision.get('parent_taxon')
                 subclade_build_batch[sc_name].append({
-                    'assembly_id': decision['assembly_id'],
+                    'assembly_id': assembly_id,
                     'assembly_path': decision['assembly'],
                     'subclade_name': sc_name,
-                    'parent_taxon': decision.get('parent_taxon'),
+                    'parent_taxon': (sanitize_path_component(raw_parent_taxon)
+                                     if raw_parent_taxon else raw_parent_taxon),
                     'subclade_id': decision.get('subclade_id'),
                     'database_dir': decision['database_dir'],
                     'subclade_taxonomy': decision.get('subclade_taxonomy'),
@@ -715,9 +752,9 @@ class PipelineWrapper:
                     'tree_data': decision.get('tree_data', 'CDS'),
                 })
             else:  # OrthoPhyl
-                taxon = decision['download_value']
+                taxon = sanitize_path_component(decision['download_value'])
                 orthophyl_batch[taxon].append({
-                    'assembly_id': decision['assembly_id'],
+                    'assembly_id': assembly_id,
                     'assembly_path': decision['assembly'],
                     'download_rank': decision['download_rank'],
                     'taxonomy': decision['query_taxonomy'],
@@ -2056,6 +2093,12 @@ class PipelineWrapper:
         'user_supplied' and the actual QC status.
         """
         logger.info(f"\n  Creating database entry for {taxon_name}...")
+        # taxon_name can carry a batch TSV's free-text taxonomy value verbatim;
+        # sanitize before it's used in a log_file path (the subprocess argv
+        # below intentionally keeps the raw taxon_name -- OP_database_tool.py
+        # applies its own equivalent sanitization when it creates the actual
+        # DB directory, so changing what's passed there is out of scope here).
+        safe_taxon_name = sanitize_path_component(taxon_name)
 
         if subclade_meta is not None:
             # Built subclade (or megatree backbone): register a single clade
@@ -2089,7 +2132,7 @@ class PipelineWrapper:
                             f"database for {taxon_name}")
                 return
 
-            log_file = self.logs_dir / f"database_{taxon_name}.log"
+            log_file = self.logs_dir / f"database_{safe_taxon_name}.log"
             with open(log_file, 'w') as f:
                 result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
             if result.returncode != 0:
@@ -2127,7 +2170,7 @@ class PipelineWrapper:
             logger.info(f"  [DRY RUN] Would create database for {taxon_name}")
             return
         
-        log_file = self.logs_dir / f"database_{taxon_name}.log"
+        log_file = self.logs_dir / f"database_{safe_taxon_name}.log"
         with open(log_file, 'w') as f:
             if self.verbose == 1:
                 result = subprocess.run(cmd, stderr=f, text=True)
@@ -2842,8 +2885,14 @@ class PipelineWrapper:
             taxonomy=taxonomy
         )
 
-        # Update database config with taxon metadata
-        db_dir = self.database_dir / f"{taxon_name}_db"
+        # Update database config with taxon metadata. Must match
+        # OP_database_tool.py's create_database_for_run/database_exists exactly
+        # (clade_name.replace(' ', '_').replace('/', '_')) -- that's the
+        # transform actually applied when the directory below was created;
+        # without it, a taxon_name containing '/' would silently look up the
+        # wrong (nonexistent) path and this metadata update would no-op.
+        safe_taxon_name = taxon_name.replace(' ', '_').replace('/', '_')
+        db_dir = self.database_dir / f"{safe_taxon_name}_db"
         if db_dir.exists():
             config_file = db_dir / "database_config.json"
             if config_file.exists():
@@ -2893,7 +2942,10 @@ class PipelineWrapper:
             qc_applied=qc_applied,
         )
 
-        db_dir = self.database_dir / f"{clade_name}_db"
+        # Must match OP_database_tool.py's clade_name.replace(' ', '_').replace(
+        # '/', '_') exactly -- see _create_taxon_database's identical comment.
+        safe_clade_name = clade_name.replace(' ', '_').replace('/', '_')
+        db_dir = self.database_dir / f"{safe_clade_name}_db"
         config_file = db_dir / "database_config.json"
         if not config_file.exists():
             return

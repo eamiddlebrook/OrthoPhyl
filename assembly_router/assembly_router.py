@@ -42,6 +42,26 @@ MASH_K = "17"
 MASH_S = "5000"
 
 
+def sanitize_path_component(s: str) -> str:
+    """Sanitize a string for safe use as a single filesystem path component.
+
+    GTDBTaxonomy._parse_taxonomy's regex (below) places no restriction on the
+    rank value it captures -- a taxonomy string like "g__../../../../tmp/evil"
+    passes through untouched. That value (via download_value in
+    _route_to_orthophyl) and a batch TSV's free-text assembly_id column both
+    get path-joined (e.g. self.output_dir / f"routing_decision_{assembly_id}
+    .json", opened for writing) without this. Same allowlist regex as
+    orthophyl_pipeline_wrapper.py's sanitize_path_component/_default_run_name:
+    strips everything but alphanumerics/dot/underscore/hyphen, which removes
+    every '/' (so an adjacent '..' can no longer traverse) while leaving
+    ordinary taxon/accession names byte-identical.
+    """
+    if not s:
+        return 'unnamed'
+    safe = re.sub(r'[^A-Za-z0-9._-]+', '_', s).strip('_')
+    return safe or 'unnamed'
+
+
 def pick_nearest_subclade(candidates: List[Dict], dist_fn) -> Tuple[Optional[Dict], Optional[float]]:
     """
     Pick the candidate dict with the smallest dist_fn(candidate) value.
@@ -266,7 +286,12 @@ class MultiDatabaseRouter:
         """Route assembly to best matching database or suggest new OrthoPhyl run."""
         if assembly_id is None:
             assembly_id = Path(assembly_path).stem
-        
+        # assembly_id can come straight from a batch TSV's free-text 3rd column
+        # (unlike the filename-stem default above, which can't contain '/').
+        # Sanitize before it's used in any path (_save_decision writes
+        # self.output_dir / f"routing_decision_{assembly_id}.json" et al.).
+        assembly_id = sanitize_path_component(assembly_id)
+
         logger.info(f"\nRouting assembly: {assembly_id}")
         logger.info(f"Query taxonomy: {taxonomy}")
         
@@ -612,9 +637,20 @@ class MultiDatabaseRouter:
             f"    --update"
         )
         commands.append(db_cmd)
-        
+
         full_command = "\n\n".join(commands)
-        
+
+        # download_value comes straight from GTDBTaxonomy._parse_taxonomy, whose
+        # regex places NO restriction on the captured rank value -- a taxonomy
+        # string like "g__../../../../tmp/evil" passes through untouched. The
+        # wrapper uses this value as taxon_name in real Path joins (self.
+        # orthophyl_dir / "downloads" / taxon_name, etc.), so sanitize the value
+        # that actually flows downstream while keeping the original available
+        # under raw_download_value for a human auditing the decision JSON (the
+        # human-facing command text above still shows the raw value verbatim --
+        # it's advisory text, not itself a path write).
+        safe_download_value = sanitize_path_component(download_value or '')
+
         decision = {
             'pipeline': 'OrthoPhyl',
             'reason': 'Novel taxonomy not represented in any database',
@@ -623,7 +659,8 @@ class MultiDatabaseRouter:
             'query_taxonomy': taxonomy,
             'download_taxonomy': tax_string_for_download,
             'download_rank': rank_name,
-            'download_value': download_value,
+            'download_value': safe_download_value,
+            'raw_download_value': download_value,
             'suggestion': f"Create new database for {rank_name} '{download_value}'",
             'command': full_command
         }

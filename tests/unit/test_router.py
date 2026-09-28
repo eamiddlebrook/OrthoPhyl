@@ -218,3 +218,75 @@ class TestBatchRoute:
         decisions = router.batch_route(batch)
         assert len(decisions) == 1
         assert decisions[0]["pipeline"] == "ReLeaf"
+
+
+class TestSanitizePathComponent:
+    """GTDBTaxonomy._parse_taxonomy's regex places no restriction on the rank
+    value it captures, so a taxonomy string like "g__../../../../tmp/evil"
+    passes through untouched -- sanitize_path_component is the guard against
+    that value (or a batch TSV's free-text assembly_id column) ending up in a
+    real Path join."""
+
+    def test_leaves_ordinary_names_unchanged(self, router_module):
+        assert router_module.sanitize_path_component("Escherichia") == "Escherichia"
+        assert (router_module.sanitize_path_component("MK848050.1_Cymbidium")
+                == "MK848050.1_Cymbidium")
+
+    def test_strips_path_separators_and_traversal(self, router_module):
+        result = router_module.sanitize_path_component("../../../../tmp/evil")
+        # No '/' means the result is a single path component that cannot
+        # escape its parent directory, regardless of any '..' substrings
+        # left inside it (e.g. ".._.._.._tmp_evil" is just an odd filename,
+        # not a traversal -- a '..' segment can only traverse via an
+        # adjacent '/', which this always removes).
+        assert "/" not in result
+        assert result not in (".", "..")
+
+    def test_empty_string_falls_back_to_unnamed(self, router_module):
+        assert router_module.sanitize_path_component("") == "unnamed"
+
+
+class TestPathTraversalRegression:
+    """Regression coverage for the actual vulnerability: a crafted
+    taxonomy/assembly_id string must not cause routing_decision_*.json /
+    routing_summary_*.txt to be written outside output_dir."""
+
+    def _assembly(self, tmp_path):
+        asm = tmp_path / "novel.fna"
+        asm.write_text(">c\nACGT\n")
+        return asm
+
+    def test_traversal_in_taxonomy_genus_field_stays_sanitized(
+            self, Router, two_db_dir, tmp_path):
+        out = tmp_path / "out"
+        router = Router(database_dir=two_db_dir, output_dir=out)
+        decision = router.route_assembly(
+            self._assembly(tmp_path),
+            GAIELLALES_TAX + ";f__Gaiellaceae;g__../../../../tmp/evil;s__",
+            "novel1",
+        )
+        assert decision["pipeline"] == "OrthoPhyl"
+        assert "/" not in decision["download_value"]
+        assert decision["download_value"] not in (".", "..")
+        # The raw value is preserved separately for audit, unsanitized.
+        assert decision["raw_download_value"] == "../../../../tmp/evil"
+        # Only files inside output_dir were written -- the actual regression
+        # check (would fail if a real Path join used the raw value instead).
+        written = list(out.glob("routing_decision_*.json"))
+        assert written
+        assert all(p.resolve().is_relative_to(out.resolve()) for p in written)
+
+    def test_traversal_in_assembly_id_stays_sanitized(
+            self, Router, two_db_dir, tmp_path):
+        out = tmp_path / "out"
+        router = Router(database_dir=two_db_dir, output_dir=out)
+        decision = router.route_assembly(
+            self._assembly(tmp_path),
+            GAIELLALES_TAX + ";f__Gaiellaceae;g__Gaiella;s__",
+            "../../../../tmp/evil_id",
+        )
+        assert "/" not in decision["assembly_id"]
+        assert decision["assembly_id"] not in (".", "..")
+        written = list(out.glob("routing_decision_*.json"))
+        assert written
+        assert all(p.resolve().is_relative_to(out.resolve()) for p in written)

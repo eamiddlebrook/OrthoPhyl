@@ -321,6 +321,46 @@ class TestTaxonCreateMode:
         assert config["assembly_accessions"] == ["GCF_000008.2", "GCF_000009.1"]
         assert config["n_assemblies_at_creation"] == 2
 
+    def test_create_db_metadata_finds_db_when_taxon_name_has_slash(
+        self, Wrapper, tmp_path, fake_gatherer_class, recording_run
+    ):
+        """_create_taxon_database's own db_dir lookup must use the SAME
+        sanitization (.replace(' ', '_').replace('/', '_')) OP_database_tool.py
+        applies when actually creating the directory -- otherwise a taxon_name
+        containing '/' silently looks up a path that doesn't exist and this
+        metadata update no-ops instead of erroring or succeeding correctly."""
+        db_dir = tmp_path / "databases"
+        db_dir.mkdir()
+        w = _make_taxon_wrapper(Wrapper, tmp_path, db_dir, dry_run=False)
+
+        taxon_name = "Foo/Bar"
+        safe_name = taxon_name.replace(' ', '_').replace('/', '_')
+        taxon_db = w.database_dir / f"{safe_name}_db"
+        taxon_db.mkdir(parents=True, exist_ok=True)
+        (taxon_db / "database_config.json").write_text(
+            json.dumps({"clade_name": safe_name}))
+
+        genomes_to_keep = tmp_path / "gtk2"
+        genomes_to_keep.mkdir()
+        (genomes_to_keep / "GCF_000009.1.fna").write_text(">a\nATCG\n")
+
+        gatherer = fake_gatherer_class[0] if fake_gatherer_class else \
+            __import__('sys').modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer(
+                taxon=taxon_name, output_dir=tmp_path / "tq2")
+
+        w._create_database_entry = lambda **kwargs: None
+
+        w._create_taxon_database(
+            taxon_name=taxon_name,
+            orthophyl_output=tmp_path / "op2",
+            gatherer=gatherer,
+            genomes_to_keep=genomes_to_keep,
+        )
+
+        config = json.loads((taxon_db / "database_config.json").read_text())
+        assert config["assembly_accessions"] == ["GCF_000009.1"]
+        assert config["source_taxon_name"] == taxon_name
+
     def test_dry_run_short_circuits_create_mode(
         self, Wrapper, tmp_path, fake_gatherer_class, recording_run
     ):

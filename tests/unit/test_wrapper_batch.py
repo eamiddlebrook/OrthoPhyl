@@ -141,6 +141,67 @@ class TestParseRoutingResults:
         assert results["releaf_batch"][0]["tree_method"] == "iqtree"
         assert results["releaf_batch"][0]["tree_data"] == "CDS"
 
+    def _write_decision_raw(self, routing_dir, filename, decision):
+        """Like _write_decision, but the caller picks the ON-DISK filename
+        directly instead of deriving it from decision['assembly_id'] -- needed
+        to simulate a hand-edited/older-router-produced JSON whose assembly_id
+        field itself carries an unsanitized value."""
+        routing_dir.mkdir(parents=True, exist_ok=True)
+        (routing_dir / filename).write_text(json.dumps(decision))
+
+    def test_defense_in_depth_sanitizes_download_value(self, Wrapper, tmp_path):
+        """Even if a routing_decision_*.json on disk was NOT sanitized (e.g.
+        hand-edited, or produced by an older assembly_router.py), taxon_name
+        derived from it must still be safe -- this taxon_name feeds real Path
+        joins like self.orthophyl_dir / "downloads" / taxon_name."""
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        self._write_decision_raw(w.routing_dir, "routing_decision_n1.json", {
+            "pipeline": "OrthoPhyl",
+            "assembly_id": "n1",
+            "assembly": "/data/n1.fna",
+            "download_value": "../../../../tmp/evil_taxon",
+            "download_rank": "genus",
+            "query_taxonomy": "d__Bacteria;...",
+            "download_taxonomy": "d__Bacteria;...;g__evil_taxon",
+        })
+        results = w._parse_routing_results()
+        taxon_names = list(results["orthophyl_batch"].keys())
+        assert len(taxon_names) == 1
+        assert "/" not in taxon_names[0]
+        assert taxon_names[0] not in (".", "..")
+
+    def test_defense_in_depth_sanitizes_assembly_id(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        self._write_decision_raw(w.routing_dir, "routing_decision_evil.json", {
+            "pipeline": "ReLeaf",
+            "assembly_id": "../../../../tmp/evil_id",
+            "assembly": "/data/m1.fna",
+            "matched_database": "Escherichia",
+            "database_dir": "/db/Escherichia_db",
+        })
+        results = w._parse_routing_results()
+        assembly_id = results["releaf_batch"][0]["assembly_id"]
+        assert "/" not in assembly_id
+        assert assembly_id not in (".", "..")
+
+    def test_defense_in_depth_sanitizes_subclade_build_names(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        self._write_decision_raw(w.routing_dir, "routing_decision_evil2.json", {
+            "pipeline": "OrthoPhyl_subclade_build",
+            "assembly_id": "../../../../tmp/evil_id2",
+            "assembly": "/data/q1.fna",
+            "subclade_name": "../../../../tmp/evil_subclade",
+            "parent_taxon": "../../../../tmp/evil_parent",
+            "database_dir": "/db/Foo_1_db",
+        })
+        results = w._parse_routing_results()
+        sc_names = list(results["subclade_build_batch"].keys())
+        assert len(sc_names) == 1
+        assert "/" not in sc_names[0]
+        entry = results["subclade_build_batch"][sc_names[0]][0]
+        assert "/" not in entry["assembly_id"]
+        assert "/" not in entry["parent_taxon"]
+
 
 class TestReleafPhase:
     def _prepare(self, Wrapper, tmp_path, make_db_dir):
@@ -325,3 +386,47 @@ class TestRunOrthophylCommand:
 
         cmd = recording_run[0]["cmd"]
         assert cmd[cmd.index("-n") + 1] == "5"  # min(5, 50-1)
+
+
+class TestCreateDatabaseEntryLogFile:
+    """_create_database_entry builds log_file = self.logs_dir /
+    f"database_{taxon_name}.log" directly from taxon_name (which can carry a
+    batch TSV's free-text taxonomy value verbatim) in BOTH the subclade/backbone
+    branch and the classic --update branch. A '/' in taxon_name used to crash
+    with FileNotFoundError (open() doesn't create missing parent dirs) rather
+    than just silently mis-routing like the db_dir lookups fixed elsewhere."""
+
+    def test_update_branch_log_file_stays_inside_logs_dir(
+            self, Wrapper, tmp_path, recording_run):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        w.logs_dir.mkdir(parents=True, exist_ok=True)
+        w.database_dir.mkdir(parents=True, exist_ok=True)
+
+        w._create_database_entry(
+            taxon_name="Foo/Bar",
+            orthophyl_output=tmp_path / "op_out",
+            taxonomy="g__FooBar",
+        )
+
+        logs = list(w.logs_dir.glob("database_*.log"))
+        assert len(logs) == 1
+        assert "/" not in logs[0].name.removeprefix("database_").removesuffix(".log")
+        assert logs[0].parent == w.logs_dir
+
+    def test_subclade_branch_log_file_stays_inside_logs_dir(
+            self, Wrapper, tmp_path, recording_run):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        w.logs_dir.mkdir(parents=True, exist_ok=True)
+        w.database_dir.mkdir(parents=True, exist_ok=True)
+
+        w._create_database_entry(
+            taxon_name="Foo/Bar_1",
+            orthophyl_output=tmp_path / "op_out",
+            taxonomy="g__FooBar",
+            subclade_meta={"is_backbone": False, "parent_taxon": "Foo/Bar"},
+        )
+
+        logs = list(w.logs_dir.glob("database_*.log"))
+        assert len(logs) == 1
+        assert "/" not in logs[0].name.removeprefix("database_").removesuffix(".log")
+        assert logs[0].parent == w.logs_dir
