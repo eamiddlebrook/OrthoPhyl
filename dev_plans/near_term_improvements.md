@@ -87,6 +87,17 @@ orthogroup IDs. Then let the subclade run its OWN alignment, trimming, and
 tree-model/branch-length steps on those assigned genes — explicitly NOT reusing
 the backbone's alignments or evolutionary model, per the user's caveat.
 
+**Shares item 4's open design snag**: `HMM_search`'s only existing downstream
+consumer, `ADD_2_ALIGNMENTS` (`script_lib/functions_addem.sh:265-326`), doesn't
+align from scratch — it always does `mafft --add $new_OG_seqs/... --keeplength
+$OG_alignment` (`:316`), i.e. it only ever *extends* a pre-existing alignment at
+fixed column coordinates. Since this item explicitly does NOT reuse the
+backbone's alignment, there is no "old alignment" to extend here either — same
+gap as item 4, not a separate one. Whatever new code path item 4 ends up needing
+("take HMM-identified sequences for a group and align them fresh, no old
+alignment required") is also exactly what item 3 needs. Solve once, reuse for
+both.
+
 ## 4. Scaffold support for an external HMM set (e.g. BUSCO)
 
 **Ask** (related to #3, bigger lift): let OrthoPhyl use an external HMM set (like
