@@ -17,10 +17,19 @@ AUTHOR earlm@lanl.gov
 
 %post
     # instal conda and conda packages
-    micromamba install --yes --name base --channel bioconda --channel conda-forge prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer mash prodigal ete3 raxml trimal r-essentials scipy iqtree pytest
+    # python=3.12 pinned to match orthophyl_env.2.2.1.yml's dev env -- ete3's
+    #   webplugin submodule (imported unconditionally by ete3/__init__.py) does
+    #   `import cgi`, which was removed from the stdlib in Python 3.13 (PEP 594).
+    #   Without this pin, micromamba resolves whatever the latest Python is at
+    #   build time, silently breaking every `import ete3` in the pipeline.
+    micromamba install --yes --name base --channel bioconda --channel conda-forge python=3.12 prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer mash prodigal ete3 raxml trimal r-essentials scipy iqtree pytest
     # CheckM2 (DIAMOND + ML) replaces legacy CheckM1: no pplacer/reference-tree,
     #   so no python 3.10 / setuptools<82 pins are needed and there is no ~40 GB
-    #   RAM blow-up on placement.
+    #   RAM blow-up on placement. This env never imports ete3, so it does not
+    #   need (and must NOT have) the python=3.12 pin above -- checkm2's newest
+    #   build requires python>3.12, which is unsatisfiable with an exact ==3.12
+    #   pin ("checkm2 =* * does not exist" is libmamba's way of saying no
+    #   version of checkm2 satisfies both constraints at once).
     micromamba create --yes -n gather_genomes -c bioconda -c conda-forge checkm2 bbmap entrez-direct ncbi-datasets-cli pytest
     micromamba clean --all --yes
     chmod --recursive a+rw /opt/conda/bin/*
