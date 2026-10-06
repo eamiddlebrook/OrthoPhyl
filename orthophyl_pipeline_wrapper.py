@@ -112,6 +112,7 @@ class PipelineWrapper:
         subclade_size: int = 150,
         conflict_min_support: int = 90,
         megatree_lazy: bool = False,
+        megatree_hmm_reuse: bool = False,
         placement: str = 'subclade',
         # NEW: local genome-ingest mode (build a DB from genomes already on disk,
         #   under a user-supplied clade name that was not assigned by NCBI)
@@ -245,6 +246,17 @@ class PipelineWrapper:
         #   an unbuilt subclade triggers _phase_subclade_build to build it then.
         #   Default off -- plain --megatree still builds every subclade eagerly.
         self.megatree_lazy = megatree_lazy
+
+        # Opt-in HMM reuse: give every subclade the BACKBONE's orthogroup HMMs
+        #   (via OrthoPhyl.sh's --hmm-assign-dir) instead of each subclade
+        #   running its own independent OrthoFinder orthogroup inference --
+        #   alignment/trim/tree model remain per-subclade. Requires building
+        #   the backbone BEFORE any subclade (reordered in _run_megatree),
+        #   since the backbone's hmms_final/ must exist first; this blocks
+        #   subclade builds on one upfront backbone run instead of each being
+        #   independently parallelizable, so it defaults off rather than
+        #   silently changing --megatree's existing runtime shape.
+        self.megatree_hmm_reuse = megatree_hmm_reuse
 
         # Which tree a query is placed into when a megatree parent taxon has
         #   multiple tied-specificity matches (its subclades + its backbone):
@@ -1131,13 +1143,19 @@ class PipelineWrapper:
              MASH matrix; refuse rather than OOM).
           2. Partition the raw set into subclades of <= subclade_size genomes.
           3. Build a full OrthoPhyl tree for EVERY subclade (queries mapped to
-             their subclade via the manifest's query_assignments).
-          4. Pick backbone_reps diverse reps per subclade (MASH greedy max-min,
-             seeded by that subclade's queries), pool them, and build one BACKBONE
-             OrthoPhyl tree.
-          5. Graft each subclade tree onto its reps in the backbone -> one merged
+             their subclade via the manifest's query_assignments) and pick
+             backbone_reps diverse reps per subclade (MASH greedy max-min,
+             seeded by that subclade's queries). DEFAULT order (independent):
+             each subclade's tree first, THEN the backbone built from pooled
+             reps. --megatree-hmm-reuse order (reversed): the backbone is
+             built FIRST from pooled reps picked off each subclade's QC'd
+             member pool, so every subclade can then build using the
+             backbone's own orthogroup HMMs (OrthoPhyl.sh --hmm-assign-dir)
+             instead of its own independent OrthoFinder run -- see
+             _build_megatree_subclades_hmm_reuse.
+          4. Graft each subclade tree onto its reps in the backbone -> one merged
              megatree, flagging (not resolving) high-support bipartition conflicts.
-          6. Publish the merged tree + conflict report and create the taxon DB from
+          5. Publish the merged tree + conflict report and create the taxon DB from
              the backbone run so ReLeaf has a coherent HMM set.
 
         Checkpointed per stage; dry-run short-circuits.
@@ -1167,73 +1185,37 @@ class PipelineWrapper:
             sc = assignments.get(name)
             query_by_subclade.setdefault(sc, []).append(asm)
 
-        # (3) Build a full tree for every subclade + (4) collect backbone reps.
         backbone_dir = self.orthophyl_dir / "megatree" / taxon_name / "backbone_genomes"
         backbone_dir.mkdir(parents=True, exist_ok=True)
-        # subclade name -> {tree, reps} accumulated for the graft.
-        subclade_specs: Dict[str, Dict] = {}
-
-        for entry in subclades:
-            sc_name = entry['name']
-            queries_here = query_by_subclade.get(sc_name, [])
-
-            # --megatree-lazy: a subclade with no query yet is only REGISTERED
-            # (built=false placeholder) rather than built, so an oversized
-            # taxon can be partitioned once and its subclades built
-            # incrementally as queries actually route to them. It contributes
-            # no backbone reps until it is eventually built.
-            if self.megatree_lazy and not queries_here:
-                logger.info(f"\n  Registering subclade {sc_name} for lazy "
-                            f"build ({entry['n_genomes']} raw genomes, no query)")
-                self._register_lazy_subclade(
-                    taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
-                    taxonomy=taxonomy)
-                continue
-
-            logger.info(f"\n  Building subclade {sc_name} "
-                        f"({entry['n_genomes']} raw genomes, "
-                        f"{len(queries_here)} query)")
-            self._build_subclade(
-                taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
-                query_assemblies=queries_here, taxonomy=taxonomy,
-                is_subclade=True)
-
-            # Backbone reps: diverse pick over this subclade's QC-kept genomes,
-            # seeded by its queries so they anchor the backbone.
-            sc_genomes = self.orthophyl_dir / "downloads" / sc_name / "genomes_to_keep"
-            seed_stems = [Path(a['assembly_path']).stem for a in queries_here]
-            reps_dir = self._subsample_genomes(
-                f"{sc_name}_backbone", sc_genomes, self.backbone_reps,
-                must_keep_stems=seed_stems)
-            rep_stems = []
-            if not self.dry_run:
-                for p in (list(reps_dir.glob("*.fna")) +
-                          list(reps_dir.glob("*.fasta"))):
-                    rep_stems.append(p.stem)
-                    dst = backbone_dir / p.name
-                    if not dst.exists() and not dst.is_symlink():
-                        try:
-                            os.symlink(os.path.abspath(p), dst)
-                        except OSError:
-                            shutil.copy(p, dst)
-            sc_tree = self._locate_species_tree(
-                self.orthophyl_dir / "orthophyl_runs" / sc_name)
-            subclade_specs[sc_name] = {'tree': sc_tree, 'reps': rep_stems}
-
-        # (5) Build the backbone tree over pooled reps.
         backbone_out = self.orthophyl_dir / "megatree" / taxon_name / "backbone_run"
-        if self._check_checkpoint(f"megatree_backbone_{taxon_name}") and self.resume:
-            logger.info(f"  ✓ Backbone tree already built for {taxon_name} (resuming)")
+
+        # (3) Build every subclade + collect backbone reps -- order depends
+        # on --megatree-hmm-reuse (see docstring).
+        if self.megatree_hmm_reuse:
+            subclade_specs = self._build_megatree_subclades_hmm_reuse(
+                taxon_name=taxon_name, raw_dir=raw_dir, subclades=subclades,
+                query_by_subclade=query_by_subclade, taxonomy=taxonomy,
+                backbone_dir=backbone_dir, backbone_out=backbone_out)
         else:
-            logger.info(f"\n  Building backbone tree from "
-                        f"{len(subclade_specs)} subclade rep sets")
-            self._run_orthophyl(
-                input_dir=backbone_dir, output_dir=backbone_out,
-                taxon_name=f"{taxon_name}_backbone", assemblies=[])
-            self._write_checkpoint(f"megatree_backbone_{taxon_name}")
+            subclade_specs = self._build_megatree_subclades_independent(
+                taxon_name=taxon_name, raw_dir=raw_dir, subclades=subclades,
+                query_by_subclade=query_by_subclade, taxonomy=taxonomy,
+                backbone_dir=backbone_dir)
+
+            # Backbone tree built AFTER subclades in the default order.
+            if self._check_checkpoint(f"megatree_backbone_{taxon_name}") and self.resume:
+                logger.info(f"  ✓ Backbone tree already built for {taxon_name} (resuming)")
+            else:
+                logger.info(f"\n  Building backbone tree from "
+                            f"{len(subclade_specs)} subclade rep sets")
+                self._run_orthophyl(
+                    input_dir=backbone_dir, output_dir=backbone_out,
+                    taxon_name=f"{taxon_name}_backbone", assemblies=[])
+                self._write_checkpoint(f"megatree_backbone_{taxon_name}")
+
         backbone_tree = self._locate_species_tree(backbone_out)
 
-        # (6) Graft subclade trees onto the backbone.
+        # (4) Graft subclade trees onto the backbone.
         megatree_dir = self.results_dir / "trees" / "orthophyl"
         megatree_dir.mkdir(parents=True, exist_ok=True)
         merged_tree = megatree_dir / f"{taxon_name}_megatree.nwk"
@@ -1275,6 +1257,200 @@ class PipelineWrapper:
             taxon_name=taxon_name, orthophyl_output=backbone_out,
             taxonomy=taxonomy,
             subclade_meta={'is_backbone': True, 'parent_taxon': taxon_name})
+
+    def _build_megatree_subclades_independent(
+            self, taxon_name: str, raw_dir: Path, subclades: List[Dict],
+            query_by_subclade: Dict[str, List[Dict]], taxonomy: str,
+            backbone_dir: Path) -> Dict[str, Dict]:
+        """Default --megatree order: build each subclade's own full tree
+        FIRST (independent OrthoFinder run per subclade), then pick its
+        backbone reps from the result. Returns {sc_name: {tree, reps}}.
+        """
+        subclade_specs: Dict[str, Dict] = {}
+
+        for entry in subclades:
+            sc_name = entry['name']
+            queries_here = query_by_subclade.get(sc_name, [])
+
+            # --megatree-lazy: a subclade with no query yet is only REGISTERED
+            # (built=false placeholder) rather than built, so an oversized
+            # taxon can be partitioned once and its subclades built
+            # incrementally as queries actually route to them. It contributes
+            # no backbone reps until it is eventually built.
+            if self.megatree_lazy and not queries_here:
+                logger.info(f"\n  Registering subclade {sc_name} for lazy "
+                            f"build ({entry['n_genomes']} raw genomes, no query)")
+                self._register_lazy_subclade(
+                    taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
+                    taxonomy=taxonomy)
+                continue
+
+            logger.info(f"\n  Building subclade {sc_name} "
+                        f"({entry['n_genomes']} raw genomes, "
+                        f"{len(queries_here)} query)")
+            self._build_subclade(
+                taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
+                query_assemblies=queries_here, taxonomy=taxonomy,
+                is_subclade=True)
+
+            # Backbone reps: diverse pick over this subclade's QC-kept genomes,
+            # seeded by its queries so they anchor the backbone.
+            sc_genomes = self.orthophyl_dir / "downloads" / sc_name / "genomes_to_keep"
+            seed_stems = [Path(a['assembly_path']).stem for a in queries_here]
+            reps_dir = self._subsample_genomes(
+                f"{sc_name}_backbone", sc_genomes, self.backbone_reps,
+                must_keep_stems=seed_stems)
+            rep_stems = self._stage_backbone_reps(reps_dir, backbone_dir)
+            sc_tree = self._locate_species_tree(
+                self.orthophyl_dir / "orthophyl_runs" / sc_name)
+            subclade_specs[sc_name] = {'tree': sc_tree, 'reps': rep_stems}
+
+        return subclade_specs
+
+    def _build_megatree_subclades_hmm_reuse(
+            self, taxon_name: str, raw_dir: Path, subclades: List[Dict],
+            query_by_subclade: Dict[str, List[Dict]], taxonomy: str,
+            backbone_dir: Path, backbone_out: Path) -> Dict[str, Dict]:
+        """--megatree-hmm-reuse order: QC every subclade and pick its backbone
+        reps FIRST, build the backbone tree (producing hmms_final/), THEN
+        build every subclade passing --hmm-assign-dir so it shares the
+        backbone's orthogroup identity instead of running its own
+        independent OrthoFinder inference. Falls back to the independent
+        path (with a warning) if the backbone's hmms_final/ never
+        materializes -- e.g. the pooled backbone rep count ended up at or
+        under --ani-shortlist, so OrthoPhyl.sh's HMM-building branch never
+        engaged for it. Returns {sc_name: {tree, reps}}.
+        """
+        # ---- Phase A: QC every subclade, pick backbone reps, pool them ----
+        # genomes_to_keep per subclade is cached here so the later build
+        # phase does not re-run (expensive) CheckM2 QC.
+        genomes_to_keep_by_subclade: Dict[str, Path] = {}
+        lazy_entries: List[Dict] = []
+        buildable_entries: List[Dict] = []
+
+        for entry in subclades:
+            sc_name = entry['name']
+            queries_here = query_by_subclade.get(sc_name, [])
+
+            if self.megatree_lazy and not queries_here:
+                lazy_entries.append(entry)
+                continue
+            buildable_entries.append(entry)
+
+            member_names = self._read_members_file(entry.get('members_file'))
+            if member_names:
+                raw_members = [raw_dir / m for m in member_names]
+            else:
+                raw_members = (list(raw_dir.glob("*.fna")) +
+                               list(raw_dir.glob("*.fasta")))
+            subclade_dir = self.orthophyl_dir / "downloads" / sc_name
+            if self._check_checkpoint(f"qc_{sc_name}") and self.resume:
+                logger.info(f"  ✓ QC already complete for {sc_name} (resuming)")
+                genomes_to_keep = subclade_dir / "genomes_to_keep"
+            else:
+                genomes_to_keep = self._qc_subclade(
+                    subclade_dir, raw_members, taxon_label=sc_name,
+                    query_assemblies=queries_here)
+                self._write_checkpoint(f"qc_{sc_name}")
+            genomes_to_keep_by_subclade[sc_name] = genomes_to_keep
+
+            seed_stems = [Path(a['assembly_path']).stem for a in queries_here]
+            reps_dir = self._subsample_genomes(
+                f"{sc_name}_backbone", genomes_to_keep, self.backbone_reps,
+                must_keep_stems=seed_stems)
+            self._stage_backbone_reps(reps_dir, backbone_dir)
+
+        # ---- Phase B: build the backbone FIRST (produces hmms_final/) ----
+        if self._check_checkpoint(f"megatree_backbone_{taxon_name}") and self.resume:
+            logger.info(f"  ✓ Backbone tree already built for {taxon_name} (resuming)")
+        else:
+            logger.info(f"\n  Building backbone tree from "
+                        f"{len(buildable_entries)} subclade rep sets "
+                        f"(--megatree-hmm-reuse: backbone built first)")
+            self._run_orthophyl(
+                input_dir=backbone_dir, output_dir=backbone_out,
+                taxon_name=f"{taxon_name}_backbone", assemblies=[])
+            self._write_checkpoint(f"megatree_backbone_{taxon_name}")
+
+        hmm_assign_dir = self._locate_backbone_hmms(backbone_out)
+        if hmm_assign_dir is None and not self.dry_run:
+            logger.warning(
+                f"  ⚠ --megatree-hmm-reuse requested but {taxon_name}'s "
+                f"backbone produced no hmms_final/ (its pooled rep count was "
+                f"likely at or under --ani-shortlist, so OrthoPhyl.sh's "
+                f"HMM-building branch never engaged). Falling back to "
+                f"independent per-subclade builds.")
+
+        # ---- Phase C: register lazy subclades, build the rest ----
+        for entry in lazy_entries:
+            logger.info(f"\n  Registering subclade {entry['name']} for lazy "
+                        f"build ({entry['n_genomes']} raw genomes, no query)")
+            self._register_lazy_subclade(
+                taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
+                taxonomy=taxonomy)
+
+        subclade_specs: Dict[str, Dict] = {}
+        for entry in buildable_entries:
+            sc_name = entry['name']
+            queries_here = query_by_subclade.get(sc_name, [])
+            logger.info(f"\n  Building subclade {sc_name} "
+                        f"({entry['n_genomes']} raw genomes, "
+                        f"{len(queries_here)} query)"
+                        + (f" using backbone HMMs" if hmm_assign_dir else ""))
+            self._build_subclade(
+                taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
+                query_assemblies=queries_here, taxonomy=taxonomy,
+                is_subclade=True, hmm_assign_dir=hmm_assign_dir,
+                genomes_to_keep=genomes_to_keep_by_subclade.get(sc_name))
+
+            sc_tree = self._locate_species_tree(
+                self.orthophyl_dir / "orthophyl_runs" / sc_name)
+            # Reps were already staged into backbone_dir in Phase A; recover
+            # their stems from that subclade's own rep-selection dir for the
+            # graft command (same genomes, just re-read instead of re-picked).
+            reps_dir = (self.orthophyl_dir / "subsample" /
+                       f"{sc_name}_backbone" / "selected")
+            rep_stems = []
+            if not self.dry_run and reps_dir.exists():
+                rep_stems = [p.stem for p in
+                            (list(reps_dir.glob("*.fna")) +
+                             list(reps_dir.glob("*.fasta")))]
+            subclade_specs[sc_name] = {'tree': sc_tree, 'reps': rep_stems}
+
+        return subclade_specs
+
+    def _stage_backbone_reps(self, reps_dir: Path, backbone_dir: Path) -> List[str]:
+        """Symlink (falling back to copy) every rep genome in reps_dir into
+        backbone_dir; returns their stems. Shared by both megatree subclade-
+        build orderings.
+        """
+        rep_stems = []
+        if not self.dry_run:
+            for p in (list(reps_dir.glob("*.fna")) +
+                      list(reps_dir.glob("*.fasta"))):
+                rep_stems.append(p.stem)
+                dst = backbone_dir / p.name
+                if not dst.exists() and not dst.is_symlink():
+                    try:
+                        os.symlink(os.path.abspath(p), dst)
+                    except OSError:
+                        shutil.copy(p, dst)
+        return rep_stems
+
+    @staticmethod
+    def _locate_backbone_hmms(orthophyl_output: Path) -> Optional[Path]:
+        """Find a completed OrthoPhyl run's hmms_final/ dir, if it exists.
+
+        script_lib/functions.sh's ANI_ORTHOFINDER_TO_ALL_SEQS writes
+        <output>/OG_alignmentsToHMM/hmms_final/*.hmm -- the same directory
+        ReLeaf.sh looks for (ReLeaf.sh:86-88). Returns None if the run never
+        produced one (e.g. its genome count never exceeded --ani-shortlist,
+        so OrthoPhyl.sh's MASH-shortlist/HMM-building branch never engaged).
+        """
+        hmms_dir = orthophyl_output / "OG_alignmentsToHMM" / "hmms_final"
+        if hmms_dir.is_dir() and any(hmms_dir.glob("*.hmm")):
+            return hmms_dir
+        return None
 
     @staticmethod
     def _locate_species_tree(orthophyl_output: Path) -> Path:
@@ -1408,15 +1584,25 @@ class PipelineWrapper:
 
     def _build_subclade(self, taxon_name: str, entry: Dict, raw_dir: Path,
                         query_assemblies: List[Dict], taxonomy: str,
-                        is_subclade: bool, force: bool = False):
+                        is_subclade: bool, force: bool = False,
+                        hmm_assign_dir: Optional[Path] = None,
+                        genomes_to_keep: Optional[Path] = None):
         """QC one subclade's raw members, run OrthoPhyl, and create its DB entry.
 
         For the unpartitioned case (is_subclade=False) sc_name == taxon_name and
         the whole raw set is the member list. CheckM2 QC runs HERE (deferred from
-        partition time), only on this subclade's members.
+        partition time), only on this subclade's members -- UNLESS the caller
+        already QC'd it and passes the result as `genomes_to_keep` (the
+        --megatree-hmm-reuse path QCs every subclade upfront to pick backbone
+        reps before any subclade is built, so this skips a redundant,
+        expensive CheckM2 re-run).
 
         force=True overwrites an existing DB dir for this subclade (e.g. when
         rebuilding), rather than aborting on FileExistsError.
+
+        hmm_assign_dir (optional): threaded straight into _run_orthophyl --
+        see its docstring. Used by the opt-in --megatree-hmm-reuse path to
+        give every subclade the megatree backbone's orthogroup HMMs.
         """
         sc_name = entry['name']
         sc_id = entry.get('subclade_id')
@@ -1433,7 +1619,10 @@ class PipelineWrapper:
         ckey = sc_name  # checkpoint key component (already suffixed for subclades)
 
         # ---- QC ----
-        if self._check_checkpoint(f"qc_{ckey}") and self.resume:
+        if genomes_to_keep is not None:
+            logger.info(f"  ✓ Using caller-provided QC result for {sc_name}")
+            self._write_checkpoint(f"qc_{ckey}")
+        elif self._check_checkpoint(f"qc_{ckey}") and self.resume:
             logger.info(f"  ✓ QC already complete for {sc_name} (resuming)")
             genomes_to_keep = subclade_dir / "genomes_to_keep"
         else:
@@ -1475,7 +1664,8 @@ class PipelineWrapper:
                 input_dir=genomes_to_keep,
                 output_dir=orthophyl_output,
                 taxon_name=sc_name,
-                assemblies=query_assemblies)
+                assemblies=query_assemblies,
+                hmm_assign_dir=hmm_assign_dir)
             self._write_checkpoint(f"orthophyl_{ckey}")
 
         # ---- Database entry ----
@@ -2028,9 +2218,22 @@ class PipelineWrapper:
         input_dir: Path,
         output_dir: Path,
         taxon_name: str,
-        assemblies: List[Dict]
+        assemblies: List[Dict],
+        hmm_assign_dir: Optional[Path] = None,
     ):
-        """Run OrthoPhyl on combined genome set."""
+        """Run OrthoPhyl on combined genome set.
+
+        hmm_assign_dir (optional): a directory of precomputed <OG_id>.hmm
+        files (e.g. a megatree backbone's hmms_final/). When given, passed
+        through as OrthoPhyl.sh's --hmm-assign-dir, which skips MASH-
+        shortlisting/OrthoFinder entirely and assigns this run's genes into
+        the EXTERNAL orthogroup set via hmmsearch, aligning each from
+        scratch -- this run still computes its own alignment/trim/tree model,
+        only orthogroup identity is shared. -n/ani_n below is irrelevant on
+        that path (OrthoPhyl.sh's --hmm-assign-dir branch never reaches the
+        MASH-shortlist size check), so it's passed unconditionally for
+        simplicity rather than conditionally omitted.
+        """
         # Force the MASH-shortlist/HMM-building branch of OrthoPhyl.sh's MAIN_PIPE
         # (ANI_ORTHOFINDER_TO_ALL_SEQS) regardless of input size -- see ani_shortlist's
         # docstring in __init__. n_genomes - 1 guarantees OrthoPhyl.sh's own
@@ -2048,6 +2251,8 @@ class PipelineWrapper:
             '-o', 'CDS',
             '-n', str(ani_n),
         ]
+        if hmm_assign_dir is not None:
+            cmd.extend(['--hmm-assign-dir', str(hmm_assign_dir)])
 
         logger.info(f"\n  Running OrthoPhyl for {taxon_name}...")
         self._log_command(cmd)
@@ -3300,6 +3505,17 @@ Examples:
              'Default off (every subclade is built eagerly).'
     )
     parser.add_argument(
+        '--megatree-hmm-reuse',
+        action='store_true',
+        help='Megatree only: give every subclade the BACKBONE run\'s orthogroup '
+             'HMMs (via OrthoPhyl.sh --hmm-assign-dir) instead of each subclade '
+             'running its own independent OrthoFinder orthogroup inference -- '
+             'each subclade still computes its OWN alignment/trim/tree model. '
+             'Requires building the backbone BEFORE any subclade (reordered from '
+             'the default --megatree flow), so it is opt-in rather than silently '
+             'changing --megatree\'s existing runtime shape. Default off.'
+    )
+    parser.add_argument(
         '--placement',
         choices=['subclade', 'backbone'],
         default='subclade',
@@ -3383,6 +3599,7 @@ Examples:
         subclade_size=args.subclade_size,
         conflict_min_support=args.conflict_min_support,
         megatree_lazy=args.megatree_lazy,
+        megatree_hmm_reuse=args.megatree_hmm_reuse,
         placement=args.placement,
         genome_dir=args.genome_dir,
         clade_name=args.clade_name,

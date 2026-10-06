@@ -795,6 +795,60 @@ ANI_ORTHOFINDER_TO_ALL_SEQS () {
 	&& touch $store/ANI_ORTHOFINDER_TO_ALL_SEQS.complete
 }
 
+HMM_ASSIGN_FROM_EXTERNAL () {
+	echo '
+	###################################################
+	##### Assign Orthogroups From External HMMs  #####
+	##### (e.g. a megatree backbone or BUSCO set) #####
+	###################################################
+	'
+	date
+	func_timing_start
+	local hmm_assign_dir=$1
+
+	local new_hmm_output=$wd/hmm_assign_out
+	local new_OG_prots=$wd/hmm_assign_new_OG_prots
+	mkdir -p $new_hmm_output
+	mkdir -p $new_OG_prots
+
+	# HMM_search (script_lib/functions_addem.sh) hmmsearches this run's
+	#   all_prots.nm.fa against every <OG>.hmm in hmm_assign_dir, applies the
+	#   same no-paralog score filter ANI_ORTHOFINDER_TO_ALL_SEQS uses, and
+	#   writes hits to $new_OG_prots/<OG>.faa (silently omitted if an OG has
+	#   zero hits in this genome set -- not every orthogroup in the external
+	#   HMM set need be present in every subclade).
+	HMM_search \
+		$new_hmm_output \
+		$hmm_assign_dir \
+		$wd/all_prots.nm.fa \
+		$new_OG_prots
+
+	# Align each assigned OG from scratch (NOT mafft --add/--keeplength --
+	# there is no pre-existing alignment for this run to extend; this run's
+	# own alignment/trim/tree-model steps must be free to differ from
+	# whatever produced hmm_assign_dir). Mirrors the exact invocation
+	# OG_hmm_search uses above (functions.sh ANI_ORTHOFINDER_TO_ALL_SEQS).
+	local unmatched_log=$wd/hmm_assign_unmatched_OGs.txt
+	> $unmatched_log
+	for hmm_file in $hmm_assign_dir/*.hmm
+	do
+		local OG=$(basename ${hmm_file%.*})
+		if [ -s $new_OG_prots/${OG}.faa ]
+		then
+			mafft --quiet $new_OG_prots/${OG}.faa > $wd/AlignmentsProts/${OG}.faa
+		else
+			# No hits for this OG in this genome set. Logged (not an error)
+			# as a seam for a future "route unassigned genes through
+			# OrthoFinder for additional homologs" step -- nothing consumes
+			# this file yet.
+			echo "$OG" >> $unmatched_log
+		fi
+	done
+	echo "$(cat $unmatched_log | wc -l) of $(ls $hmm_assign_dir/*.hmm | wc -l) external OGs had no hits in this genome set (see $unmatched_log)"
+
+	GET_OG_NAMES $wd/OG_names $wd/AlignmentsProts/
+}
+
 REALIGN_ORTHOGROUP_PROTS () {
 	echo '
 	###################################################

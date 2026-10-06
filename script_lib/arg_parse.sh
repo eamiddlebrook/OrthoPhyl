@@ -47,6 +47,13 @@ Optional:
 	If \"-a\" is declared but you want to use the assemblies you have also provided, set \"-d genome\"
 	If \"-a\" not used but you want to use CDS (annotated within OrthoPhyl by Prodigal) for ANI subsetting, set \"-d CDS\"
 -T|--test  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast,TESTER_fasttest)
+--hmm-assign-dir  path to a directory of precomputed <OrthogroupID>.hmm files (e.g. from a prior
+	OrthoPhyl run's OG_alignmentsToHMM/hmms_final/). Skips OrthoFinder/MASH-shortlisting
+	entirely -- genes are instead assigned into these existing orthogroups via hmmsearch (same
+	mechanism ReLeaf uses to add a genome), then aligned from scratch and fed into the normal
+	TRIM/SCO_MIN_ALIGN/TREE_BUILD steps. Intended for building a subclade tree that shares
+	orthogroup identity with another already-built tree (e.g. a megatree backbone) without
+	sharing its alignments/trim/tree model.
 -h|--help  display a description and a super useful usage message
 ###############################################################\n
 To run test datasets:
@@ -331,8 +338,21 @@ ARG_PARSE () {
 				ARGS_SET+=T
 				# set variables specific for running OrthoPhyl on a test data set.
 				tester
-				shift 
+				shift
 				shift;;
+
+			--hmm-assign-dir) if [[ ! -n ${2} ]] ; then
+					echo "looks like the argument for --hmm-assign-dir is messed up"
+					USAGE
+					exit 1
+				fi
+				hmm_assign_dir=$(relative_absolute ${2})
+				if [[ ! -d "${hmm_assign_dir}" ]]; then
+					echo "WARNING: --hmm-assign-dir path does not exist: ${hmm_assign_dir}"
+					exit 1
+				fi
+				shift
+				shift ;;
 
 			\?) # Invalid option
 				echo "Error: Invalid option"

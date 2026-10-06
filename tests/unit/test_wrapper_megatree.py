@@ -321,6 +321,186 @@ class TestRunMegatree:
         assert registered == []
 
 
+class TestMegatreeHmmReuse:
+    """--megatree-hmm-reuse: backbone built FIRST (from reps picked off each
+    subclade's QC'd member pool), then every subclade is built passing
+    --hmm-assign-dir pointed at the backbone's hmms_final/, instead of each
+    subclade running its own independent OrthoFinder orthogroup inference.
+    Default (flag off) order/behavior is covered by TestRunMegatree above and
+    must stay byte-identical; these tests only exercise the opt-in path.
+    """
+
+    def _wire(self, w, wrapper_module, monkeypatch, n_subclades=2,
+             hmms_final=True):
+        """Stub every heavy dependency; hmms_final controls whether the fake
+        backbone run's _run_orthophyl stub actually creates hmms_final/*.hmm
+        (so the fallback-when-missing path can be tested too)."""
+        rec = {"ceiling": [], "partition": [], "qc": [], "build": [],
+               "subsample": [], "orthophyl": [], "graft_cmd": [], "db": [],
+               "register": []}
+
+        monkeypatch.setattr(w, "_enforce_total_genome_ceiling",
+                            lambda taxon, n: rec["ceiling"].append((taxon, n)))
+
+        def fake_partition(taxon, raw_dir, queries, max_size=None):
+            rec["partition"].append({"taxon": taxon, "max_size": max_size})
+            subs = [{"subclade_id": i + 1, "name": f"{taxon}_{i + 1}",
+                     "n_genomes": 3, "members_file": None, "sketch_file": None}
+                    for i in range(n_subclades)]
+            assignments = {}
+            for asm in queries:
+                assignments[Path(asm["assembly_path"]).name] = subs[0]["name"]
+            return {"partitioned": True, "subclades": subs,
+                    "query_assignments": assignments}
+        monkeypatch.setattr(w, "_partition_genomes", fake_partition)
+
+        def fake_qc(subclade_dir, raw_members, taxon_label, query_assemblies=None):
+            rec["qc"].append(taxon_label)
+            gtk = subclade_dir / "genomes_to_keep"
+            gtk.mkdir(parents=True, exist_ok=True)
+            (gtk / f"{taxon_label}_a.fna").write_text(">c\nAC\n")
+            return gtk
+        monkeypatch.setattr(w, "_qc_subclade", fake_qc)
+
+        monkeypatch.setattr(w, "_build_subclade",
+                            lambda **k: rec["build"].append(k))
+        monkeypatch.setattr(w, "_register_lazy_subclade",
+                            lambda **k: rec["register"].append(k))
+
+        def fake_subsample(taxon, raw_dir, target, must_keep_stems=None):
+            rec["subsample"].append({"taxon": taxon, "target": target,
+                                     "seeds": must_keep_stems})
+            sel = w.orthophyl_dir / "subsample" / taxon / "selected"
+            sel.mkdir(parents=True, exist_ok=True)
+            (sel / f"{taxon}_rep.fna").write_text(">c\nAC\n")
+            return sel
+        monkeypatch.setattr(w, "_subsample_genomes", fake_subsample)
+
+        def fake_run_orthophyl(input_dir, output_dir, taxon_name, assemblies,
+                               hmm_assign_dir=None):
+            rec["orthophyl"].append({"taxon_name": taxon_name,
+                                     "hmm_assign_dir": hmm_assign_dir})
+            if taxon_name.endswith("_backbone") and hmms_final:
+                hmm_dir = output_dir / "OG_alignmentsToHMM" / "hmms_final"
+                hmm_dir.mkdir(parents=True, exist_ok=True)
+                (hmm_dir / "OG0000001.hmm").write_text("HMM\n")
+        monkeypatch.setattr(w, "_run_orthophyl", fake_run_orthophyl)
+        monkeypatch.setattr(w, "_locate_species_tree",
+                            lambda out: out / "tree.nwk")
+        monkeypatch.setattr(w, "_create_database_entry",
+                            lambda **k: rec["db"].append(k))
+
+        class FakeCompleted:
+            returncode = 0
+        def fake_run(cmd, *a, **k):
+            rec["graft_cmd"].append([str(x) for x in cmd])
+            return FakeCompleted()
+        monkeypatch.setattr(wrapper_module.subprocess, "run", fake_run)
+        return rec
+
+    def test_backbone_built_before_subclades(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True,
+                          megatree_hmm_reuse=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2)
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        for i in range(8):
+            (raw / f"g{i}.fna").write_text(">c\nAC\n")
+
+        w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                        query_assemblies=[_query(tmp_path)],
+                        taxonomy="d__Bacteria;g__Andreesenella")
+
+        # QC ran for both subclades BEFORE any _build_subclade call -- the
+        # backbone's OrthoPhyl run must be the first entry in rec["orthophyl"].
+        assert len(rec["qc"]) == 2
+        assert rec["orthophyl"][0]["taxon_name"] == "Andreesenella_backbone"
+        # Every subclade build received the backbone's hmms_final/ dir.
+        assert len(rec["build"]) == 2
+        for b in rec["build"]:
+            assert b["hmm_assign_dir"] is not None
+            assert b["hmm_assign_dir"].name == "hmms_final"
+            # genomes_to_keep was passed through (no redundant QC in _build_subclade).
+            assert b["genomes_to_keep"] is not None
+
+    def test_falls_back_to_independent_when_no_hmms_final(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """If the backbone run never produces hmms_final/ (e.g. too few
+        pooled reps to cross --ani-shortlist), subclades still build, just
+        without hmm_assign_dir -- not a hard failure."""
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True,
+                          megatree_hmm_reuse=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2,
+                         hmms_final=False)
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        for i in range(8):
+            (raw / f"g{i}.fna").write_text(">c\nAC\n")
+
+        w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                        query_assemblies=[_query(tmp_path)],
+                        taxonomy="d__Bacteria;g__Andreesenella")
+
+        assert len(rec["build"]) == 2
+        for b in rec["build"]:
+            assert b["hmm_assign_dir"] is None
+
+    def test_megatree_lazy_still_registers_with_hmm_reuse(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """--megatree-lazy + --megatree-hmm-reuse together: a subclade with
+        no query is still only registered, contributing no backbone reps and
+        never QC'd."""
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True,
+                          megatree_hmm_reuse=True, megatree_lazy=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2)
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        for i in range(8):
+            (raw / f"g{i}.fna").write_text(">c\nAC\n")
+
+        # fake_partition assigns the query to subclade "_1" only, so "_2" has
+        # no query.
+        w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                        query_assemblies=[_query(tmp_path)],
+                        taxonomy="d__Bacteria;g__Andreesenella")
+
+        assert len(rec["register"]) == 1
+        assert rec["register"][0]["entry"]["name"] == "Andreesenella_2"
+        assert len(rec["build"]) == 1
+        assert rec["build"][0]["entry"]["name"] == "Andreesenella_1"
+        # Only the built subclade was QC'd -- the lazy one never ran QC.
+        assert rec["qc"] == ["Andreesenella_1"]
+
+    def test_default_order_independent_when_flag_off(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """Regression guard: with --megatree-hmm-reuse NOT set, no QC call
+        happens before the FIRST subclade build (today's independent-build
+        order), confirming the reorder is fully opt-in."""
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2)
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        for i in range(8):
+            (raw / f"g{i}.fna").write_text(">c\nAC\n")
+
+        w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                        query_assemblies=[_query(tmp_path)],
+                        taxonomy="d__Bacteria;g__Andreesenella")
+
+        # Default path never calls _qc_subclade directly (it's inside the
+        # real _build_subclade, which is stubbed here), and the backbone
+        # OrthoPhyl run is LAST, not first.
+        assert rec["qc"] == []
+        assert rec["orthophyl"][-1]["taxon_name"] == "Andreesenella_backbone"
+        for b in rec["build"]:
+            assert b.get("hmm_assign_dir") is None
+
+
 class TestSubcladeBuildPhase:
     """Phase 3c: build a lazily-registered subclade on demand, then ReLeaf
     the waiting queries onto it."""

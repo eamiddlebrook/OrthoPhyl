@@ -497,6 +497,35 @@ class TestRunOrthophylCommand:
         cmd = recording_run[0]["cmd"]
         assert cmd[cmd.index("-n") + 1] == "5"  # min(5, 50-1)
 
+    def test_hmm_assign_dir_omitted_by_default(
+            self, Wrapper, tmp_path, recording_run):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        w.logs_dir.mkdir(parents=True, exist_ok=True)
+        input_dir = self._make_genome_dir(tmp_path, 6)
+
+        w._run_orthophyl(
+            input_dir=input_dir, output_dir=tmp_path / "out_run",
+            taxon_name="Foo", assemblies=[])
+
+        cmd = recording_run[0]["cmd"]
+        assert "--hmm-assign-dir" not in cmd
+
+    def test_hmm_assign_dir_threaded_through_when_given(
+            self, Wrapper, tmp_path, recording_run):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        w.logs_dir.mkdir(parents=True, exist_ok=True)
+        input_dir = self._make_genome_dir(tmp_path, 6)
+        hmm_dir = tmp_path / "backbone_hmms"
+        hmm_dir.mkdir()
+
+        w._run_orthophyl(
+            input_dir=input_dir, output_dir=tmp_path / "out_run",
+            taxon_name="Foo", assemblies=[], hmm_assign_dir=hmm_dir)
+
+        cmd = recording_run[0]["cmd"]
+        assert "--hmm-assign-dir" in cmd
+        assert cmd[cmd.index("--hmm-assign-dir") + 1] == str(hmm_dir)
+
 
 class TestCreateDatabaseEntryLogFile:
     """_create_database_entry builds log_file = self.logs_dir /

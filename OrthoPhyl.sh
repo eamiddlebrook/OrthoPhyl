@@ -25,6 +25,13 @@ export script_home=$(dirname "$(readlink -f "$0")")
 #############################################
 # import main_script functions
 source $script_home/script_lib/functions.sh
+# functions_addem.sh is ReLeaf's library, but HMM_search (the hmmsearch-
+#   against-precomputed-OGs primitive) is reused here too, by
+#   HMM_ASSIGN_FROM_EXTERNAL/--hmm-assign-dir. Defines functions only (no
+#   top-level side effects), so sourcing it here is safe even when
+#   --hmm-assign-dir is never used. No name collisions with functions.sh
+#   except the byte-identical safe_percent helper.
+source $script_home/script_lib/functions_addem.sh
 source $script_home/script_lib/run_setup.sh
 source $script_home/script_lib/arg_parse.sh
 #load custom aliases...might get rid of
@@ -184,44 +191,57 @@ MAIN_PIPE () {
 	FIX_TRANS_NAMES $trans
 	FIX_PROTS_NAMES $prots
 
-	# test if user input preannotated transcripts 
-        #   or wants to use transcripts for the ANI subsetting
-	if [ "$ANI_trans" = true ]
-	then
-		ANI_dataset=$trans
-	elif [ "$ANI_genome" = true ]
-	then
-		ANI_dataset=$genome_dir
-	else
-		echo "PANIC: no dataset declared for ANI_species_shortlist to chew on"
-		exit
-	fi
-    
-	# find subset of genomes or transcripts that represents diversity of full set
-	#   if number of sequence files is greater than the max number to send through orthofinder
-	if [[ $(ls $ANI_dataset | wc -l)  -gt $ANI_shortlist ]]
+	# --hmm-assign-dir: skip MASH-shortlisting/ORTHO_RUN/
+	#   ANI_ORTHOFINDER_TO_ALL_SEQS entirely -- genes are instead assigned
+	#   into a precomputed external orthogroup set (e.g. a megatree
+	#   backbone's hmms_final/) via hmmsearch, then aligned from scratch.
+	#   ANI=true so SCO_MIN_ALIGN counts SCO membership directly from
+	#   alignment headers rather than a (nonexistent, since ORTHO_RUN never
+	#   ran) Orthogroups.GeneCount.tsv.
+	if [[ ${hmm_assign_dir+x} ]]
 	then
 		export ANI=true
-		#ANI script makes a prot directory from shortlist for orthofinder ($prots.shortlist)
-		MASH_species_shortlist $ANI_dataset $ANI_shortlist $threads $prots $ANI_genome_picking
-		#ANI_species_shortlist $ANI_dataset $ANI_shortlist $threads
-		prots4ortho=${prots}.shortlist
-		ORTHO_RUN $prots4ortho
-		# find genes from full set for each OG (make HMM profile and search against all prots)
-		ANI_ORTHOFINDER_TO_ALL_SEQS \
-			$orthodir/Orthogroups/Orthogroups.GeneCount.tsv \
-			$orthodir/MultipleSequenceAlignments \
-			$wd/all_prots.nm.fa \
-			$hmm_reps \
-			$store/OG_alignmentsToHMM
-		GET_OG_NAMES $wd/OG_names $wd/AlignmentsProts/
-		
+		HMM_ASSIGN_FROM_EXTERNAL $hmm_assign_dir
 	else
-		# this is broken now....need to update for MACSE
-		prots4ortho=${prots}.fixed
-		ORTHO_RUN ${prots4ortho}
-		REALIGN_ORTHOGROUP_PROTS
-		GET_OG_NAMES $wd/OG_names $orthodir/MultipleSequenceAlignments
+		# test if user input preannotated transcripts
+	        #   or wants to use transcripts for the ANI subsetting
+		if [ "$ANI_trans" = true ]
+		then
+			ANI_dataset=$trans
+		elif [ "$ANI_genome" = true ]
+		then
+			ANI_dataset=$genome_dir
+		else
+			echo "PANIC: no dataset declared for ANI_species_shortlist to chew on"
+			exit
+		fi
+
+		# find subset of genomes or transcripts that represents diversity of full set
+		#   if number of sequence files is greater than the max number to send through orthofinder
+		if [[ $(ls $ANI_dataset | wc -l)  -gt $ANI_shortlist ]]
+		then
+			export ANI=true
+			#ANI script makes a prot directory from shortlist for orthofinder ($prots.shortlist)
+			MASH_species_shortlist $ANI_dataset $ANI_shortlist $threads $prots $ANI_genome_picking
+			#ANI_species_shortlist $ANI_dataset $ANI_shortlist $threads
+			prots4ortho=${prots}.shortlist
+			ORTHO_RUN $prots4ortho
+			# find genes from full set for each OG (make HMM profile and search against all prots)
+			ANI_ORTHOFINDER_TO_ALL_SEQS \
+				$orthodir/Orthogroups/Orthogroups.GeneCount.tsv \
+				$orthodir/MultipleSequenceAlignments \
+				$wd/all_prots.nm.fa \
+				$hmm_reps \
+				$store/OG_alignmentsToHMM
+			GET_OG_NAMES $wd/OG_names $wd/AlignmentsProts/
+
+		else
+			# this is broken now....need to update for MACSE
+			prots4ortho=${prots}.fixed
+			ORTHO_RUN ${prots4ortho}
+			REALIGN_ORTHOGROUP_PROTS
+			GET_OG_NAMES $wd/OG_names $orthodir/MultipleSequenceAlignments
+		fi
 	fi
 
 	# trim protein sequences and also make a file for 

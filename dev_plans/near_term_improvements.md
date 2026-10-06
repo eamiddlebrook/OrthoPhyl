@@ -49,9 +49,46 @@ manual-download-instructions mode.
 (`script_dir` is already computed as `Path(__file__).parent` at `:253`) when
 `--gather-script` is omitted, rather than requiring explicit opt-in every time.
 
-## 3. Megatree subclades reuse the backbone's HMM gene models only
+## 3. Megatree subclades reuse the backbone's HMM gene models only [DONE]
 
-**Ask**: Make megatree subclades use the precomputed "representative subsample"
+**Status**: Implemented. New `OrthoPhyl.sh --hmm-assign-dir <path>` flag
+(`script_lib/arg_parse.sh`) branches `MAIN_PIPE` to a new
+`HMM_ASSIGN_FROM_EXTERNAL` function (`script_lib/functions.sh`) that calls
+`HMM_search` (reused verbatim from `script_lib/functions_addem.sh`, now also
+sourced by `OrthoPhyl.sh`) against the given external HMM dir, aligns each
+assigned OG from scratch with plain `mafft --quiet` (NOT the extend-only
+`ADD_2_ALIGNMENTS`/`mafft --add --keeplength`), and drops the result into
+`$wd/AlignmentsProts/<OG>.faa` -- the same slot `TRIM`/`SCO_MIN_ALIGN`/
+`TRIMAL_backtrans`/`TREE_BUILD` already consume unmodified. OGs with zero
+hits are logged to `$wd/hmm_assign_unmatched_OGs.txt` (the seam for item 4
+below) rather than erroring.
+
+`orthophyl_pipeline_wrapper.py`'s `_run_megatree` now has an opt-in
+`--megatree-hmm-reuse` flag (default off, so plain `--megatree` is
+byte-identical to before): when set, `_build_megatree_subclades_hmm_reuse`
+QCs every subclade and pools backbone reps FIRST, builds the backbone tree
+(producing `hmms_final/`), then builds every subclade passing
+`hmm_assign_dir=<backbone's hmms_final/>` into `_build_subclade` ->
+`_run_orthophyl` (`--hmm-assign-dir`). Falls back to the default independent
+per-subclade-OrthoFinder path with a warning if the backbone never produces
+`hmms_final/` (e.g. too few pooled reps to cross `--ani-shortlist`).
+Default path's exact call order/behavior is preserved in a sibling
+`_build_megatree_subclades_independent` method and covered by the
+pre-existing `TestRunMegatree` suite, which still passes unmodified.
+
+Verified end-to-end with real tools (chloroplast genomes): built a real
+8-genome backbone (forced through the HMM-building branch via `-n 3`), then
+ran a disjoint 6-genome subclade with `--hmm-assign-dir` pointed at the
+backbone's `hmms_final/`. Confirmed no `OrthoFinder`/`Results_*` directory
+anywhere in the subclade's output, a valid tree was produced, 84/85 backbone
+OGs got assigned (1 correctly logged to `hmm_assign_unmatched_OGs.txt`), and
+every assigned OG ID in the subclade's `AlignmentsProts/` is a subset of the
+backbone's HMM filenames (no foreign IDs). Full existing integration suite
+(`tests/integration/test_megatree_lazy.py`, 9 tests, real subprocesses) still
+passes with the new code present but the flag unused, confirming the default
+path is unaffected.
+
+Original ask (kept for context): Make megatree subclades use the precomputed "representative subsample"
 clade's (i.e. the backbone's) HMM gene models, similar to ReLeaf — but hold off on
 reusing anything else from that run (alignments, trim, evolutionary/tree model),
 since those might legitimately differ by subclade (gene content, divergence).
@@ -87,16 +124,16 @@ orthogroup IDs. Then let the subclade run its OWN alignment, trimming, and
 tree-model/branch-length steps on those assigned genes — explicitly NOT reusing
 the backbone's alignments or evolutionary model, per the user's caveat.
 
-**Shares item 4's open design snag**: `HMM_search`'s only existing downstream
-consumer, `ADD_2_ALIGNMENTS` (`script_lib/functions_addem.sh:265-326`), doesn't
-align from scratch — it always does `mafft --add $new_OG_seqs/... --keeplength
-$OG_alignment` (`:316`), i.e. it only ever *extends* a pre-existing alignment at
-fixed column coordinates. Since this item explicitly does NOT reuse the
-backbone's alignment, there is no "old alignment" to extend here either — same
-gap as item 4, not a separate one. Whatever new code path item 4 ends up needing
-("take HMM-identified sequences for a group and align them fresh, no old
-alignment required") is also exactly what item 3 needs. Solve once, reuse for
-both.
+**Align-from-scratch gap (shared with item 4): SOLVED as part of item 3.**
+`HMM_search`'s pre-existing downstream consumer, `ADD_2_ALIGNMENTS`
+(`script_lib/functions_addem.sh:265-326`), only ever *extends* a pre-existing
+alignment (`mafft --add --keeplength`, `:316`) — no use here, since there's
+no backbone alignment to extend. Item 3's new `HMM_ASSIGN_FROM_EXTERNAL`
+(`script_lib/functions.sh`) instead aligns each HMM-assigned OG from scratch
+with plain `mafft --quiet` (mirroring `OG_hmm_search`'s own precedent) and
+drops it straight into `$wd/AlignmentsProts/<OG>.faa`. This is exactly the
+"align fresh, no old alignment required" primitive item 4 also needs — reuse
+it directly rather than re-solving.
 
 ## 4. Scaffold support for an external HMM set (e.g. BUSCO)
 
@@ -104,10 +141,23 @@ both.
 BUSCO) to identify "easily identifiable" homologs directly, then route only the
 remaining unclassified genes through the standard OrthoFinder path.
 
-**Current behavior**: no existing scaffolding. Only mention anywhere in the repo
-is doc text (`README_OrthoPhyl_ReLeaf.md:358`) noting OrthoPhyl "does not robustly
-compute SCOs (like BUSCOs)... does not do any modeling to ensure species
-tree-like behavior." No code, flags, or TODOs reference BUSCO or external HMMs.
+**Partially unblocked by item 3**: `--hmm-assign-dir <path>` (new
+`OrthoPhyl.sh` flag) already does "assign genes into a precomputed external
+HMM set, align fresh, feed into the normal TRIM/SCO_MIN_ALIGN/TREE_BUILD
+pipeline" for ANY directory of `<id>.hmm` files — it has no dependency on
+those HMMs having come from a prior OrthoPhyl run specifically. In principle
+pointing it at a BUSCO HMM set (renamed `<BUSCO_ID>.hmm`) already gets the
+"classify easy orthologs via external HMMs" half of this ask working today,
+untested. What's still missing for the FULL ask is the second half: routing
+HMM-*unmatched* genes through OrthoFinder for additional homologs, rather
+than just logging them (today's `$wd/hmm_assign_unmatched_OGs.txt`, written
+by `HMM_ASSIGN_FROM_EXTERNAL`, is the seam — nothing consumes it yet).
+
+**Current behavior otherwise**: no other scaffolding. Only other mention
+anywhere in the repo is doc text (`README_OrthoPhyl_ReLeaf.md:358`) noting
+OrthoPhyl "does not robustly compute SCOs (like BUSCOs)... does not do any
+modeling to ensure species tree-like behavior." No flags/TODOs reference
+BUSCO by name.
 
 This shares its core mechanism with #3: `HMM_search` doesn't care where its
 `hmm_dir` came from — in principle it could point at a directory of
