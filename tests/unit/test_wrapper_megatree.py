@@ -9,6 +9,7 @@ subprocess, DB creation) is mocked; these tests assert the wiring/dispatch, not
 the bioinformatics.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -321,6 +322,146 @@ class TestRunMegatree:
         assert registered == []
 
 
+class TestMegatreeLazyAllDeferred:
+    """Regression test for the real-world bug: --taxon create mode has NO
+    query at all, so with --megatree-lazy EVERY subclade's `queries_here` is
+    empty and every one gets lazily registered. Before the fix, this left
+    backbone_genomes/ empty -> OrthoPhyl.sh silently built a tree from
+    nothing -> megatree_graft.py crashed on a nonexistent backbone tree
+    file. After the fix, _register_lazy_subclade itself contributes a few
+    QC'd backbone reps, so the backbone always has real input, and the
+    grafter step is skipped (not crashed) when there are zero subclade trees
+    to graft."""
+
+    def _wire(self, w, wrapper_module, monkeypatch, n_subclades=2,
+             register_rep_count=1):
+        rec = {"ceiling": [], "partition": [], "register": [], "build": [],
+               "orthophyl": [], "graft_cmd": [], "db": []}
+
+        monkeypatch.setattr(w, "_enforce_total_genome_ceiling",
+                            lambda taxon, n: rec["ceiling"].append((taxon, n)))
+
+        def fake_partition(taxon, raw_dir, queries, max_size=None):
+            rec["partition"].append({"taxon": taxon, "max_size": max_size})
+            subs = [{"subclade_id": i + 1, "name": f"{taxon}_{i + 1}",
+                     "n_genomes": 3, "members_file": None, "sketch_file": None}
+                    for i in range(n_subclades)]
+            # No queries at all (create mode) -> empty assignments regardless.
+            return {"partitioned": True, "subclades": subs,
+                    "query_assignments": {}}
+        monkeypatch.setattr(w, "_partition_genomes", fake_partition)
+
+        def fake_register(taxon_name, entry, raw_dir, taxonomy, backbone_dir):
+            rec["register"].append({"taxon_name": taxon_name, "entry": entry})
+            rep_stems = []
+            for i in range(register_rep_count):
+                stem = f"{entry['name']}_rep{i}"
+                (backbone_dir / f"{stem}.fna").write_text(">c\nAC\n")
+                rep_stems.append(stem)
+            return rep_stems
+        monkeypatch.setattr(w, "_register_lazy_subclade", fake_register)
+
+        monkeypatch.setattr(w, "_build_subclade",
+                            lambda **k: rec["build"].append(k))
+        def fake_run_orthophyl(input_dir, output_dir, taxon_name, assemblies,
+                               hmm_assign_dir=None):
+            rec["orthophyl"].append({"taxon_name": taxon_name})
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "tree.nwk").write_text("(a,b);")
+        monkeypatch.setattr(w, "_run_orthophyl", fake_run_orthophyl)
+        monkeypatch.setattr(w, "_locate_species_tree",
+                            lambda out: out / "tree.nwk")
+        monkeypatch.setattr(w, "_create_database_entry",
+                            lambda **k: rec["db"].append(k))
+
+        class FakeCompleted:
+            returncode = 0
+        def fake_run(cmd, *a, **k):
+            rec["graft_cmd"].append([str(x) for x in cmd])
+            return FakeCompleted()
+        monkeypatch.setattr(wrapper_module.subprocess, "run", fake_run)
+        return rec
+
+    def _raw_dir(self, w, n=8):
+        raw = w.orthophyl_dir / "downloads" / "Andreesenella" / "assemblies_all.TMP"
+        raw.mkdir(parents=True, exist_ok=True)
+        for i in range(n):
+            (raw / f"g{i}.fna").write_text(">c\nAC\n")
+        return raw
+
+    def test_default_order_backbone_gets_lazy_reps_grafter_skipped(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True,
+                          megatree_lazy=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2)
+        raw = self._raw_dir(w)
+
+        w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                        query_assemblies=[], taxonomy="d__Bacteria;g__Andreesenella")
+
+        # Every subclade was registered (lazy), none built eagerly.
+        assert len(rec["register"]) == 2
+        assert rec["build"] == []
+        # The backbone build ran with non-empty input (both lazy subclades'
+        # reps landed in backbone_genomes/ BEFORE this call).
+        assert len(rec["orthophyl"]) == 1
+        backbone_dir = (w.orthophyl_dir / "megatree" / "Andreesenella" /
+                        "backbone_genomes")
+        assert len(list(backbone_dir.glob("*.fna"))) == 2
+        # No subclade trees exist -> grafter must be SKIPPED, not crashed.
+        assert rec["graft_cmd"] == []
+        # The backbone tree is still published as the megatree.
+        merged_tree = (w.results_dir / "trees" / "orthophyl" /
+                      "Andreesenella_megatree.nwk")
+        assert merged_tree.exists()
+        conflict_report = (w.results_dir / "trees" / "orthophyl" /
+                           "Andreesenella_megatree_conflicts.json")
+        assert json.loads(conflict_report.read_text()) == []
+        # Taxon DB still created from the backbone run.
+        assert len(rec["db"]) == 1
+        assert rec["db"][0]["subclade_meta"]["is_backbone"] is True
+
+    def test_default_order_raises_if_backbone_would_be_empty(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """Defense-in-depth: if even the lazy-registration reps come back
+        empty for every subclade (e.g. QC drops everything everywhere), fail
+        fast with an actionable message instead of running OrthoPhyl.sh on
+        an empty directory."""
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True,
+                          megatree_lazy=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2,
+                         register_rep_count=0)
+        raw = self._raw_dir(w)
+
+        with pytest.raises(RuntimeError, match="0 genomes"):
+            w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                            query_assemblies=[],
+                            taxonomy="d__Bacteria;g__Andreesenella")
+        assert rec["orthophyl"] == []
+
+    def test_hmm_reuse_order_backbone_gets_lazy_reps_grafter_skipped(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """Same scenario, --megatree-hmm-reuse order: lazy registration must
+        happen before the backbone build in THIS ordering too (Phase A, not
+        the old Phase C which ran after the backbone)."""
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True,
+                          megatree_lazy=True, megatree_hmm_reuse=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2)
+        raw = self._raw_dir(w)
+
+        w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                        query_assemblies=[], taxonomy="d__Bacteria;g__Andreesenella")
+
+        assert len(rec["register"]) == 2
+        assert rec["build"] == []
+        assert len(rec["orthophyl"]) == 1
+        backbone_dir = (w.orthophyl_dir / "megatree" / "Andreesenella" /
+                        "backbone_genomes")
+        assert len(list(backbone_dir.glob("*.fna"))) == 2
+        assert rec["graft_cmd"] == []
+        assert len(rec["db"]) == 1
+
+
 class TestMegatreeHmmReuse:
     """--megatree-hmm-reuse: backbone built FIRST (from reps picked off each
     subclade's QC'd member pool), then every subclade is built passing
@@ -553,6 +694,23 @@ class TestSubcladeBuildPhase:
 
 
 class TestRegisterLazySubclade:
+    def _stub_qc_and_subsample(self, w, monkeypatch, tmp_path, n_kept=3):
+        """A lazy subclade is now QC'd + rep-picked at registration time (the
+        bugfix) -- stub those two steps so this suite stays at the mocked
+        wiring level, matching the rest of this file's convention."""
+        gtk = tmp_path / "gtk"
+        gtk.mkdir(exist_ok=True)
+        for i in range(n_kept):
+            (gtk / f"g{i}.fna").write_text(">c\nAC\n")
+        monkeypatch.setattr(w, "_qc_subclade", lambda *a, **k: gtk)
+
+        sel = tmp_path / "selected"
+        sel.mkdir(exist_ok=True)
+        if n_kept > 0:
+            (sel / "rep0.fna").write_text(">c\nAC\n")
+        monkeypatch.setattr(w, "_subsample_genomes", lambda *a, **k: sel)
+        return gtk, sel
+
     def test_writes_register_checkpoint_not_database_checkpoint(
             self, Wrapper, wrapper_module, tmp_path, monkeypatch):
         """Hazard 1: registration must use its OWN register_<name> checkpoint,
@@ -560,6 +718,7 @@ class TestRegisterLazySubclade:
         on-demand build is not skipped by a checkpoint set at registration
         time."""
         w = _make_wrapper(Wrapper, tmp_path)
+        self._stub_qc_and_subsample(w, monkeypatch, tmp_path)
 
         class FakeCompleted:
             returncode = 0
@@ -569,9 +728,63 @@ class TestRegisterLazySubclade:
         entry = {"name": "Andreesenella_2", "subclade_id": 2, "n_genomes": 90,
                  "sketch_file": str(tmp_path / "s.msh"),
                  "members_file": str(tmp_path / "m.txt")}
+        backbone_dir = tmp_path / "backbone_genomes"
+        backbone_dir.mkdir()
         w._register_lazy_subclade(
             taxon_name="Andreesenella", entry=entry, raw_dir=tmp_path / "raw",
-            taxonomy="d__Bacteria;g__Andreesenella")
+            taxonomy="d__Bacteria;g__Andreesenella", backbone_dir=backbone_dir)
 
         assert w._check_checkpoint("register_Andreesenella_2")
         assert not w._check_checkpoint("database_Andreesenella_2")
+
+    def test_stages_backbone_reps_before_registering(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """The bugfix itself: a lazy subclade must still contribute QC'd
+        backbone reps -- staged into backbone_dir -- even though its own
+        full tree build is deferred."""
+        w = _make_wrapper(Wrapper, tmp_path)
+        self._stub_qc_and_subsample(w, monkeypatch, tmp_path, n_kept=3)
+
+        class FakeCompleted:
+            returncode = 0
+        monkeypatch.setattr(wrapper_module.subprocess, "run",
+                            lambda *a, **k: FakeCompleted())
+
+        entry = {"name": "Andreesenella_3", "subclade_id": 3, "n_genomes": 50}
+        backbone_dir = tmp_path / "backbone_genomes"
+        backbone_dir.mkdir()
+        rep_stems = w._register_lazy_subclade(
+            taxon_name="Andreesenella", entry=entry, raw_dir=tmp_path / "raw",
+            taxonomy="d__Bacteria;g__Andreesenella", backbone_dir=backbone_dir)
+
+        assert rep_stems == ["rep0"]
+        assert (backbone_dir / "rep0.fna").exists()
+
+    def test_zero_survivors_contributes_no_reps_without_failing(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """If QC drops every member of a lazy subclade, it must contribute
+        zero reps (with a warning) rather than aborting the whole taxon --
+        other subclades must still get a chance to populate the backbone."""
+        w = _make_wrapper(Wrapper, tmp_path)
+        self._stub_qc_and_subsample(w, monkeypatch, tmp_path, n_kept=0)
+        subsample_calls = []
+        monkeypatch.setattr(
+            w, "_subsample_genomes",
+            lambda *a, **k: subsample_calls.append(1) or pytest.fail(
+                "must not subsample when QC kept 0 genomes"))
+
+        class FakeCompleted:
+            returncode = 0
+        monkeypatch.setattr(wrapper_module.subprocess, "run",
+                            lambda *a, **k: FakeCompleted())
+
+        entry = {"name": "Andreesenella_4", "subclade_id": 4, "n_genomes": 10}
+        backbone_dir = tmp_path / "backbone_genomes"
+        backbone_dir.mkdir()
+        rep_stems = w._register_lazy_subclade(
+            taxon_name="Andreesenella", entry=entry, raw_dir=tmp_path / "raw",
+            taxonomy="d__Bacteria;g__Andreesenella", backbone_dir=backbone_dir)
+
+        assert rep_stems == []
+        assert list(backbone_dir.iterdir()) == []
+        assert w._check_checkpoint("register_Andreesenella_4")

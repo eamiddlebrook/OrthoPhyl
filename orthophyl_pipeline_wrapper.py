@@ -1206,6 +1206,7 @@ class PipelineWrapper:
             if self._check_checkpoint(f"megatree_backbone_{taxon_name}") and self.resume:
                 logger.info(f"  ✓ Backbone tree already built for {taxon_name} (resuming)")
             else:
+                self._check_backbone_dir_nonempty(taxon_name, backbone_dir)
                 logger.info(f"\n  Building backbone tree from "
                             f"{len(subclade_specs)} subclade rep sets")
                 self._run_orthophyl(
@@ -1221,34 +1222,62 @@ class PipelineWrapper:
         merged_tree = megatree_dir / f"{taxon_name}_megatree.nwk"
         conflict_report = megatree_dir / f"{taxon_name}_megatree_conflicts.json"
 
-        cmd = ['python', str(self.megatree_grafter),
-               '--backbone', str(backbone_tree),
-               '--out-tree', str(merged_tree),
-               '--out-report', str(conflict_report),
-               '--min-support', str(self.conflict_min_support)]
+        subclade_args = []
         for sc_name, spec in sorted(subclade_specs.items()):
             if not spec['reps']:
                 logger.warning(f"    Subclade {sc_name} contributed no backbone "
                                f"reps; skipping its graft.")
                 continue
-            cmd.extend(['--subclade',
-                        f"{sc_name}:{spec['tree']}:{','.join(spec['reps'])}"])
-        self._log_command(cmd)
+            subclade_args.append(
+                ['--subclade', f"{sc_name}:{spec['tree']}:{','.join(spec['reps'])}"])
 
-        if self.dry_run:
-            logger.info(f"  [DRY RUN] Would graft {len(subclade_specs)} subclades "
-                        f"onto backbone -> {merged_tree}")
+        if not subclade_args:
+            # Every subclade was lazy (e.g. --megatree-lazy with no query
+            # anywhere, so none got its own full tree built) or none had
+            # usable reps -- megatree_graft.py's --subclade is required=True,
+            # so it would reject a call with zero of them. Nothing to graft:
+            # publish the backbone tree itself as the megatree.
+            logger.info(
+                f"  No subclade trees to graft for {taxon_name} "
+                f"(--megatree-lazy deferred all of them, or none had usable "
+                f"reps); publishing the backbone tree as the megatree.")
+            if not self.dry_run:
+                try:
+                    shutil.copy(backbone_tree, merged_tree)
+                except OSError as e:
+                    raise RuntimeError(
+                        f"Could not publish backbone tree as megatree for "
+                        f"{taxon_name}: {e}") from e
+                with open(conflict_report, 'w') as f:
+                    json.dump([], f, indent=2, sort_keys=True)
+                self._write_checkpoint(f"megatree_graft_{taxon_name}")
+            else:
+                logger.info(f"  [DRY RUN] Would publish backbone tree as "
+                            f"megatree -> {merged_tree}")
         else:
-            log_file = self.logs_dir / f"megatree_{taxon_name}.log"
-            with open(log_file, 'w') as f:
-                result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT,
-                                        text=True)
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"Megatree graft failed for {taxon_name}. Check log: {log_file}")
-            logger.info(f"  ✓ Megatree written: {merged_tree}")
-            logger.info(f"    Conflict report: {conflict_report}")
-            self._write_checkpoint(f"megatree_graft_{taxon_name}")
+            cmd = ['python', str(self.megatree_grafter),
+                   '--backbone', str(backbone_tree),
+                   '--out-tree', str(merged_tree),
+                   '--out-report', str(conflict_report),
+                   '--min-support', str(self.conflict_min_support)]
+            for args in subclade_args:
+                cmd.extend(args)
+            self._log_command(cmd)
+
+            if self.dry_run:
+                logger.info(f"  [DRY RUN] Would graft {len(subclade_args)} subclades "
+                            f"onto backbone -> {merged_tree}")
+            else:
+                log_file = self.logs_dir / f"megatree_{taxon_name}.log"
+                with open(log_file, 'w') as f:
+                    result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT,
+                                            text=True)
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"Megatree graft failed for {taxon_name}. Check log: {log_file}")
+                logger.info(f"  ✓ Megatree written: {merged_tree}")
+                logger.info(f"    Conflict report: {conflict_report}")
+                self._write_checkpoint(f"megatree_graft_{taxon_name}")
 
         # Create the taxon DB from the backbone run (coherent HMM set for
         # ReLeaf). Marked is_backbone so the router can tell it apart from a
@@ -1273,16 +1302,19 @@ class PipelineWrapper:
             queries_here = query_by_subclade.get(sc_name, [])
 
             # --megatree-lazy: a subclade with no query yet is only REGISTERED
-            # (built=false placeholder) rather than built, so an oversized
-            # taxon can be partitioned once and its subclades built
-            # incrementally as queries actually route to them. It contributes
-            # no backbone reps until it is eventually built.
+            # (built=false placeholder) rather than getting its own full tree
+            # built, so an oversized taxon can be partitioned once and its
+            # subclades built incrementally as queries actually route to
+            # them. It still contributes a few diverse backbone reps now
+            # (_register_lazy_subclade QCs it for that) -- otherwise a taxon
+            # where EVERY subclade is lazy (e.g. --taxon create mode has no
+            # query at all) would leave the backbone with zero genomes.
             if self.megatree_lazy and not queries_here:
                 logger.info(f"\n  Registering subclade {sc_name} for lazy "
                             f"build ({entry['n_genomes']} raw genomes, no query)")
                 self._register_lazy_subclade(
                     taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
-                    taxonomy=taxonomy)
+                    taxonomy=taxonomy, backbone_dir=backbone_dir)
                 continue
 
             logger.info(f"\n  Building subclade {sc_name} "
@@ -1325,15 +1357,24 @@ class PipelineWrapper:
         # genomes_to_keep per subclade is cached here so the later build
         # phase does not re-run (expensive) CheckM2 QC.
         genomes_to_keep_by_subclade: Dict[str, Path] = {}
-        lazy_entries: List[Dict] = []
         buildable_entries: List[Dict] = []
 
         for entry in subclades:
             sc_name = entry['name']
             queries_here = query_by_subclade.get(sc_name, [])
 
+            # Lazy subclades are QC'd + rep-picked HERE too (via
+            # _register_lazy_subclade), not deferred -- only their own full
+            # tree build is deferred. Must happen before Phase B's backbone
+            # build below, same reasoning as the default order's fix: a
+            # taxon where EVERY subclade is lazy must not leave the backbone
+            # with zero input genomes.
             if self.megatree_lazy and not queries_here:
-                lazy_entries.append(entry)
+                logger.info(f"\n  Registering subclade {sc_name} for lazy "
+                            f"build ({entry['n_genomes']} raw genomes, no query)")
+                self._register_lazy_subclade(
+                    taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
+                    taxonomy=taxonomy, backbone_dir=backbone_dir)
                 continue
             buildable_entries.append(entry)
 
@@ -1364,6 +1405,7 @@ class PipelineWrapper:
         if self._check_checkpoint(f"megatree_backbone_{taxon_name}") and self.resume:
             logger.info(f"  ✓ Backbone tree already built for {taxon_name} (resuming)")
         else:
+            self._check_backbone_dir_nonempty(taxon_name, backbone_dir)
             logger.info(f"\n  Building backbone tree from "
                         f"{len(buildable_entries)} subclade rep sets "
                         f"(--megatree-hmm-reuse: backbone built first)")
@@ -1381,14 +1423,8 @@ class PipelineWrapper:
                 f"HMM-building branch never engaged). Falling back to "
                 f"independent per-subclade builds.")
 
-        # ---- Phase C: register lazy subclades, build the rest ----
-        for entry in lazy_entries:
-            logger.info(f"\n  Registering subclade {entry['name']} for lazy "
-                        f"build ({entry['n_genomes']} raw genomes, no query)")
-            self._register_lazy_subclade(
-                taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
-                taxonomy=taxonomy)
-
+        # ---- Phase C: build every buildable (non-lazy) subclade ----
+        # Lazy subclades were already QC'd + registered in Phase A above.
         subclade_specs: Dict[str, Dict] = {}
         for entry in buildable_entries:
             sc_name = entry['name']
@@ -1418,6 +1454,30 @@ class PipelineWrapper:
             subclade_specs[sc_name] = {'tree': sc_tree, 'reps': rep_stems}
 
         return subclade_specs
+
+    def _check_backbone_dir_nonempty(self, taxon_name: str, backbone_dir: Path) -> None:
+        """Raise a clear, actionable error before handing an empty
+        backbone_dir to OrthoPhyl.sh -- which would otherwise silently no-op
+        on zero input genomes (no error, no tree), surfacing as a confusing
+        crash two steps later at the megatree_graft.py step instead of here.
+        Can legitimately happen if every subclade's QC drops all its
+        members, or every subclade contributed zero backbone reps.
+
+        Skipped during --dry-run: the subsample/stage steps that would have
+        populated backbone_dir are themselves no-ops in dry-run mode (see
+        _subsample_genomes/_stage_backbone_reps), so an empty dir there is
+        expected, not a real failure.
+        """
+        if self.dry_run:
+            return
+        n = len(list(backbone_dir.glob("*.fna")) +
+                list(backbone_dir.glob("*.fasta")))
+        if n == 0:
+            raise RuntimeError(
+                f"Megatree backbone for {taxon_name} would be built from 0 "
+                f"genomes -- every subclade's QC must have dropped all "
+                f"members, or none contributed backbone reps. Check "
+                f"per-subclade QC logs under logs/.")
 
     def _stage_backbone_reps(self, reps_dir: Path, backbone_dir: Path) -> List[str]:
         """Symlink (falling back to copy) every rep genome in reps_dir into
@@ -1711,23 +1771,70 @@ class PipelineWrapper:
             return False
 
     def _register_lazy_subclade(self, taxon_name: str, entry: Dict,
-                                raw_dir: Path, taxonomy: str):
-        """Register a subclade as built=false (no QC, no tree) via the DB creator.
+                                raw_dir: Path, taxonomy: str,
+                                backbone_dir: Path) -> List[str]:
+        """Register a subclade as built=false (no full tree) via the DB creator.
 
-        Records its raw member list + sketch + source_genome_dir so a future
-        query routing here can QC + build it on demand. Uses its OWN
-        register_<sc_name> checkpoint key, distinct from _build_subclade's
+        Still QCs this subclade and stages a few diverse backbone reps into
+        backbone_dir -- without this, a taxon where EVERY subclade is lazy
+        (e.g. --taxon create mode has no query at all, so every subclade's
+        `queries_here` is empty) would leave the backbone with zero input
+        genomes, which previously surfaced as a confusing crash two steps
+        later in megatree_graft.py rather than here. Only the subclade's own
+        FULL tree build is deferred -- that happens later via
+        _process_subclade_build when a query actually routes here.
+
+        Records its raw member list + sketch + source_genome_dir so that
+        later on-demand build can QC + build it from scratch (independently
+        of the lightweight QC done here for backbone-rep selection). Uses its
+        OWN register_<sc_name> checkpoint key, distinct from _build_subclade's
         database_<sc_name> key -- otherwise an on-demand build later would see
         that key already set (from registration) and skip promoting the
         built=false placeholder to a real built=true entry.
+
+        Returns the stems of the backbone reps it contributed (possibly
+        empty, if this subclade's QC drops every member -- a single bad
+        subclade must not abort the whole taxon).
         """
         sc_name = entry['name']
         sc_id = entry.get('subclade_id')
         ckey = sc_name
 
+        # ---- Lightweight QC + backbone-rep pick (new; no full tree built) ----
+        member_names = self._read_members_file(entry.get('members_file'))
+        if member_names:
+            raw_members = [raw_dir / m for m in member_names]
+        else:
+            raw_members = (list(raw_dir.glob("*.fna")) +
+                           list(raw_dir.glob("*.fasta")))
+        subclade_dir = self.orthophyl_dir / "downloads" / sc_name
+        if self._check_checkpoint(f"qc_{sc_name}") and self.resume:
+            logger.info(f"  ✓ QC already complete for {sc_name} (resuming)")
+            genomes_to_keep = subclade_dir / "genomes_to_keep"
+        else:
+            genomes_to_keep = self._qc_subclade(
+                subclade_dir, raw_members, taxon_label=sc_name,
+                query_assemblies=[])
+            self._write_checkpoint(f"qc_{sc_name}")
+
+        n_kept = 0
+        if not self.dry_run and genomes_to_keep.exists():
+            n_kept = len(list(genomes_to_keep.glob("*.fna")) +
+                        list(genomes_to_keep.glob("*.fasta")))
+        rep_stems: List[str] = []
+        if self.dry_run or n_kept > 0:
+            reps_dir = self._subsample_genomes(
+                f"{sc_name}_backbone", genomes_to_keep, self.backbone_reps)
+            rep_stems = self._stage_backbone_reps(reps_dir, backbone_dir)
+        else:
+            logger.warning(
+                f"  ⚠ Lazy subclade {sc_name}: QC dropped all "
+                f"{len(raw_members)} raw member(s); contributing no "
+                f"backbone reps for it.")
+
         if self._check_checkpoint(f"register_{ckey}") and self.resume:
             logger.info(f"  ✓ Lazy subclade already registered for {sc_name} (resuming)")
-            return
+            return rep_stems
 
         cmd = [
             'python', str(self.database_creator),
@@ -1749,7 +1856,7 @@ class PipelineWrapper:
         self._log_command(cmd)
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would register lazy subclade {sc_name}")
-            return
+            return rep_stems
 
         log_file = self.logs_dir / f"database_{sc_name}.log"
         with open(log_file, 'w') as f:
@@ -1759,6 +1866,7 @@ class PipelineWrapper:
                 f"Lazy registration failed for {sc_name}. Check log: {log_file}")
         logger.info(f"  ✓ Registered lazy subclade: {sc_name}_db (built=false)")
         self._write_checkpoint(f"register_{ckey}")
+        return rep_stems
 
     def _download_genomes(self, taxon_name: str, output_dir: Path,
                           query_assemblies: Optional[List[Dict]] = None,
