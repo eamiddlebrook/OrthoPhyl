@@ -143,7 +143,12 @@ class PipelineWrapper:
             logger.info(f"No --output-dir provided, using: {self.output_dir}")
         
         self.threads = threads
-        self.gather_script = Path(gather_script) if gather_script else None
+        # Default to the bundled gather_filter_asms.sh when --gather-script is
+        # omitted, rather than requiring every invocation to pass it
+        # explicitly. _validate_dependencies still checks it's actually
+        # usable (exists + executable) and raises/warns accordingly.
+        self.gather_script = (Path(gather_script) if gather_script
+                               else Path(__file__).parent / "utils" / "gather_filter_asms.sh")
         self.orthophyl_runs_tsv = Path(orthophyl_runs_tsv) if orthophyl_runs_tsv else None
         self.resume = resume
         self.skip_download = skip_download
@@ -575,22 +580,72 @@ class PipelineWrapper:
             'OrthoPhyl': self.orthophyl_script,
             'ReLeaf': self.releaf_script
         }
-        
+
         missing = []
         for name, script_path in required_scripts.items():
             if not script_path.exists():
                 missing.append(f"{name}: {script_path}")
-        
+
         if missing:
             raise FileNotFoundError(
                 "Missing required scripts:\n" + "\n".join(f"  - {m}" for m in missing)
             )
-        
-        # Check if gather script is provided and exists
-        if self.gather_script and not self.gather_script.exists():
-            logger.warning(f"Genome download script not found: {self.gather_script}")
+
+        # Whether THIS run actually needs a working gather script, decided
+        # before any network-touching taxonomy resolution happens
+        # (TaxonAssemblyGatherer's constructor downloads the NCBI taxdump) --
+        # so a bad/missing script fails here, not deep inside
+        # _run_taxon_create_mode after that work has already run.
+        #
+        # Taxon mode: mirrors _run_taxon_mode's own dispatch -- existing_db is
+        # None means create mode regardless of --update-existing (hard
+        # required); an existing_db match means update mode (soft, same as
+        # today -- update mode tolerates no gather script by skipping QC on
+        # the new assemblies). This re-check is pure local filesystem I/O
+        # (glob + JSON read under database_dir, no network), so repeating it
+        # here costs nothing.
+        gather_required = False
+        if self.taxon_mode:
+            gather_required = self._check_existing_taxon_database() is None
+        elif self.local_mode:
+            gather_required = not self.skip_qc
+
+        gather_ok = (
+            self.gather_script is not None
+            and self.gather_script.is_file()
+            and os.access(self.gather_script, os.X_OK)
+        )
+
+        if self.gather_script is not None and not gather_ok:
+            if not self.gather_script.exists():
+                reason = "not found"
+            elif not self.gather_script.is_file():
+                reason = "not a regular file"
+            else:
+                reason = "not executable (chmod +x it)"
+            if gather_required:
+                raise FileNotFoundError(
+                    f"Gather script is {reason}: {self.gather_script}\n"
+                    f"This mode cannot proceed without a working genome "
+                    f"download/QC script. Fix the path/permissions, or pass "
+                    f"--skip-qc (local-genome-ingest mode only) to proceed "
+                    f"without it."
+                )
+            # Not required for this run -- same soft fallback as always. No
+            # --help/smoke-test invocation here: gather_filter_asms.sh
+            # unconditionally sources ~/.bash_profile and runs `conda
+            # activate` before it parses any flags (see
+            # utils/gather_filter_asms.sh), so even a --help call would carry
+            # those side effects.
+            logger.warning(f"Genome download script is {reason}: {self.gather_script}")
             logger.warning("  Will generate manual download instructions instead")
             self.gather_script = None
+        elif gather_required and self.gather_script is None:
+            raise FileNotFoundError(
+                "This mode (taxon create, or local-genome-ingest without "
+                "--skip-qc) requires a gather script (e.g. --gather-script "
+                "utils/gather_filter_asms.sh), but none was provided."
+            )
 
     def _log_command(self, cmd: List) -> None:
         """Print a constructed command to real STDOUT, unconditionally.
@@ -3098,7 +3153,8 @@ Examples:
     )
     parser.add_argument(
         '--gather-script',
-        help='Path to gather_filter_asms.sh for genome downloading'
+        help='Path to gather_filter_asms.sh for genome downloading '
+             '(default: utils/gather_filter_asms.sh next to this script)'
     )
     parser.add_argument(
         '--orthophyl-runs',

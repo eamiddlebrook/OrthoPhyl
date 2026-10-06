@@ -78,6 +78,28 @@ class TestConstruction:
         assert w.taxon_mode is True
 
 
+class TestGatherScriptDefault:
+    """gather_script defaults to the bundled utils/gather_filter_asms.sh when
+    --gather-script is omitted, instead of requiring explicit opt-in every
+    invocation."""
+
+    def test_defaults_to_bundled_script(self, Wrapper, tmp_path, repo_root):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        assert w.gather_script == repo_root / "utils" / "gather_filter_asms.sh"
+
+    def test_explicit_gather_script_overrides_default(self, Wrapper, tmp_path):
+        custom = tmp_path / "my_custom_gather.sh"
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db", gather_script=custom)
+        assert w.gather_script == custom
+
+    def test_bundled_default_passes_validate_dependencies(self, Wrapper, tmp_path):
+        # The real bundled script must itself be exist+executable, or every
+        # taxon-create/local-mode run would hard-fail out of the box.
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        w._validate_dependencies()  # must not raise
+        assert w.gather_script is not None
+
+
 class TestValidateDependencies:
     def test_reports_missing_scripts(self, Wrapper, tmp_path, monkeypatch):
         w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
@@ -91,8 +113,96 @@ class TestValidateDependencies:
             Wrapper, tmp_path, tmp_path / "db",
             gather_script=tmp_path / "missing_gather.sh",
         )
-        # gather script missing is a warning, not fatal; it gets reset to None.
+        # Batch mode never requires a gather script -- missing is a warning,
+        # not fatal; it gets reset to None.
         w._validate_dependencies()
+        assert w.gather_script is None
+
+
+class TestGatherScriptViabilityFailsFast:
+    """Taxon create mode and local-genome-ingest mode (without --skip-qc) both
+    hard-require a working gather script. _validate_dependencies must catch a
+    missing/non-executable script and raise BEFORE any taxonomy-resolution
+    work (NCBI taxdump download) happens -- it is called from
+    _phase_initialization, which runs before mode dispatch in run()."""
+
+    def test_taxon_create_mode_missing_script_raises(self, Wrapper, tmp_path):
+        w = Wrapper(
+            input_file=None, database_dir=tmp_path / "db",
+            output_dir=tmp_path / "out", taxon="Methylorubrum", threads=4,
+            gather_script=tmp_path / "does_not_exist.sh",
+        )
+        with pytest.raises(FileNotFoundError, match="Gather script"):
+            w._validate_dependencies()
+
+    def test_taxon_create_mode_non_executable_script_raises(self, Wrapper, tmp_path):
+        bad = tmp_path / "not_executable.sh"
+        bad.write_text("#!/bin/bash\necho hi\n")
+        bad.chmod(0o644)  # no +x
+        w = Wrapper(
+            input_file=None, database_dir=tmp_path / "db",
+            output_dir=tmp_path / "out", taxon="Methylorubrum", threads=4,
+            gather_script=bad,
+        )
+        with pytest.raises(FileNotFoundError, match="not executable"):
+            w._validate_dependencies()
+
+    def test_taxon_create_mode_no_script_at_all_raises(self, Wrapper, tmp_path):
+        # gather_script=None at construction now falls back to the bundled
+        # utils/gather_filter_asms.sh (see TestGatherScriptDefault below), so
+        # there's no longer a public-API way to end up with gather_script
+        # actually None. Exercise that defensive branch directly instead.
+        w = Wrapper(
+            input_file=None, database_dir=tmp_path / "db",
+            output_dir=tmp_path / "out", taxon="Methylorubrum", threads=4,
+        )
+        w.gather_script = None
+        with pytest.raises(FileNotFoundError, match="requires a gather script"):
+            w._validate_dependencies()
+
+    def test_taxon_update_mode_missing_script_is_soft(self, Wrapper, tmp_path):
+        """Update mode (an existing DB matches) tolerates a missing gather
+        script -- it only skips QC on the new assemblies, same as before."""
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        existing_db = db_dir / "Methylorubrum_genus_db"
+        existing_db.mkdir()
+        (existing_db / "database_config.json").write_text(json.dumps({
+            "clade_name": "Methylorubrum", "source_taxon_name": "Methylorubrum",
+            "assembly_accessions": ["GCF_000001.1"],
+        }))
+        w = Wrapper(
+            input_file=None, database_dir=db_dir,
+            output_dir=tmp_path / "out", taxon="Methylorubrum",
+            update_existing=True, threads=4,
+            gather_script=tmp_path / "does_not_exist.sh",
+        )
+        w._validate_dependencies()  # must not raise
+        assert w.gather_script is None
+
+    def test_local_mode_default_qc_missing_script_raises(self, Wrapper, tmp_path):
+        genome_dir = tmp_path / "genomes"
+        genome_dir.mkdir()
+        w = Wrapper(
+            input_file=None, database_dir=tmp_path / "db",
+            output_dir=tmp_path / "out",
+            genome_dir=genome_dir, clade_name="Blorptaxon", threads=4,
+            gather_script=tmp_path / "does_not_exist.sh",
+        )
+        with pytest.raises(FileNotFoundError, match="Gather script"):
+            w._validate_dependencies()
+
+    def test_local_mode_skip_qc_missing_script_is_soft(self, Wrapper, tmp_path):
+        genome_dir = tmp_path / "genomes"
+        genome_dir.mkdir()
+        w = Wrapper(
+            input_file=None, database_dir=tmp_path / "db",
+            output_dir=tmp_path / "out",
+            genome_dir=genome_dir, clade_name="Blorptaxon", threads=4,
+            skip_qc=True,
+            gather_script=tmp_path / "does_not_exist.sh",
+        )
+        w._validate_dependencies()  # must not raise
         assert w.gather_script is None
 
 

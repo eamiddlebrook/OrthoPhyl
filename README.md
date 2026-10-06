@@ -314,7 +314,7 @@ naming clades that aren't formally assigned by NCBI, and taxonomy-routability de
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `--gather-script` | Path to genome download script | None |
+| `--gather-script` | Path to genome download script | `utils/gather_filter_asms.sh` (next to the wrapper) |
 | `--gather-args` | Additional args for gather script | "" |
 | `--orthophyl-runs` | TSV for initial database creation | None |
 | `--skip-releaf` | Skip ReLeaf route | False |
