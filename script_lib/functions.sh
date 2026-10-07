@@ -846,6 +846,69 @@ HMM_ASSIGN_FROM_EXTERNAL () {
 	done
 	echo "$(cat $unmatched_log | wc -l) of $(ls $hmm_assign_dir/*.hmm | wc -l) external OGs had no hits in this genome set (see $unmatched_log)"
 
+	# --hmm-assign-leftover-orthofinder: route genes that matched NONE of the
+	#   external HMMs through a real OrthoFinder run of their own, instead of
+	#   just dropping them. Off by default -- without the flag, behavior
+	#   below is skipped entirely and this function ends exactly as before.
+	if [[ ${hmm_assign_leftover_orthofinder+x} ]]
+	then
+		# Leftover names = all_prots.nm.fa names MINUS every name that
+		#   appears in any matched $new_OG_prots/<OG>.faa (gene-level, NOT
+		#   the OG-level unmatched_log above -- an OG can have SOME hits
+		#   without covering every gene in every genome).
+		grep ">" $wd/all_prots.nm.fa | sed 's/^>//; s/ .*//' | sort -u \
+			> $wd/hmm_assign_all_names.sorted
+		cat $new_OG_prots/*.faa 2>/dev/null | grep ">" | sed 's/^>//; s/ .*//' | sort -u \
+			> $wd/hmm_assign_matched_names.sorted
+		comm -23 $wd/hmm_assign_all_names.sorted $wd/hmm_assign_matched_names.sorted \
+			> $wd/hmm_assign_leftover_names.txt
+
+		local n_leftover=$(cat $wd/hmm_assign_leftover_names.txt | wc -l)
+		if [ "$n_leftover" -eq 0 ]
+		then
+			echo "No leftover (HMM-unmatched) sequences -- nothing to route through OrthoFinder."
+		else
+			echo "$n_leftover leftover (HMM-unmatched) sequences found; pooling per-genome for OrthoFinder."
+
+			# Materialize per-genome leftover-only protein files. $prots.fixed/
+			#   (from FIX_PROTS_NAMES) and $wd/all_prots.nm.fa share identical
+			#   headers (genome@geneid, same sed transform, same loop) -- the
+			#   leftover name list can filter $prots.fixed/<genome>.faa
+			#   directly, no translation needed.
+			local leftover_prots=$wd/hmm_assign_leftover_prots
+			mkdir -p $leftover_prots
+			local n_leftover_genomes=0
+			for genome_faa in $prots.fixed/*.faa
+			do
+				local genome=$(basename ${genome_faa%.*})
+				# Literal (non-regex) prefix match -- genome names can
+				#   contain characters (., etc.) that grep would treat as
+				#   regex metacharacters.
+				awk -v g="${genome}@" 'index($0, g) == 1' \
+					$wd/hmm_assign_leftover_names.txt \
+					> $leftover_prots/${genome}.names 2>/dev/null
+				if [ -s $leftover_prots/${genome}.names ]
+				then
+					filterbyname.sh -Xmx60m -Xms60m include=t ignorejunk=t \
+						names=$leftover_prots/${genome}.names \
+						in=$genome_faa out=$leftover_prots/${genome}.faa \
+						>> $wd/logs/filterbyname.hmm_assign_leftover 2>&1
+					n_leftover_genomes=$((n_leftover_genomes + 1))
+				fi
+				rm -f $leftover_prots/${genome}.names
+			done
+
+			if [ "$n_leftover_genomes" -lt 2 ]
+			then
+				echo "Only $n_leftover_genomes genome(s) have leftover sequences -- too few for OrthoFinder to cluster; skipping."
+			else
+				echo "Running OrthoFinder on leftover sequences from $n_leftover_genomes genome(s)..."
+				ORTHO_RUN $leftover_prots
+				REALIGN_LEFTOVER_ORTHOGROUP_PROTS
+			fi
+		fi
+	fi
+
 	GET_OG_NAMES $wd/OG_names $wd/AlignmentsProts/
 }
 
@@ -896,6 +959,86 @@ REALIGN_ORTHOGROUP_PROTS () {
 		filter_and_Align_subfunc &
 		J=$((J+1))
 		
+	done
+	wait
+}
+
+REALIGN_LEFTOVER_ORTHOGROUP_PROTS () {
+	echo '
+	###################################################
+	##### Realign Leftover (post-HMM-assign) OGs #####
+	##################### With MAFFT ##################
+	###################################################
+	'
+	date
+	func_timing_start
+	# Sibling of REALIGN_ORTHOGROUP_PROTS, for the fresh ORTHO_RUN that
+	#   HMM_ASSIGN_FROM_EXTERNAL runs on leftover (HMM-unmatched) sequences
+	#   when --hmm-assign-leftover-orthofinder is set. Deliberately renames
+	#   OrthoFinder's own OG0000001-style IDs to OG0_LFT_0000001 -- a fresh
+	#   OrthoFinder run always numbers from OG0000001 with no run-specific
+	#   salt, so writing straight to $wd/AlignmentsProts/OG0000001.faa (as
+	#   REALIGN_ORTHOGROUP_PROTS does) would silently clobber whatever
+	#   HMM_ASSIGN_FROM_EXTERNAL already wrote there under the SAME OG0000001
+	#   ID from the external HMM set (a real risk when hmm_assign_dir came
+	#   from a prior OrthoPhyl run, e.g. --megatree-hmm-reuse). The OG0_LFT_
+	#   prefix still satisfies SCO_MIN_ALIGN's ANI=true branch glob
+	#   ($alignment_dir/OG0*) while keeping the two ID namespaces visually
+	#   and mechanically distinct.
+	#
+	# Filtered through OG_sco_filter.py (threshold 1 = any OG with no
+	#   paralogs, same mechanism ANI_ORTHOFINDER_TO_ALL_SEQS/SCO_MIN_ALIGN's
+	#   non-ANI branch already use) BEFORE realigning -- unlike the
+	#   externally-assigned OGs (whose single-copy-per-genome property is
+	#   already enforced upstream by HMM_search's no-paralog score filter), a
+	#   fresh OrthoFinder clustering on leftovers has no such guarantee, and
+	#   SCO_MIN_ALIGN's ANI=true branch only counts total headers per
+	#   alignment file, not distinct genomes -- a multi-copy OG would corrupt
+	#   SCO membership and crash catfasta2phyml downstream (mismatched
+	#   per-genome sequence counts/lengths) if let through unfiltered.
+	cd $wd || exit
+	local leftover_gene_counts="$orthodir/Orthogroups/Orthogroups.GeneCount.tsv"
+	python $OG_sco_filter $leftover_gene_counts 1
+	local leftover_sco_list=$wd/SCO_1
+	local num_OGs=$(cat $leftover_sco_list 2>/dev/null | wc -l)
+	if [ "$num_OGs" -eq 0 ]
+	then
+		echo "No single-copy orthogroups found among leftover sequences; nothing to realign."
+		rm -f $leftover_sco_list
+		return
+	fi
+	percent=$(( num_OGs / 10))
+	if [ "$percent" -lt 1 ]
+	then
+		percent=1
+	fi
+	J=0
+	for orig_base in $(cat $leftover_sco_list)
+	do
+		local i="$orthodir/MultipleSequenceAlignments/${orig_base}.fa"
+		if test "$(jobs | wc -l)" -ge $threads
+		then
+			wait -n
+			trap control_c INT
+		fi
+		if [ $((J % percent)) -eq 0 ]
+		then
+			echo $((J/percent*10))" percent of the way through the extraction and realignment of leftover OG prots"
+		fi
+		filter_and_Align_leftover_subfunc () {
+			local orig_base=$(basename "${i%.*}")
+			local base="OG0_LFT_${orig_base#OG}"
+		    cat $i | grep ">" | sed 's/>//g' | sed 's/|.*//g' \
+		        > ./OG_names/${base}.names
+			filterbyname.sh -Xmx60m -Xms60m include=t \
+		        names=./OG_names/${base}.names ignorejunk=t \
+		        in=$wd/all_prots.nm.fa out=./SequencesProts/${base}.faa \
+				>> $wd/logs/filterbyname.realign_leftover_prots 2>&1
+			mafft --quiet $wd/SequencesProts/${base}.faa > \
+                	$wd/AlignmentsProts/${base}.faa
+		}
+		filter_and_Align_leftover_subfunc &
+		J=$((J+1))
 	done
 	wait
 }

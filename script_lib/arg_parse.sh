@@ -48,12 +48,20 @@ Optional:
 	If \"-a\" not used but you want to use CDS (annotated within OrthoPhyl by Prodigal) for ANI subsetting, set \"-d CDS\"
 -T|--test  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast,TESTER_fasttest)
 --hmm-assign-dir  path to a directory of precomputed <OrthogroupID>.hmm files (e.g. from a prior
-	OrthoPhyl run's OG_alignmentsToHMM/hmms_final/). Skips OrthoFinder/MASH-shortlisting
-	entirely -- genes are instead assigned into these existing orthogroups via hmmsearch (same
-	mechanism ReLeaf uses to add a genome), then aligned from scratch and fed into the normal
-	TRIM/SCO_MIN_ALIGN/TREE_BUILD steps. Intended for building a subclade tree that shares
-	orthogroup identity with another already-built tree (e.g. a megatree backbone) without
-	sharing its alignments/trim/tree model.
+	OrthoPhyl run's OG_alignmentsToHMM/hmms_final/, or an external set like BUSCO). Skips
+	OrthoFinder/MASH-shortlisting entirely -- genes are instead assigned into these existing
+	orthogroups via hmmsearch (same mechanism ReLeaf uses to add a genome), then aligned from
+	scratch and fed into the normal TRIM/SCO_MIN_ALIGN/TREE_BUILD steps. Intended for building a
+	subclade tree that shares orthogroup identity with another already-built tree (e.g. a
+	megatree backbone) without sharing its alignments/trim/tree model.
+--hmm-assign-leftover-orthofinder  only meaningful with --hmm-assign-dir. By default, genes that
+	match NONE of the external HMMs are simply dropped (logged to hmm_assign_unmatched_OGs.txt).
+	With this flag, those leftover sequences are instead pooled per-genome and run through a
+	real OrthoFinder clustering step of their own, finding additional orthogroups among
+	themselves (exactly like a normal small-dataset OrthoPhyl run would). Freshly-discovered
+	orthogroups are written as OG0_LFT_<number> (distinct from the external HMM set's own OG
+	IDs, to avoid collisions when hmm_assign_dir came from a prior OrthoPhyl run) and flow into
+	the same TRIM/SCO_MIN_ALIGN/TREE_BUILD pipeline as the externally-assigned ones. Default off.
 -h|--help  display a description and a super useful usage message
 ###############################################################\n
 To run test datasets:
@@ -352,6 +360,10 @@ ARG_PARSE () {
 					exit 1
 				fi
 				shift
+				shift ;;
+
+			--hmm-assign-leftover-orthofinder)
+				hmm_assign_leftover_orthofinder=true
 				shift ;;
 
 			\?) # Invalid option
