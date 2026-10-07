@@ -3470,75 +3470,61 @@ Examples:
              'For local genome-ingest mode.'
     )
 
-    parser.add_argument(
+    core_group = parser.add_argument_group(
+        'Core', 'Where things are and where output goes')
+    core_group.add_argument(
         '--database-dir',
         required=True,
         help='Directory containing *_db databases'
     )
-    parser.add_argument(
+    core_group.add_argument(
         '--output-dir',
         help='Output directory for all results (default: <database-dir>/.pipeline_runs/<taxon>_<timestamp>, '
              'where <taxon> is the --taxon name, "TaxID<num>" for a numeric TaxID, or "run" for batch mode)'
     )
-    parser.add_argument(
+
+    run_control_group = parser.add_argument_group(
+        'Run control', 'Checkpointing, resuming, and dry-running a pipeline invocation')
+    run_control_group.add_argument(
+        '--resume',
+        action='store_true',
+        help='Resume from last checkpoint'
+    )
+    run_control_group.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Show what would be executed without running anything'
+    )
+    run_control_group.add_argument(
+        '--skip-download',
+        action='store_true',
+        help='Skip genome downloading (use existing genomes)'
+    )
+    run_control_group.add_argument(
+        '--update-existing',
+        action='store_true',
+        help='Update existing database with new assemblies (taxon mode only)'
+    )
+
+    performance_group = parser.add_argument_group(
+        'Performance', 'CPU/RAM tradeoffs')
+    performance_group.add_argument(
         '--threads',
         type=int,
         default=8,
         help='Number of threads (default: 8)'
     )
-    parser.add_argument(
-        '--gather-script',
-        help='Path to gather_filter_asms.sh for genome downloading '
-             '(default: utils/gather_filter_asms.sh next to this script)'
-    )
-    parser.add_argument(
-        '--orthophyl-runs',
-        help='TSV for initial database creation (if databases don\'t exist)'
-    )
-    parser.add_argument(
-        '--resume',
-        action='store_true',
-        help='Resume from last checkpoint'
-    )
-    parser.add_argument(
-        '--skip-download',
-        action='store_true',
-        help='Skip genome downloading (use existing genomes)'
-    )
-    parser.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Show what would be executed without running anything'
-    )
-    parser.add_argument(
-        '-v', '--verbose',
-        action='count',
-        default=0,
-        help='Verbose output: -v shows stdout from subprocesses, -vv shows stdout and stderr'
-    )
-    parser.add_argument(
+    performance_group.add_argument(
         '--low-ram',
         action='store_true',
         help='Use reduced memory mode for CheckM2 (passes --lowmem to gather_filter_asms.sh)'
     )
-    parser.add_argument(
+    performance_group.add_argument(
         '--use-bbmap',
         action='store_true',
         help='Use bbmap statswrapper instead of CheckM2 for genome statistics (faster, less RAM, but no completeness/contamination filtering)'
     )
-    parser.add_argument(
-        '--must-keep',
-        help='Accessions that MUST survive QC or the run aborts with a clear per-metric '
-             'report. Supply either a comma-separated list (e.g. GCF_000...,GCF_001...) '
-             'or a path to a file with one accession per line.'
-    )
-    parser.add_argument(
-        '--keep-failing-query',
-        action='store_true',
-        help='Let query/input genomes that fail QC through with a loud warning instead '
-             'of aborting (default: a query genome failing QC aborts the run).'
-    )
-    parser.add_argument(
+    performance_group.add_argument(
         '--ani-shortlist',
         type=int,
         default=20,
@@ -3550,18 +3536,71 @@ Examples:
              'default. Default 20.'
     )
 
-    # Taxon mode arguments (--taxon is in mutually_exclusive_group above)
-    parser.add_argument(
+    gather_group = parser.add_argument_group(
+        'Gather / QC', 'Genome downloading and quality-control options')
+    gather_group.add_argument(
+        '--gather-script',
+        help='Path to gather_filter_asms.sh for genome downloading '
+             '(default: utils/gather_filter_asms.sh next to this script)'
+    )
+    gather_group.add_argument(
+        '--orthophyl-runs',
+        help='TSV for initial database creation (if databases don\'t exist)'
+    )
+    gather_group.add_argument(
+        '--must-keep',
+        help='Accessions that MUST survive QC or the run aborts with a clear per-metric '
+             'report. Supply either a comma-separated list (e.g. GCF_000...,GCF_001...) '
+             'or a path to a file with one accession per line.'
+    )
+    gather_group.add_argument(
+        '--keep-failing-query',
+        action='store_true',
+        help='Let query/input genomes that fail QC through with a loud warning instead '
+             'of aborting (default: a query genome failing QC aborts the run).'
+    )
+    gather_group.add_argument(
+        '--skip-qc',
+        action='store_true',
+        help='Skip CheckM2 QC on --genome-dir genomes (default: QC runs). Use this '
+             'only for genomes you have already quality-checked.'
+    )
+
+    taxon_group = parser.add_argument_group(
+        'Taxon mode', 'Only meaningful with --taxon')
+    taxon_group.add_argument(
         '--taxon-rank',
         choices=['species', 'genus', 'family', 'order', 'class', 'phylum'],
         help='Taxonomic rank for --taxon query (default: auto-detect)'
     )
-    parser.add_argument(
-        '--update-existing',
-        action='store_true',
-        help='Update existing database with new assemblies (taxon mode only)'
+
+    local_genome_group = parser.add_argument_group(
+        'Local genome-ingest mode', 'Only meaningful with --genome-dir')
+    local_genome_group.add_argument(
+        '--clade-name',
+        help='Required with --genome-dir. Names the clade/database. Auto-resolved '
+             'against the local NCBI taxdump when it is a real taxon; otherwise the '
+             'database is built under this name and NOTE: it was not assigned by '
+             'NCBI (use --clade-taxonomy for a full, routable lineage).'
     )
-    parser.add_argument(
+    local_genome_group.add_argument(
+        '--clade-taxonomy',
+        help='Optional escape hatch: a full GTDB taxonomy string '
+             '(e.g. "d__Bacteria;p__...;g__MyClade"), used verbatim. Needed only '
+             'when --clade-name does not resolve to a known NCBI taxon and you '
+             'know the real lineage.'
+    )
+    local_genome_group.add_argument(
+        '--clade-rank',
+        choices=list(PipelineWrapper._GTDB_RANK_LETTERS),
+        default='g',
+        help='Rank letter at which an unresolvable --clade-name is attached '
+             '(GTDB single-letter rank, d..s). Default: g (genus).'
+    )
+
+    large_taxon_group = parser.add_argument_group(
+        'Large-taxon handling', 'Capping tree size for oversized taxa (default: diverse subsampling)')
+    large_taxon_group.add_argument(
         '--max-tree-genomes',
         type=int,
         default=2000,
@@ -3570,7 +3609,7 @@ Examples:
              'MASH subsample of --subsample-size genomes (greedy max-min; query '
              'genomes are always kept). Default 2000.'
     )
-    parser.add_argument(
+    large_taxon_group.add_argument(
         '--subsample-size',
         type=int,
         default=500,
@@ -3579,7 +3618,7 @@ Examples:
              'Sketches genomes linearly (no O(n^2) matrix), so it scales to very '
              'large taxa. Default 500.'
     )
-    parser.add_argument(
+    large_taxon_group.add_argument(
         '--max-total-genomes',
         type=int,
         default=25000,
@@ -3589,7 +3628,10 @@ Examples:
              'measured), so it is refused above this ceiling. The default subsample '
              'path never builds this array and is unaffected. Default 25000.'
     )
-    parser.add_argument(
+
+    megatree_group = parser.add_argument_group(
+        'Megatree (opt-in, --megatree)', 'Full-coverage partition/graft strategy for oversized taxa')
+    megatree_group.add_argument(
         '--megatree',
         action='store_true',
         help='Opt-in large-taxon strategy: instead of subsampling an oversized taxon '
@@ -3600,7 +3642,7 @@ Examples:
              'genome. High-support bipartition disagreements are flagged (not '
              'resolved). Enforces --max-total-genomes. Overrides the default subsample.'
     )
-    parser.add_argument(
+    megatree_group.add_argument(
         '--backbone-reps',
         type=int,
         default=5,
@@ -3608,7 +3650,7 @@ Examples:
              'contributes to the backbone tree (min(subclade_size, this)); '
              'guarantees every subclade several backbone anchors. Default 5.'
     )
-    parser.add_argument(
+    megatree_group.add_argument(
         '--subclade-size',
         type=int,
         default=150,
@@ -3616,7 +3658,7 @@ Examples:
              '(--max-size). Distinct from --max-tree-genomes (the single-tree '
              'ceiling). Default 150.'
     )
-    parser.add_argument(
+    megatree_group.add_argument(
         '--conflict-min-support',
         type=int,
         default=90,
@@ -3624,7 +3666,7 @@ Examples:
              'between a subclade tree and the backbone (0-100 scale, e.g. IQ-TREE '
              'UFBoot). Default 90.'
     )
-    parser.add_argument(
+    megatree_group.add_argument(
         '--megatree-lazy',
         action='store_true',
         help='Megatree only: subclades with NO query at partition time are only '
@@ -3634,7 +3676,7 @@ Examples:
              'Lets an oversized taxon be partitioned once and covered incrementally. '
              'Default off (every subclade is built eagerly).'
     )
-    parser.add_argument(
+    megatree_group.add_argument(
         '--megatree-hmm-reuse',
         action='store_true',
         help='Megatree only: give every subclade the BACKBONE run\'s orthogroup '
@@ -3648,7 +3690,7 @@ Examples:
              'OrthoPhyl.sh\'s own default, routed through a real OrthoFinder run '
              'of their own (see --megatree-hmm-reuse-skip-leftover to disable).'
     )
-    parser.add_argument(
+    megatree_group.add_argument(
         '--megatree-hmm-reuse-skip-leftover',
         action='store_true',
         help='Only meaningful with --megatree-hmm-reuse. Passes OrthoPhyl.sh '
@@ -3656,7 +3698,7 @@ Examples:
              'old behavior of dropping genes that match none of the backbone\'s '
              'HMMs instead of running a real OrthoFinder pass on them. Default off.'
     )
-    parser.add_argument(
+    megatree_group.add_argument(
         '--placement',
         choices=['subclade', 'backbone'],
         default='subclade',
@@ -3667,33 +3709,12 @@ Examples:
              'instead. Threaded to assembly_router.py --placement.'
     )
 
-    # Local genome-ingest mode arguments (--genome-dir is in mutually_exclusive_group above)
-    parser.add_argument(
-        '--clade-name',
-        help='Required with --genome-dir. Names the clade/database. Auto-resolved '
-             'against the local NCBI taxdump when it is a real taxon; otherwise the '
-             'database is built under this name and NOTE: it was not assigned by '
-             'NCBI (use --clade-taxonomy for a full, routable lineage).'
-    )
-    parser.add_argument(
-        '--clade-taxonomy',
-        help='Optional escape hatch: a full GTDB taxonomy string '
-             '(e.g. "d__Bacteria;p__...;g__MyClade"), used verbatim. Needed only '
-             'when --clade-name does not resolve to a known NCBI taxon and you '
-             'know the real lineage.'
-    )
-    parser.add_argument(
-        '--clade-rank',
-        choices=list(PipelineWrapper._GTDB_RANK_LETTERS),
-        default='g',
-        help='Rank letter at which an unresolvable --clade-name is attached '
-             '(GTDB single-letter rank, d..s). Default: g (genus).'
-    )
-    parser.add_argument(
-        '--skip-qc',
-        action='store_true',
-        help='Skip CheckM2 QC on --genome-dir genomes (default: QC runs). Use this '
-             'only for genomes you have already quality-checked.'
+    low_importance_group = parser.add_argument_group('Low importance')
+    low_importance_group.add_argument(
+        '-v', '--verbose',
+        action='count',
+        default=0,
+        help='Verbose output: -v shows stdout from subprocesses, -vv shows stdout and stderr'
     )
 
     args = parser.parse_args()

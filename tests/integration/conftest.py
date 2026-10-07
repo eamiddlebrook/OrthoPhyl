@@ -241,6 +241,61 @@ def cymbidium_megatree_lazy_files(chloroplast_genomes_dir, tmp_path_factory) -> 
     }
 
 
+# 8 "backbone" + 6 "subclade" real chloroplast genomes for the
+# --hmm-assign-dir integration tests, disjoint from the Cymbidium set above.
+# Hardcoded (not globbed) for the same reasons as _CYMBIDIUM_RAW_20: the
+# directory also contains an anomalous 50MB `.fasta` file (322 concatenated
+# records, not a single genome) that any glob must exclude, and a fixed list
+# keeps test behavior stable even if TESTER/genomes_chloroplast/ changes.
+_HMM_ASSIGN_BACKBONE_8 = [
+    "AB893950.1_Dendrobium_moniliforme_chloroplast.fasta",
+    "JF746994.1_Erycina_pusilla.fasta",
+    "KP168671.1_Cattleya_crispata.fasta",
+    "KU551263.1_Cephalanthera_longifolia_voucher_STET_1163_(PE).fasta",
+    "KU551264.1_Epipactis_mairei_voucher_Jin_X.H._13416_(PE).fasta",
+    "KU551267.1_Epipactis_veratrifolia_voucher_Jin_X.H._10358_(PE).fasta",
+    "KU551269.1_Neottia_pinetorum_voucher_STET_1587_(PE).fasta",
+    "KU551270.1_Neottia_fugongensis_voucher_Jin_X.H._11375_(PE).fasta",
+]
+_HMM_ASSIGN_SUBCLADE_6 = [
+    "KU551271.1_Neottia_ovata_voucher_Jin_X.H._14242_(PE).fasta",
+    "LC085346.1_Goodyera_schlechtendaliana_chloroplast.fasta",
+    "LC085347.1_Paphiopedilum_armeniacum_chloroplast.fasta",
+    "LC085348.1_Vanilla_aphylla_chloroplast.fasta",
+    "MF374688.1_Liparis_loeselii_voucher_POZ_Maslak_LS33.fasta",
+    "MG181954.1_Eulophia_zollingeri.fasta",
+]
+
+
+@pytest.fixture(scope="session")
+def hmm_assign_backbone_genomes(chloroplast_genomes_dir, tmp_path_factory) -> Path:
+    """Stage the 8 backbone genomes (as .fasta, OrthoPhyl.sh -g accepts that
+    extension directly) into their own directory."""
+    dest = tmp_path_factory.mktemp("hmm_assign_backbone")
+    missing = [f for f in _HMM_ASSIGN_BACKBONE_8
+               if not (chloroplast_genomes_dir / f).exists()]
+    if missing:
+        pytest.fail(f"Expected chloroplast files missing from "
+                    f"{chloroplast_genomes_dir}: {missing}")
+    for fasta_name in _HMM_ASSIGN_BACKBONE_8:
+        shutil.copy(chloroplast_genomes_dir / fasta_name, dest / fasta_name)
+    return dest
+
+
+@pytest.fixture(scope="session")
+def hmm_assign_subclade_genomes(chloroplast_genomes_dir, tmp_path_factory) -> Path:
+    """Stage the 6 subclade genomes (disjoint from the backbone set)."""
+    dest = tmp_path_factory.mktemp("hmm_assign_subclade")
+    missing = [f for f in _HMM_ASSIGN_SUBCLADE_6
+               if not (chloroplast_genomes_dir / f).exists()]
+    if missing:
+        pytest.fail(f"Expected chloroplast files missing from "
+                    f"{chloroplast_genomes_dir}: {missing}")
+    for fasta_name in _HMM_ASSIGN_SUBCLADE_6:
+        shutil.copy(chloroplast_genomes_dir / fasta_name, dest / fasta_name)
+    return dest
+
+
 @pytest.fixture(scope="session")
 def fasttest_genomes(project_root) -> Path:
     """Return the path to the fasttest genomes directory."""

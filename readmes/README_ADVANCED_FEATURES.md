@@ -576,6 +576,65 @@ distances.
 
 ---
 
+### 11. External HMM Assignment (`--hmm-assign-dir`)
+
+`OrthoPhyl.sh --hmm-assign-dir <path>` assigns a genome set's genes into a
+**precomputed** external orthogroup HMM set (e.g. a prior OrthoPhyl run's
+`OG_alignmentsToHMM/hmms_final/`, or a third-party set like BUSCO) instead of
+running OrthoFinder from scratch. This is the mechanism that lets a subclade
+share orthogroup identity with another already-built tree (e.g. a megatree
+backbone) without sharing its alignments, trimming, or tree model.
+
+**Basic usage:**
+
+```bash
+# Build a backbone the normal way (forcing -n below the genome count forces
+# OrthoPhyl.sh's MASH-shortlist/HMM-building branch, so hmms_final/ exists)
+bash OrthoPhyl.sh -g backbone_genomes/ -s backbone_out/ -t 8 -n 10
+
+# Assign a disjoint genome set's genes into the backbone's orthogroups
+bash OrthoPhyl.sh -g subclade_genomes/ -s subclade_out/ -t 8 \
+    --hmm-assign-dir backbone_out/OG_alignmentsToHMM/hmms_final/
+```
+
+Genes matching an external HMM are hmmsearch-assigned (same mechanism ReLeaf
+uses to add a genome), aligned fresh with `mafft`, and dropped straight into
+`$wd/AlignmentsProts/<OG>.faa` — the normal `TRIM`/`SCO_MIN_ALIGN`/`TREE_BUILD`
+pipeline consumes it unmodified. `OG_alignmentsToHMM/hmms_final/` itself lives
+directly under the `-s` storage dir (not under `phylo_current/`).
+
+**Leftover routing (default on):** genes that match **none** of the external
+HMMs are, by default, pooled per-genome and run through a real OrthoFinder
+clustering pass of their own (`--hmm-assign-leftover-orthofinder`'s behavior —
+the flag itself is a no-op kept for symmetry since this is now the default).
+Freshly-discovered orthogroups are written as `OG0_LFT_<number>` — a distinct
+namespace from the external HMM set's own OG IDs, avoiding a silent filename
+collision when `hmm_assign_dir` came from a prior OrthoPhyl run (OrthoFinder
+always numbers a fresh run from `OG0000001`, with no per-run salt) — and flow
+into the same downstream pipeline as the externally-assigned OGs. Disable
+with `--skip-hmm-assign-leftover` to restore the old log-and-drop behavior
+(unmatched genes are simply logged to `hmm_assign_unmatched_OGs.txt` and
+dropped from the tree).
+
+**Wrapper-level reuse (`--megatree-hmm-reuse`):** `orthophyl_pipeline_wrapper.py
+--megatree --megatree-hmm-reuse` gives every subclade build the megatree
+backbone's HMMs automatically (via this same `--hmm-assign-dir` mechanism) —
+see section 10 above for the full megatree writeup. `--megatree-hmm-reuse`
+inherits leftover-routing for free; `--megatree-hmm-reuse-skip-leftover`
+threads `--skip-hmm-assign-leftover` through every subclade build in that path
+if you want the old behavior back.
+
+**Covered by:**
+- `tests/integration/test_hmm_assign.py` — real-tool end-to-end coverage of
+  basic assignment, default leftover-routing, and `--skip-hmm-assign-leftover`.
+- `tests/unit/test_wrapper_batch.py::TestRunOrthophylCommand` and
+  `tests/unit/test_wrapper_megatree.py::TestMegatreeHmmReuse` — wrapper-level
+  flag wiring (mocked subprocesses).
+- `tests/unit/test_wrapper_megatree.py::TestMegatreeLazyAllDeferred` — the
+  related `--megatree-lazy` zero-query empty-backbone fix (every subclade
+  lazily registered in pure `--taxon` create mode still contributes backbone
+  reps, so the backbone never builds from zero genomes).
+
 ---
 
 [← Back to Main README](../README.md)

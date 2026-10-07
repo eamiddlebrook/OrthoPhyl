@@ -269,7 +269,7 @@ python orthophyl_pipeline_wrapper.py \
     --database-dir databases/ \
     --output-dir results/ \
     --gather-script utils/gather_filter_asms.sh \
-    --gather-args "--lowmem --use-bbmap" \
+    --low-ram --use-bbmap \
     --threads 16
 ```
 
@@ -298,34 +298,91 @@ naming clades that aren't formally assigned by NCBI, and taxonomy-routability de
 
 ## Essential Configuration
 
-### Core Arguments
+Flags are grouped below by subject, matching `--help`'s layout.
 
-| Argument | Required | Description | Default |
-|----------|----------|-------------|---------|
-| `--input` | one of `--input`/`--taxon`/`--genome-dir` | Path to assemblies.tsv (batch mode) | - |
-| `--taxon` | one of `--input`/`--taxon`/`--genome-dir` | Taxon name for NCBI auto-gather mode | - |
-| `--genome-dir` | one of `--input`/`--taxon`/`--genome-dir` | Directory of genomes already on disk (local mode; requires `--clade-name`) | - |
-| `--database-dir` | ✅ | Directory containing taxonomy databases | - |
-| `--output-dir` | ❌ | Output directory for results | `<database-dir>/.pipeline_runs/<taxon>_<timestamp>` |
-| `--threads` | ❌ | Number of CPU threads | 8 |
-| `--resume` | ❌ | Resume from checkpoint | False |
+### Mode selection (mutually exclusive, one required)
 
-### Pipeline Control
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--input` | Input TSV: assembly_path, taxonomy, [id]. Batch mode. | - |
+| `--taxon` | Taxon name for NCBI auto-gather mode (e.g. "Methylorubrum"). | - |
+| `--genome-dir` | Directory of genomes already on disk (local mode; requires `--clade-name`). | - |
+
+### Core
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--database-dir` | Directory containing `*_db` databases (required) | - |
+| `--output-dir` | Output directory for all results | `<database-dir>/.pipeline_runs/<taxon>_<timestamp>` |
+
+### Run control
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--resume` | Resume from last checkpoint | False |
+| `--dry-run` | Show what would be executed without running anything | False |
+| `--skip-download` | Skip genome downloading (use existing genomes) | False |
+| `--update-existing` | Update existing database with new assemblies (taxon mode only) | False |
+
+### Performance
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--threads` | Number of threads | 8 |
+| `--low-ram` | Reduced-memory CheckM2 mode (`--lowmem`) | False |
+| `--use-bbmap` | Use bbmap instead of CheckM2 for genome stats (faster, less RAM, no completeness/contamination filtering) | False |
+| `--ani-shortlist` | OrthoFinder MASH-shortlist size (`-n`); forced so small databases still get HMMs built | 20 |
+
+### Gather / QC
 
 | Argument | Description | Default |
 |----------|-------------|---------|
 | `--gather-script` | Path to genome download script | `utils/gather_filter_asms.sh` (next to the wrapper) |
-| `--gather-args` | Additional args for gather script | "" |
 | `--orthophyl-runs` | TSV for initial database creation | None |
-| `--skip-releaf` | Skip ReLeaf route | False |
-| `--skip-orthophyl` | Skip OrthoPhyl route | False |
+| `--must-keep` | Accessions that must survive QC, or the run aborts with a per-metric report | None |
+| `--keep-failing-query` | Let a failing query genome through with a warning instead of aborting | False |
+| `--skip-qc` | Skip CheckM2 QC on `--genome-dir` genomes | False |
 
-### Tree Configuration
+### Taxon mode (`--taxon`)
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `--tree-method` | Tree inference method (iqtree/fasttree) | iqtree |
-| `--tree-data` | Data type (CDS/protein) | CDS |
+| `--taxon-rank` | Taxonomic rank for the `--taxon` query (species/genus/family/order/class/phylum) | auto-detect |
+
+### Local genome-ingest mode (`--genome-dir`)
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--clade-name` | Names the clade/database (required with `--genome-dir`) | - |
+| `--clade-taxonomy` | Full GTDB taxonomy string, used verbatim, for clades that don't resolve against NCBI | None |
+| `--clade-rank` | GTDB rank letter (`d`..`s`) an unresolvable `--clade-name` is attached at | `g` (genus) |
+
+### Large-taxon handling
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--max-tree-genomes` | Single-tree ceiling before diverse subsampling (or `--megatree`) kicks in | 2000 |
+| `--subsample-size` | Target genome count for the diverse MASH subsample | 500 |
+| `--max-total-genomes` | Guardrail for the opt-in megatree partitioner (O(n²) distance array) | 25000 |
+
+### Megatree (opt-in, `--megatree`)
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--megatree` | Partition an oversized taxon into subclades + a backbone instead of subsampling to one tree | False |
+| `--backbone-reps` | Diverse representatives each subclade contributes to the backbone | 5 |
+| `--subclade-size` | Per-subclade genome ceiling | 150 |
+| `--conflict-min-support` | Support threshold for flagging a backbone/subclade bipartition conflict | 90 |
+| `--megatree-lazy` | Defer building subclades with no query at partition time; build on demand later | False |
+| `--megatree-hmm-reuse` | Give every subclade the backbone's orthogroup HMMs instead of its own OrthoFinder run | False |
+| `--megatree-hmm-reuse-skip-leftover` | With `--megatree-hmm-reuse`, drop genes unmatched by the backbone's HMMs instead of clustering them | False |
+| `--placement` | Tie-break for a query matching both a subclade and the backbone (`subclade`/`backbone`) | `subclade` |
+
+### Low importance
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `-v`, `--verbose` | `-v` shows subprocess stdout, `-vv` shows stdout and stderr | 0 |
 
 **🔧 For complete configuration reference, see [Technical Reference](readmes/README_TECHNICAL_REFERENCE.md#configuration-options)**
 
@@ -371,9 +428,9 @@ ls results/checkpoints/
 **Solution**:
 ```bash
 # CheckM2 (DIAMOND + ML models, no reference tree/pplacer) already uses far less
-# RAM than legacy CheckM1. Use --lowmem to halve DIAMOND RAM, or --use-bbmap to skip.
+# RAM than legacy CheckM1. Use --low-ram to halve DIAMOND RAM, or --use-bbmap to skip.
 python orthophyl_pipeline_wrapper.py \
-    --gather-args "--lowmem --use-bbmap" \
+    --low-ram --use-bbmap \
     --threads 16  # Reduce threads
 ```
 
@@ -428,7 +485,7 @@ ls databases/MyDatabase_db/orthophyl_run/OG_alignmentsToHMM/hmms_final/
 
 2. **Low-Memory Systems**:
    ```bash
-   --gather-args "--lowmem --use-bbmap"
+   --low-ram --use-bbmap
    ```
 
 3. **Large Datasets** (>100 assemblies):

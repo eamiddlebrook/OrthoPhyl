@@ -585,27 +585,91 @@ database_dir/
 python orthophyl_pipeline_wrapper.py [OPTIONS]
 ```
 
-#### Required Arguments
+Flags are grouped below by subject, matching `--help`'s layout.
+
+#### Mode selection (mutually exclusive, one required)
 
 | Argument | Description |
 |----------|-------------|
-| `--input FILE` | Input TSV file with assemblies and taxonomies |
-| `--database-dir DIR` | Directory containing taxonomy databases |
+| `--input FILE` | Input TSV: assembly_path, taxonomy, [id]. Batch mode. |
+| `--taxon NAME` | Taxon name for NCBI auto-gather mode. |
+| `--genome-dir DIR` | Directory of genomes already on disk (local mode; requires `--clade-name`). |
 
-#### Optional Arguments
+#### Core
 
 | Argument | Default | Description |
 |----------|---------|-------------|
+| `--database-dir DIR` | required | Directory containing `*_db` databases |
 | `--output-dir DIR` | `<database-dir>/.pipeline_runs/<taxon>_<timestamp>` | Output directory for all results. `<taxon>` is the `--taxon` name, `TaxID<num>` for a numeric TaxID, or `run` in batch mode |
-| `--threads N` | 8 | Number of CPU threads to use |
-| `--gather-script PATH` | None | Path to gather_filter_asms.sh for genome downloading |
-| `--orthophyl-runs FILE` | None | TSV for initial database creation |
+
+#### Run control
+
+| Argument | Default | Description |
+|----------|---------|-------------|
 | `--resume` | False | Resume from last checkpoint |
-| `--skip-download` | False | Skip genome downloading (use existing) |
 | `--dry-run` | False | Show commands without executing |
-| `-v, --verbose` | 0 | Verbose output (use -v or -vv) |
+| `--skip-download` | False | Skip genome downloading (use existing) |
+| `--update-existing` | False | Update existing database with new assemblies (taxon mode only) |
+
+#### Performance
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--threads N` | 8 | Number of CPU threads to use |
 | `--low-ram` | False | Pass CheckM2 `--lowmem` (halves DIAMOND RAM) |
 | `--use-bbmap` | False | Use bbmap instead of CheckM2 (faster, less stringent) |
+| `--ani-shortlist N` | 20 | OrthoFinder MASH-shortlist size (`-n`), forced so small databases still get HMMs built |
+
+#### Gather / QC
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--gather-script PATH` | `utils/gather_filter_asms.sh` (next to the wrapper) | Path to gather_filter_asms.sh for genome downloading |
+| `--orthophyl-runs FILE` | None | TSV for initial database creation |
+| `--must-keep LIST\|FILE` | None | Accessions that must survive QC, or the run aborts with a per-metric report |
+| `--keep-failing-query` | False | Let a failing query genome through with a warning instead of aborting |
+| `--skip-qc` | False | Skip CheckM2 QC on `--genome-dir` genomes |
+
+#### Taxon mode (`--taxon`)
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--taxon-rank {species,genus,family,order,class,phylum}` | auto-detect | Taxonomic rank for the `--taxon` query |
+
+#### Local genome-ingest mode (`--genome-dir`)
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--clade-name NAME` | required with `--genome-dir` | Names the clade/database |
+| `--clade-taxonomy STR` | None | Full GTDB taxonomy string, used verbatim, for clades that don't resolve against NCBI |
+| `--clade-rank {d,p,c,o,f,g,s}` | `g` | Rank letter an unresolvable `--clade-name` is attached at |
+
+#### Large-taxon handling
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--max-tree-genomes N` | 2000 | Single-tree ceiling before diverse subsampling (or `--megatree`) kicks in |
+| `--subsample-size N` | 500 | Target genome count for the diverse MASH subsample |
+| `--max-total-genomes N` | 25000 | Guardrail for the opt-in megatree partitioner (O(n²) distance array) |
+
+#### Megatree (opt-in, `--megatree`)
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--megatree` | False | Partition an oversized taxon into subclades + a backbone instead of subsampling to one tree |
+| `--backbone-reps N` | 5 | Diverse representatives each subclade contributes to the backbone |
+| `--subclade-size N` | 150 | Per-subclade genome ceiling |
+| `--conflict-min-support N` | 90 | Support threshold for flagging a backbone/subclade bipartition conflict |
+| `--megatree-lazy` | False | Defer building subclades with no query at partition time; build on demand later |
+| `--megatree-hmm-reuse` | False | Give every subclade the backbone's orthogroup HMMs instead of its own OrthoFinder run |
+| `--megatree-hmm-reuse-skip-leftover` | False | With `--megatree-hmm-reuse`, drop genes unmatched by the backbone's HMMs instead of clustering them |
+| `--placement {subclade,backbone}` | `subclade` | Tie-break for a query matching both a subclade and the backbone |
+
+#### Low importance
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `-v, --verbose` | 0 | Verbose output (use -v or -vv) |
 
 ### Verbosity Levels
 
