@@ -566,6 +566,45 @@ class TestMegatreeHmmReuse:
             # genomes_to_keep was passed through (no redundant QC in _build_subclade).
             assert b["genomes_to_keep"] is not None
 
+    def test_skip_leftover_defaults_false(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True,
+                          megatree_hmm_reuse=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2)
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        for i in range(8):
+            (raw / f"g{i}.fna").write_text(">c\nAC\n")
+
+        w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                        query_assemblies=[_query(tmp_path)],
+                        taxonomy="d__Bacteria;g__Andreesenella")
+
+        assert len(rec["build"]) == 2
+        for b in rec["build"]:
+            assert b["skip_hmm_assign_leftover"] is False
+
+    def test_skip_leftover_threads_through_when_set(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        w = _make_wrapper(Wrapper, tmp_path, max_tree_genomes=5, megatree=True,
+                          megatree_hmm_reuse=True,
+                          megatree_hmm_reuse_skip_leftover=True)
+        rec = self._wire(w, wrapper_module, monkeypatch, n_subclades=2)
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        for i in range(8):
+            (raw / f"g{i}.fna").write_text(">c\nAC\n")
+
+        w._run_megatree(taxon_name="Andreesenella", raw_dir=raw,
+                        query_assemblies=[_query(tmp_path)],
+                        taxonomy="d__Bacteria;g__Andreesenella")
+
+        assert len(rec["build"]) == 2
+        for b in rec["build"]:
+            assert b["skip_hmm_assign_leftover"] is True
+
     def test_falls_back_to_independent_when_no_hmms_final(
             self, Wrapper, wrapper_module, tmp_path, monkeypatch):
         """If the backbone run never produces hmms_final/ (e.g. too few

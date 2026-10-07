@@ -526,6 +526,53 @@ class TestRunOrthophylCommand:
         assert "--hmm-assign-dir" in cmd
         assert cmd[cmd.index("--hmm-assign-dir") + 1] == str(hmm_dir)
 
+    def test_skip_hmm_assign_leftover_omitted_by_default(
+            self, Wrapper, tmp_path, recording_run):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        w.logs_dir.mkdir(parents=True, exist_ok=True)
+        input_dir = self._make_genome_dir(tmp_path, 6)
+        hmm_dir = tmp_path / "backbone_hmms"
+        hmm_dir.mkdir()
+
+        w._run_orthophyl(
+            input_dir=input_dir, output_dir=tmp_path / "out_run",
+            taxon_name="Foo", assemblies=[], hmm_assign_dir=hmm_dir)
+
+        cmd = recording_run[0]["cmd"]
+        assert "--skip-hmm-assign-leftover" not in cmd
+
+    def test_skip_hmm_assign_leftover_threaded_through_when_requested(
+            self, Wrapper, tmp_path, recording_run):
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        w.logs_dir.mkdir(parents=True, exist_ok=True)
+        input_dir = self._make_genome_dir(tmp_path, 6)
+        hmm_dir = tmp_path / "backbone_hmms"
+        hmm_dir.mkdir()
+
+        w._run_orthophyl(
+            input_dir=input_dir, output_dir=tmp_path / "out_run",
+            taxon_name="Foo", assemblies=[], hmm_assign_dir=hmm_dir,
+            skip_hmm_assign_leftover=True)
+
+        cmd = recording_run[0]["cmd"]
+        assert "--skip-hmm-assign-leftover" in cmd
+
+    def test_skip_hmm_assign_leftover_ignored_without_hmm_assign_dir(
+            self, Wrapper, tmp_path, recording_run):
+        """skip_hmm_assign_leftover is only meaningful alongside
+        hmm_assign_dir -- it must not leak onto a normal run."""
+        w = _make_wrapper(Wrapper, tmp_path, tmp_path / "db")
+        w.logs_dir.mkdir(parents=True, exist_ok=True)
+        input_dir = self._make_genome_dir(tmp_path, 6)
+
+        w._run_orthophyl(
+            input_dir=input_dir, output_dir=tmp_path / "out_run",
+            taxon_name="Foo", assemblies=[], skip_hmm_assign_leftover=True)
+
+        cmd = recording_run[0]["cmd"]
+        assert "--skip-hmm-assign-leftover" not in cmd
+        assert "--hmm-assign-dir" not in cmd
+
 
 class TestCreateDatabaseEntryLogFile:
     """_create_database_entry builds log_file = self.logs_dir /

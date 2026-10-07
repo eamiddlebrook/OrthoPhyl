@@ -137,10 +137,24 @@ it directly rather than re-solving.
 
 ## 4. Scaffold support for an external HMM set (e.g. BUSCO) [DONE]
 
-**Status**: Implemented. New opt-in `OrthoPhyl.sh --hmm-assign-leftover-orthofinder`
-flag (`script_lib/arg_parse.sh`), only meaningful alongside `--hmm-assign-dir`.
-Default off — without it, `HMM_ASSIGN_FROM_EXTERNAL` behaves exactly as item 3
-left it (log-and-drop unmatched genes).
+**Status**: Implemented, then made the default. New
+`OrthoPhyl.sh --hmm-assign-leftover-orthofinder` flag (`script_lib/arg_parse.sh`),
+only meaningful alongside `--hmm-assign-dir`, landed first as opt-in
+(default off). Per a follow-up request, leftover-OrthoFinder routing is now
+**ON by default** whenever `--hmm-assign-dir` is used — the flag itself is
+kept as a no-op for explicitness/symmetry, and a new
+`--skip-hmm-assign-leftover` flag restores the old log-and-drop behavior
+(mirrors the existing `--skip-qc` pattern in this codebase: on by default,
+explicit opt-out). The default-flip is a one-line change
+(`script_lib/functions.sh`'s `${hmm_assign_leftover_orthofinder:-true}`
+check), everything else below is unchanged.
+
+At the wrapper level, `--megatree-hmm-reuse` gets this for free (every
+subclade build already passes `hmm_assign_dir`, so it now also gets
+leftover-routing with no wrapper change) — a matching
+`--megatree-hmm-reuse-skip-leftover` wrapper flag was added so a wrapper
+user can opt back out too, threading `--skip-hmm-assign-leftover` through
+`_run_orthophyl`/`_build_subclade` for every subclade build in that path.
 
 When set, `HMM_ASSIGN_FROM_EXTERNAL`'s tail (`script_lib/functions.sh`) now:
 1. Computes the gene-level leftover set — all `all_prots.nm.fa` names MINUS

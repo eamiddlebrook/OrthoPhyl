@@ -54,14 +54,18 @@ Optional:
 	scratch and fed into the normal TRIM/SCO_MIN_ALIGN/TREE_BUILD steps. Intended for building a
 	subclade tree that shares orthogroup identity with another already-built tree (e.g. a
 	megatree backbone) without sharing its alignments/trim/tree model.
---hmm-assign-leftover-orthofinder  only meaningful with --hmm-assign-dir. By default, genes that
-	match NONE of the external HMMs are simply dropped (logged to hmm_assign_unmatched_OGs.txt).
-	With this flag, those leftover sequences are instead pooled per-genome and run through a
-	real OrthoFinder clustering step of their own, finding additional orthogroups among
-	themselves (exactly like a normal small-dataset OrthoPhyl run would). Freshly-discovered
-	orthogroups are written as OG0_LFT_<number> (distinct from the external HMM set's own OG
-	IDs, to avoid collisions when hmm_assign_dir came from a prior OrthoPhyl run) and flow into
-	the same TRIM/SCO_MIN_ALIGN/TREE_BUILD pipeline as the externally-assigned ones. Default off.
+--hmm-assign-leftover-orthofinder  only meaningful with --hmm-assign-dir, and now ON BY DEFAULT
+	whenever --hmm-assign-dir is used (this flag is a no-op kept for explicitness/symmetry with
+	--skip-hmm-assign-leftover below). Genes that match NONE of the external HMMs are pooled
+	per-genome and run through a real OrthoFinder clustering step of their own, finding
+	additional orthogroups among themselves (exactly like a normal small-dataset OrthoPhyl run
+	would). Freshly-discovered orthogroups are written as OG0_LFT_<number> (distinct from the
+	external HMM set's own OG IDs, to avoid collisions when hmm_assign_dir came from a prior
+	OrthoPhyl run) and flow into the same TRIM/SCO_MIN_ALIGN/TREE_BUILD pipeline as the
+	externally-assigned ones.
+--skip-hmm-assign-leftover  only meaningful with --hmm-assign-dir. Disables the above (restores
+	the old behavior: genes matching no external HMM are simply dropped, logged to
+	hmm_assign_unmatched_OGs.txt).
 -h|--help  display a description and a super useful usage message
 ###############################################################\n
 To run test datasets:
@@ -364,6 +368,10 @@ ARG_PARSE () {
 
 			--hmm-assign-leftover-orthofinder)
 				hmm_assign_leftover_orthofinder=true
+				shift ;;
+
+			--skip-hmm-assign-leftover)
+				hmm_assign_leftover_orthofinder=false
 				shift ;;
 
 			\?) # Invalid option

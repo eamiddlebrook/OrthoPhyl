@@ -846,11 +846,12 @@ HMM_ASSIGN_FROM_EXTERNAL () {
 	done
 	echo "$(cat $unmatched_log | wc -l) of $(ls $hmm_assign_dir/*.hmm | wc -l) external OGs had no hits in this genome set (see $unmatched_log)"
 
-	# --hmm-assign-leftover-orthofinder: route genes that matched NONE of the
-	#   external HMMs through a real OrthoFinder run of their own, instead of
-	#   just dropping them. Off by default -- without the flag, behavior
-	#   below is skipped entirely and this function ends exactly as before.
-	if [[ ${hmm_assign_leftover_orthofinder+x} ]]
+	# Route genes that matched NONE of the external HMMs through a real
+	#   OrthoFinder run of their own, instead of just dropping them. ON by
+	#   default whenever --hmm-assign-dir is used; --skip-hmm-assign-leftover
+	#   sets hmm_assign_leftover_orthofinder=false to restore the old
+	#   log-and-drop behavior.
+	if [[ "${hmm_assign_leftover_orthofinder:-true}" = true ]]
 	then
 		# Leftover names = all_prots.nm.fa names MINUS every name that
 		#   appears in any matched $new_OG_prots/<OG>.faa (gene-level, NOT

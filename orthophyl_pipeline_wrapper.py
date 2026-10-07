@@ -113,6 +113,7 @@ class PipelineWrapper:
         conflict_min_support: int = 90,
         megatree_lazy: bool = False,
         megatree_hmm_reuse: bool = False,
+        megatree_hmm_reuse_skip_leftover: bool = False,
         placement: str = 'subclade',
         # NEW: local genome-ingest mode (build a DB from genomes already on disk,
         #   under a user-supplied clade name that was not assigned by NCBI)
@@ -257,6 +258,15 @@ class PipelineWrapper:
         #   independently parallelizable, so it defaults off rather than
         #   silently changing --megatree's existing runtime shape.
         self.megatree_hmm_reuse = megatree_hmm_reuse
+
+        # OrthoPhyl.sh's --hmm-assign-dir now defaults to routing HMM-
+        #   unmatched genes through a real OrthoFinder run of their own
+        #   (--hmm-assign-leftover-orthofinder's new default), so every
+        #   --megatree-hmm-reuse subclade build gets this for free with no
+        #   wrapper change. This flag mirrors --skip-qc's pattern to let a
+        #   wrapper user opt back out, passing OrthoPhyl.sh
+        #   --skip-hmm-assign-leftover for every subclade build.
+        self.megatree_hmm_reuse_skip_leftover = megatree_hmm_reuse_skip_leftover
 
         # Which tree a query is placed into when a megatree parent taxon has
         #   multiple tied-specificity matches (its subclades + its backbone):
@@ -1437,7 +1447,8 @@ class PipelineWrapper:
                 taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
                 query_assemblies=queries_here, taxonomy=taxonomy,
                 is_subclade=True, hmm_assign_dir=hmm_assign_dir,
-                genomes_to_keep=genomes_to_keep_by_subclade.get(sc_name))
+                genomes_to_keep=genomes_to_keep_by_subclade.get(sc_name),
+                skip_hmm_assign_leftover=self.megatree_hmm_reuse_skip_leftover)
 
             sc_tree = self._locate_species_tree(
                 self.orthophyl_dir / "orthophyl_runs" / sc_name)
@@ -1646,7 +1657,8 @@ class PipelineWrapper:
                         query_assemblies: List[Dict], taxonomy: str,
                         is_subclade: bool, force: bool = False,
                         hmm_assign_dir: Optional[Path] = None,
-                        genomes_to_keep: Optional[Path] = None):
+                        genomes_to_keep: Optional[Path] = None,
+                        skip_hmm_assign_leftover: bool = False):
         """QC one subclade's raw members, run OrthoPhyl, and create its DB entry.
 
         For the unpartitioned case (is_subclade=False) sc_name == taxon_name and
@@ -1660,9 +1672,10 @@ class PipelineWrapper:
         force=True overwrites an existing DB dir for this subclade (e.g. when
         rebuilding), rather than aborting on FileExistsError.
 
-        hmm_assign_dir (optional): threaded straight into _run_orthophyl --
-        see its docstring. Used by the opt-in --megatree-hmm-reuse path to
-        give every subclade the megatree backbone's orthogroup HMMs.
+        hmm_assign_dir/skip_hmm_assign_leftover (optional): threaded straight
+        into _run_orthophyl -- see its docstring. Used by the opt-in
+        --megatree-hmm-reuse path to give every subclade the megatree
+        backbone's orthogroup HMMs.
         """
         sc_name = entry['name']
         sc_id = entry.get('subclade_id')
@@ -1725,7 +1738,8 @@ class PipelineWrapper:
                 output_dir=orthophyl_output,
                 taxon_name=sc_name,
                 assemblies=query_assemblies,
-                hmm_assign_dir=hmm_assign_dir)
+                hmm_assign_dir=hmm_assign_dir,
+                skip_hmm_assign_leftover=skip_hmm_assign_leftover)
             self._write_checkpoint(f"orthophyl_{ckey}")
 
         # ---- Database entry ----
@@ -2328,6 +2342,7 @@ class PipelineWrapper:
         taxon_name: str,
         assemblies: List[Dict],
         hmm_assign_dir: Optional[Path] = None,
+        skip_hmm_assign_leftover: bool = False,
     ):
         """Run OrthoPhyl on combined genome set.
 
@@ -2341,6 +2356,11 @@ class PipelineWrapper:
         that path (OrthoPhyl.sh's --hmm-assign-dir branch never reaches the
         MASH-shortlist size check), so it's passed unconditionally for
         simplicity rather than conditionally omitted.
+
+        skip_hmm_assign_leftover: only meaningful alongside hmm_assign_dir.
+        OrthoPhyl.sh now routes HMM-unmatched genes through a real
+        OrthoFinder run by default; set this to pass --skip-hmm-assign-leftover
+        and restore the old log-and-drop behavior for this run.
         """
         # Force the MASH-shortlist/HMM-building branch of OrthoPhyl.sh's MAIN_PIPE
         # (ANI_ORTHOFINDER_TO_ALL_SEQS) regardless of input size -- see ani_shortlist's
@@ -2361,6 +2381,8 @@ class PipelineWrapper:
         ]
         if hmm_assign_dir is not None:
             cmd.extend(['--hmm-assign-dir', str(hmm_assign_dir)])
+            if skip_hmm_assign_leftover:
+                cmd.append('--skip-hmm-assign-leftover')
 
         logger.info(f"\n  Running OrthoPhyl for {taxon_name}...")
         self._log_command(cmd)
@@ -3621,7 +3643,18 @@ Examples:
              'each subclade still computes its OWN alignment/trim/tree model. '
              'Requires building the backbone BEFORE any subclade (reordered from '
              'the default --megatree flow), so it is opt-in rather than silently '
-             'changing --megatree\'s existing runtime shape. Default off.'
+             'changing --megatree\'s existing runtime shape. Default off. Genes a '
+             'subclade has that match none of the backbone\'s HMMs are, by '
+             'OrthoPhyl.sh\'s own default, routed through a real OrthoFinder run '
+             'of their own (see --megatree-hmm-reuse-skip-leftover to disable).'
+    )
+    parser.add_argument(
+        '--megatree-hmm-reuse-skip-leftover',
+        action='store_true',
+        help='Only meaningful with --megatree-hmm-reuse. Passes OrthoPhyl.sh '
+             '--skip-hmm-assign-leftover for every subclade build, restoring the '
+             'old behavior of dropping genes that match none of the backbone\'s '
+             'HMMs instead of running a real OrthoFinder pass on them. Default off.'
     )
     parser.add_argument(
         '--placement',
@@ -3708,6 +3741,7 @@ Examples:
         conflict_min_support=args.conflict_min_support,
         megatree_lazy=args.megatree_lazy,
         megatree_hmm_reuse=args.megatree_hmm_reuse,
+        megatree_hmm_reuse_skip_leftover=args.megatree_hmm_reuse_skip_leftover,
         placement=args.placement,
         genome_dir=args.genome_dir,
         clade_name=args.clade_name,
