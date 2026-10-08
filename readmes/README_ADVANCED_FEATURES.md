@@ -501,6 +501,13 @@ NCBI-assigned) and `qc_applied: true`. `--skip-qc` is rejected together with
 `--megatree --genome-dir` for now (every subclade/backbone build QCs its own
 genomes in this path) — use `--megatree` without `--skip-qc`.
 
+**Covered by:** `tests/integration/test_local_genome_megatree.py` (real-tool
+end-to-end: run completes, merged megatree + conflict report published,
+backbone and every subclade database carry `taxonomy_source: "user_supplied"`
+and `qc_applied: true`) and `tests/unit/test_wrapper_local_genomes.py::
+TestLocalGenomesMegatree` (mocked-subprocess wiring, incl. the `--skip-qc`
+rejection at CLI-parse time).
+
 **Notes and caveats:**
 
 - `--subclade-size` is a ceiling compared against the *raw* (pre-QC) count, so a

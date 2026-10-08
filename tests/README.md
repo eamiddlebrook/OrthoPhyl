@@ -137,6 +137,7 @@ seconds; integration tests are for nightly CI or pre-release validation.
 | `test_releaf_fasttest.py` | ReLeaf.sh add-assembly: exit 0, new alignments/trees, added taxa present, original taxa retained, 8 total taxa |
 | `test_megatree_lazy.py` | `orthophyl_pipeline_wrapper.py --megatree --megatree-lazy` end-to-end: partition into subclades, eager vs lazy (`built=false` placeholder) registration, on-demand build when a later query MASH-matches an unbuilt subclade, promotion to `built=true`, ReLeaf onto the freshly-built subclade |
 | `test_hmm_assign.py` | `OrthoPhyl.sh --hmm-assign-dir`: basic external-HMM gene assignment (no OrthoFinder run), default leftover-OrthoFinder routing for genes matching no external HMM (`OG0_LFT_*` orthogroups), and `--skip-hmm-assign-leftover` restoring log-and-drop |
+| `test_local_genome_megatree.py` | `orthophyl_pipeline_wrapper.py --genome-dir --megatree`: full-coverage partition/backbone/graft build from genomes already on disk, merged megatree + conflict report published, backbone and every subclade database carry `taxonomy_source: "user_supplied"` and `qc_applied: true` |
 
 The **topology comparison** (Robinson-Foulds distance = 0) is the strongest assertion — it
 catches not just "a tree was produced" but "the *correct* tree was produced."

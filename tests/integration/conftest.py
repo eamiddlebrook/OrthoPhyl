@@ -296,6 +296,52 @@ def hmm_assign_subclade_genomes(chloroplast_genomes_dir, tmp_path_factory) -> Pa
     return dest
 
 
+# 20 real chloroplast genomes for the --genome-dir --megatree integration test,
+# disjoint from both _CYMBIDIUM_RAW_20 and the _HMM_ASSIGN_* sets above. No
+# parentheses/colons in the filenames (bbmap's statswrapper.sh -- used via
+# --use-bbmap in this test -- chokes on "(" in a filename passed on its argv;
+# hit this during manual verification of the --genome-dir --megatree feature).
+# Hardcoded for the same reasons as the other fixtures in this file: excludes
+# the anomalous 50MB `.fasta` file, and keeps partitioning deterministic.
+_LOCAL_MEGATREE_20 = [
+    "MG752972.1_Pelatantheria_scolopendrifolia_isolate_170927001.fasta",
+    "MG752973.1_Pelatantheria_scolopendrifolia_isolate_170927002.fasta",
+    "MG925365.1_Calanthe_davidii.fasta",
+    "MG925366.1_Cremastra_appendiculata.fasta",
+    "MG925367.1_Epipactis_mairei.fasta",
+    "MG925368.2_Platanthera_japonica.fasta",
+    "MH719016.1_Gastrochilus_calceolaris.fasta",
+    "MK361027.1_Pleione_formosana.fasta",
+    "MK608776.1_Epipactis_helleborine.fasta",
+    "MK736029.1_Calanthe_sylvatica.fasta",
+    "MK801140.1_Liparis_yongnoana.fasta",
+    "MK836105.1_Vanda_concolor_isolate_LDKAe62.fasta",
+    "MK836106.1_Holcoglossum_tsii_isolate_LDKAe67.fasta",
+    "MK848065.1_Geodorum_eulophioides_isolate_gzdbl.fasta",
+    "MK936427.1_Spiranthes_sinensis.fasta",
+    "MK937812.1_Lindera_megaphylla.fasta",
+    "MK937813.1_Lindera_megaphylla.fasta",
+    "MK946948.1_Coelogyne_fimbriata.fasta",
+    "MK946949.1_Coelogyne_ovalis.fasta",
+    "MN153814.1_Paphiopedilum_barbigerum.fasta",
+]
+
+
+@pytest.fixture(scope="session")
+def local_megatree_genomes(chloroplast_genomes_dir, tmp_path_factory) -> Path:
+    """Stage the 20 local-megatree genomes (as .fasta -- OrthoPhyl.sh -g
+    accepts that extension directly) into their own directory."""
+    dest = tmp_path_factory.mktemp("local_megatree_genomes")
+    missing = [f for f in _LOCAL_MEGATREE_20
+               if not (chloroplast_genomes_dir / f).exists()]
+    if missing:
+        pytest.fail(f"Expected chloroplast files missing from "
+                    f"{chloroplast_genomes_dir}: {missing}")
+    for fasta_name in _LOCAL_MEGATREE_20:
+        shutil.copy(chloroplast_genomes_dir / fasta_name, dest / fasta_name)
+    return dest
+
+
 @pytest.fixture(scope="session")
 def fasttest_genomes(project_root) -> Path:
     """Return the path to the fasttest genomes directory."""
