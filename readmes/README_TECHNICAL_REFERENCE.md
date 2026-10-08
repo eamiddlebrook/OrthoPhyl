@@ -656,7 +656,7 @@ Flags are grouped below by subject, matching `--help`'s layout.
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--megatree` | False | Partition an oversized taxon into subclades + a backbone instead of subsampling to one tree |
+| `--megatree` | False | Partition an oversized taxon into subclades + a backbone instead of subsampling to one tree. Supported with `--genome-dir` (not combinable with `--skip-qc`). |
 | `--backbone-reps N` | 5 | Diverse representatives each subclade contributes to the backbone |
 | `--subclade-size N` | 150 | Per-subclade genome ceiling |
 | `--conflict-min-support N` | 90 | Support threshold for flagging a backbone/subclade bipartition conflict |

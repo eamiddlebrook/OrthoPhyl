@@ -101,8 +101,15 @@ startup log annotates the database with `[user-supplied taxonomy: not NCBI-assig
   `--use-bbmap`, `--low-ram`, `--must-keep`, `--keep-failing-query`, `--max-tree-genomes`,
   `--subsample-size`, `--dry-run`, `--resume`, `-v`/`-vv` — same meaning as in batch and
   taxon mode.
-- `--megatree` is **not supported** with `--genome-dir` (rejected at argument-parsing
-  time). Use `--subsample-size`/`--max-tree-genomes` for oversized local sets instead.
+- `--megatree` **is supported** with `--genome-dir`: when the staged genome count
+  exceeds `--max-tree-genomes`, the full-coverage partition/backbone/graft strategy
+  runs exactly as it does for `--taxon` create mode (no query assemblies either way,
+  so every subclade is built/registered immediately). The resulting subclade/backbone
+  databases carry `taxonomy_source: "user_supplied"`. `--megatree --skip-qc` together
+  is rejected at argument-parsing time (every subclade/backbone build QCs its own
+  genomes in this path) — drop `--skip-qc` to use `--megatree`. See
+  [Advanced Features](README_ADVANCED_FEATURES.md#opt-in-full-coverage-megatree---megatree)
+  for the full megatree writeup.
 
 ## Database Metadata
 

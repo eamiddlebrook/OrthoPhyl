@@ -351,8 +351,11 @@ class TestMegatreeLazyAllDeferred:
                     "query_assignments": {}}
         monkeypatch.setattr(w, "_partition_genomes", fake_partition)
 
-        def fake_register(taxon_name, entry, raw_dir, taxonomy, backbone_dir):
-            rec["register"].append({"taxon_name": taxon_name, "entry": entry})
+        def fake_register(taxon_name, entry, raw_dir, taxonomy, backbone_dir,
+                          taxonomy_source='ncbi', qc_applied=True):
+            rec["register"].append({"taxon_name": taxon_name, "entry": entry,
+                                    "taxonomy_source": taxonomy_source,
+                                    "qc_applied": qc_applied})
             rep_stems = []
             for i in range(register_rep_count):
                 stem = f"{entry['name']}_rep{i}"
@@ -827,3 +830,43 @@ class TestRegisterLazySubclade:
         assert rep_stems == []
         assert list(backbone_dir.iterdir()) == []
         assert w._check_checkpoint("register_Andreesenella_4")
+
+    def test_taxonomy_source_and_qc_applied_thread_into_db_creator_argv(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """The --genome-dir local megatree path passes taxonomy_source=
+        'user_supplied'/qc_applied=True through to the DB-creator subprocess
+        argv, exactly like _create_database_entry already does for its own
+        calls. Default args (every --taxon/--input caller) must stay
+        'ncbi'/no --qc-not-applied flag -- byte-identical to before."""
+        w = _make_wrapper(Wrapper, tmp_path)
+        self._stub_qc_and_subsample(w, monkeypatch, tmp_path, n_kept=1)
+
+        calls = []
+        class FakeCompleted:
+            returncode = 0
+        def fake_run(cmd, *a, **k):
+            calls.append([str(x) for x in cmd])
+            return FakeCompleted()
+        monkeypatch.setattr(wrapper_module.subprocess, "run", fake_run)
+
+        entry = {"name": "Andreesenella_5", "subclade_id": 5, "n_genomes": 10}
+        backbone_dir = tmp_path / "backbone_genomes"
+        backbone_dir.mkdir()
+
+        # Default (NCBI-sourced): no --qc-not-applied, --taxonomy-source ncbi.
+        w._register_lazy_subclade(
+            taxon_name="Andreesenella", entry=entry, raw_dir=tmp_path / "raw",
+            taxonomy="d__Bacteria;g__Andreesenella", backbone_dir=backbone_dir)
+        assert "--taxonomy-source" in calls[0]
+        assert calls[0][calls[0].index("--taxonomy-source") + 1] == "ncbi"
+        assert "--qc-not-applied" not in calls[0]
+
+        # user_supplied (local --genome-dir megatree path).
+        entry2 = {"name": "Blorptaxon_1", "subclade_id": 1, "n_genomes": 10}
+        w._register_lazy_subclade(
+            taxon_name="Blorptaxon", entry=entry2, raw_dir=tmp_path / "raw",
+            taxonomy="g__Blorptaxon", backbone_dir=backbone_dir,
+            taxonomy_source="user_supplied", qc_applied=True)
+        assert "--taxonomy-source" in calls[1]
+        assert calls[1][calls[1].index("--taxonomy-source") + 1] == "user_supplied"
+        assert "--qc-not-applied" not in calls[1]

@@ -492,7 +492,14 @@ mutually exclusive with subsampling — subsampling is simply the default when
 
 The taxon database is created from the **backbone** OrthoPhyl run so ReLeaf has a
 coherent HMM set. **`--taxon` create mode** takes the same path (there is no query,
-so all subclades and their reps are built).
+so all subclades and their reps are built). **`--genome-dir` local mode** also takes
+this same path when the staged genome count exceeds `--max-tree-genomes` — it has
+no query either (the whole `--genome-dir` *is* the input), so every subclade is
+built/registered immediately exactly like `--taxon` create mode. The resulting
+subclade/backbone databases carry `taxonomy_source: "user_supplied"` (not
+NCBI-assigned) and `qc_applied: true`. `--skip-qc` is rejected together with
+`--megatree --genome-dir` for now (every subclade/backbone build QCs its own
+genomes in this path) — use `--megatree` without `--skip-qc`.
 
 **Notes and caveats:**
 

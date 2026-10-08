@@ -558,6 +558,118 @@ class TestRunLocalGenomesMode:
         assert qc_calls[0] != local_dir
 
 
+class TestLocalGenomesMegatree:
+    """--genome-dir --megatree: local mode has no query (the whole
+    --genome-dir IS the input), so this mirrors --taxon create mode's
+    all-query-less megatree fork (TestCreateModeMegatreeDispatch in
+    test_wrapper_megatree.py)."""
+
+    def test_skip_qc_with_megatree_rejected_at_cli_parse(
+            self, wrapper_module, tmp_path, monkeypatch):
+        genome_dir = tmp_path / "genomes"
+        genome_dir.mkdir()
+        db_dir = tmp_path / "databases"
+        db_dir.mkdir()
+        argv = [
+            "orthophyl_pipeline_wrapper.py",
+            "--genome-dir", str(genome_dir),
+            "--clade-name", "Blorptaxon",
+            "--database-dir", str(db_dir),
+            "--megatree",
+            "--skip-qc",
+        ]
+        monkeypatch.setattr(wrapper_module.sys, "argv", argv)
+        with pytest.raises(SystemExit):
+            wrapper_module.main()
+
+    def test_megatree_without_skip_qc_is_accepted_at_cli_parse(
+            self, wrapper_module, tmp_path, monkeypatch):
+        """--megatree --genome-dir alone (no --skip-qc) must parse fine --
+        only the --skip-qc combination is rejected. Stubs PipelineWrapper.run
+        so only argparse/validation executes (no network, no real pipeline)."""
+        genome_dir = tmp_path / "genomes"
+        genome_dir.mkdir()
+        db_dir = tmp_path / "databases"
+        db_dir.mkdir()
+        argv = [
+            "orthophyl_pipeline_wrapper.py",
+            "--genome-dir", str(genome_dir),
+            "--clade-name", "Blorptaxon",
+            "--database-dir", str(db_dir),
+            "--megatree",
+            "--dry-run",
+        ]
+        monkeypatch.setattr(wrapper_module.sys, "argv", argv)
+        monkeypatch.setattr(wrapper_module.PipelineWrapper, "run", lambda self: 0)
+        rc = wrapper_module.main()
+        assert rc == 0
+
+    def test_over_ceiling_dispatches_to_run_megatree_with_user_supplied_provenance(
+            self, Wrapper, tmp_path, monkeypatch):
+        genome_dir = _make_genome_dir(
+            tmp_path, stems=[f"g{i}" for i in range(10)])
+        w = _make_local_wrapper(
+            Wrapper, tmp_path, genome_dir=genome_dir, clade_name="Blorptaxon",
+            megatree=True, max_tree_genomes=5)
+        monkeypatch.setattr(w, "_resolve_local_taxonomy",
+                             lambda: ("g__" + w.clade_name, False))
+
+        mega_calls = []
+        monkeypatch.setattr(w, "_run_megatree",
+                             lambda **k: mega_calls.append(k))
+        monkeypatch.setattr(w, "_subsample_genomes",
+                             lambda *a, **k: pytest.fail(
+                                 "megatree must not subsample"))
+        monkeypatch.setattr(w, "_qc_subclade",
+                             lambda *a, **k: pytest.fail(
+                                 "megatree must not QC the whole set directly "
+                                 "-- _run_megatree QCs per-subclade"))
+        monkeypatch.setattr(w, "_save_final_status", lambda: None)
+
+        rc = w._run_local_genomes_mode()
+        assert rc == 0
+        assert len(mega_calls) == 1
+        call = mega_calls[0]
+        assert call["taxon_name"] == "Blorptaxon"
+        assert call["query_assemblies"] == []
+        assert call["taxonomy_source"] == "user_supplied"
+        assert call["qc_applied"] is True
+
+    def test_under_ceiling_with_megatree_falls_through_to_single_tree(
+            self, Wrapper, tmp_path, monkeypatch):
+        """Even with --megatree, a set under the ceiling is a plain single
+        tree -- mirrors TestMegatreeDispatch's equivalent for --taxon/--input."""
+        genome_dir = _make_genome_dir(tmp_path, stems=["g0", "g1", "g2", "g3"])
+        w = _make_local_wrapper(
+            Wrapper, tmp_path, genome_dir=genome_dir, clade_name="Blorptaxon",
+            megatree=True, max_tree_genomes=10)
+        monkeypatch.setattr(w, "_resolve_local_taxonomy",
+                             lambda: ("g__" + w.clade_name, False))
+        monkeypatch.setattr(w, "_run_megatree",
+                             lambda **k: pytest.fail(
+                                 "under ceiling must not megatree"))
+
+        def fake_qc(subclade_dir, raw, taxon_label, query_assemblies=None):
+            gtk = subclade_dir / "genomes_to_keep"
+            gtk.mkdir(parents=True, exist_ok=True)
+            for i in range(4):
+                (gtk / f"k{i}.fna").write_text(">c\nAC\n")
+            return gtk
+
+        monkeypatch.setattr(w, "_qc_subclade", fake_qc)
+        monkeypatch.setattr(w, "_run_orthophyl", lambda **k: None)
+        db_calls = []
+        monkeypatch.setattr(w, "_create_local_database",
+                             lambda **k: db_calls.append(k))
+        monkeypatch.setattr(w, "_locate_species_tree",
+                             lambda out: out / "nonexistent.nwk")
+        monkeypatch.setattr(w, "_save_final_status", lambda: None)
+
+        rc = w._run_local_genomes_mode()
+        assert rc == 0
+        assert len(db_calls) == 1
+
+
 class TestCreateLocalDatabase:
     def test_config_provenance_fields(self, Wrapper, tmp_path, monkeypatch, wrapper_module):
         w = _make_local_wrapper(Wrapper, tmp_path, clade_name="Blorptaxon")

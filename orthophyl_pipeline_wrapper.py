@@ -1143,7 +1143,9 @@ class PipelineWrapper:
             is_subclade=False)
 
     def _run_megatree(self, taxon_name: str, raw_dir: Path,
-                      query_assemblies: List[Dict], taxonomy: str) -> None:
+                      query_assemblies: List[Dict], taxonomy: str,
+                      taxonomy_source: str = 'ncbi',
+                      qc_applied: bool = True) -> None:
         """Opt-in large-taxon strategy: partition -> per-subclade trees -> graft.
 
         For an oversized taxon (raw count > max_tree_genomes) build FULL coverage
@@ -1169,6 +1171,12 @@ class PipelineWrapper:
              the backbone run so ReLeaf has a coherent HMM set.
 
         Checkpointed per stage; dry-run short-circuits.
+
+        taxonomy_source/qc_applied (default 'ncbi'/True, byte-identical for
+        every existing --taxon/--input caller): provenance flags passed
+        straight through to every DB-creation call this method makes
+        (backbone, every subclade, every lazy registration) -- the
+        --genome-dir local megatree path passes 'user_supplied'/True.
         """
         logger.info("\n" + "=" * 70)
         logger.info(f"MEGATREE: full-coverage build for {taxon_name}")
@@ -1205,12 +1213,14 @@ class PipelineWrapper:
             subclade_specs = self._build_megatree_subclades_hmm_reuse(
                 taxon_name=taxon_name, raw_dir=raw_dir, subclades=subclades,
                 query_by_subclade=query_by_subclade, taxonomy=taxonomy,
-                backbone_dir=backbone_dir, backbone_out=backbone_out)
+                backbone_dir=backbone_dir, backbone_out=backbone_out,
+                taxonomy_source=taxonomy_source, qc_applied=qc_applied)
         else:
             subclade_specs = self._build_megatree_subclades_independent(
                 taxon_name=taxon_name, raw_dir=raw_dir, subclades=subclades,
                 query_by_subclade=query_by_subclade, taxonomy=taxonomy,
-                backbone_dir=backbone_dir)
+                backbone_dir=backbone_dir,
+                taxonomy_source=taxonomy_source, qc_applied=qc_applied)
 
             # Backbone tree built AFTER subclades in the default order.
             if self._check_checkpoint(f"megatree_backbone_{taxon_name}") and self.resume:
@@ -1295,12 +1305,14 @@ class PipelineWrapper:
         self._create_database_entry(
             taxon_name=taxon_name, orthophyl_output=backbone_out,
             taxonomy=taxonomy,
-            subclade_meta={'is_backbone': True, 'parent_taxon': taxon_name})
+            subclade_meta={'is_backbone': True, 'parent_taxon': taxon_name},
+            taxonomy_source=taxonomy_source, qc_applied=qc_applied)
 
     def _build_megatree_subclades_independent(
             self, taxon_name: str, raw_dir: Path, subclades: List[Dict],
             query_by_subclade: Dict[str, List[Dict]], taxonomy: str,
-            backbone_dir: Path) -> Dict[str, Dict]:
+            backbone_dir: Path, taxonomy_source: str = 'ncbi',
+            qc_applied: bool = True) -> Dict[str, Dict]:
         """Default --megatree order: build each subclade's own full tree
         FIRST (independent OrthoFinder run per subclade), then pick its
         backbone reps from the result. Returns {sc_name: {tree, reps}}.
@@ -1324,7 +1336,8 @@ class PipelineWrapper:
                             f"build ({entry['n_genomes']} raw genomes, no query)")
                 self._register_lazy_subclade(
                     taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
-                    taxonomy=taxonomy, backbone_dir=backbone_dir)
+                    taxonomy=taxonomy, backbone_dir=backbone_dir,
+                    taxonomy_source=taxonomy_source, qc_applied=qc_applied)
                 continue
 
             logger.info(f"\n  Building subclade {sc_name} "
@@ -1333,7 +1346,8 @@ class PipelineWrapper:
             self._build_subclade(
                 taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
                 query_assemblies=queries_here, taxonomy=taxonomy,
-                is_subclade=True)
+                is_subclade=True,
+                taxonomy_source=taxonomy_source, qc_applied=qc_applied)
 
             # Backbone reps: diverse pick over this subclade's QC-kept genomes,
             # seeded by its queries so they anchor the backbone.
@@ -1352,7 +1366,9 @@ class PipelineWrapper:
     def _build_megatree_subclades_hmm_reuse(
             self, taxon_name: str, raw_dir: Path, subclades: List[Dict],
             query_by_subclade: Dict[str, List[Dict]], taxonomy: str,
-            backbone_dir: Path, backbone_out: Path) -> Dict[str, Dict]:
+            backbone_dir: Path, backbone_out: Path,
+            taxonomy_source: str = 'ncbi',
+            qc_applied: bool = True) -> Dict[str, Dict]:
         """--megatree-hmm-reuse order: QC every subclade and pick its backbone
         reps FIRST, build the backbone tree (producing hmms_final/), THEN
         build every subclade passing --hmm-assign-dir so it shares the
@@ -1384,7 +1400,8 @@ class PipelineWrapper:
                             f"build ({entry['n_genomes']} raw genomes, no query)")
                 self._register_lazy_subclade(
                     taxon_name=taxon_name, entry=entry, raw_dir=raw_dir,
-                    taxonomy=taxonomy, backbone_dir=backbone_dir)
+                    taxonomy=taxonomy, backbone_dir=backbone_dir,
+                    taxonomy_source=taxonomy_source, qc_applied=qc_applied)
                 continue
             buildable_entries.append(entry)
 
@@ -1448,7 +1465,8 @@ class PipelineWrapper:
                 query_assemblies=queries_here, taxonomy=taxonomy,
                 is_subclade=True, hmm_assign_dir=hmm_assign_dir,
                 genomes_to_keep=genomes_to_keep_by_subclade.get(sc_name),
-                skip_hmm_assign_leftover=self.megatree_hmm_reuse_skip_leftover)
+                skip_hmm_assign_leftover=self.megatree_hmm_reuse_skip_leftover,
+                taxonomy_source=taxonomy_source, qc_applied=qc_applied)
 
             sc_tree = self._locate_species_tree(
                 self.orthophyl_dir / "orthophyl_runs" / sc_name)
@@ -1658,7 +1676,9 @@ class PipelineWrapper:
                         is_subclade: bool, force: bool = False,
                         hmm_assign_dir: Optional[Path] = None,
                         genomes_to_keep: Optional[Path] = None,
-                        skip_hmm_assign_leftover: bool = False):
+                        skip_hmm_assign_leftover: bool = False,
+                        taxonomy_source: str = 'ncbi',
+                        qc_applied: bool = True):
         """QC one subclade's raw members, run OrthoPhyl, and create its DB entry.
 
         For the unpartitioned case (is_subclade=False) sc_name == taxon_name and
@@ -1676,6 +1696,10 @@ class PipelineWrapper:
         into _run_orthophyl -- see its docstring. Used by the opt-in
         --megatree-hmm-reuse path to give every subclade the megatree
         backbone's orthogroup HMMs.
+
+        taxonomy_source/qc_applied (default 'ncbi'/True): provenance flags
+        passed straight through to _create_database_entry. The --genome-dir
+        local megatree path passes 'user_supplied'/True.
         """
         sc_name = entry['name']
         sc_id = entry.get('subclade_id')
@@ -1763,7 +1787,9 @@ class PipelineWrapper:
                 orthophyl_output=orthophyl_output,
                 taxonomy=taxonomy,
                 subclade_meta=subclade_meta,
-                force=force)
+                force=force,
+                taxonomy_source=taxonomy_source,
+                qc_applied=qc_applied)
             self._write_checkpoint(f"database_{ckey}")
 
     def _is_subclade_db_built(self, sc_name: str) -> bool:
@@ -1786,7 +1812,9 @@ class PipelineWrapper:
 
     def _register_lazy_subclade(self, taxon_name: str, entry: Dict,
                                 raw_dir: Path, taxonomy: str,
-                                backbone_dir: Path) -> List[str]:
+                                backbone_dir: Path,
+                                taxonomy_source: str = 'ncbi',
+                                qc_applied: bool = True) -> List[str]:
         """Register a subclade as built=false (no full tree) via the DB creator.
 
         Still QCs this subclade and stages a few diverse backbone reps into
@@ -1809,6 +1837,12 @@ class PipelineWrapper:
         Returns the stems of the backbone reps it contributed (possibly
         empty, if this subclade's QC drops every member -- a single bad
         subclade must not abort the whole taxon).
+
+        taxonomy_source/qc_applied (default 'ncbi'/True): provenance flags
+        recorded on the built=false placeholder DB (and inherited by the
+        later on-demand build, since that promotes this same DB entry rather
+        than creating a new one). The --genome-dir local megatree path
+        passes 'user_supplied'/True.
         """
         sc_name = entry['name']
         sc_id = entry.get('subclade_id')
@@ -1859,7 +1893,10 @@ class PipelineWrapper:
             '--register-only',
             '--n-genomes', str(entry.get('n_genomes', 0)),
             '--source-genome-dir', str(raw_dir),
+            '--taxonomy-source', taxonomy_source,
         ]
+        if not qc_applied:
+            cmd.append('--qc-not-applied')
         if sc_id is not None:
             cmd.extend(['--subclade-id', str(sc_id)])
         if entry.get('sketch_file'):
@@ -3159,6 +3196,42 @@ class PipelineWrapper:
 
         staged_files = (list(staged_dir.glob("*.fna")) + list(staged_dir.glob("*.fasta")))
 
+        # ---- Opt-in megatree: full-coverage partition -> per-subclade trees ----
+        # -> graft, instead of subsampling to one tree. Mirrors
+        # _run_taxon_create_mode's megatree fork: local mode has no query
+        # (the whole --genome-dir IS the input), so every subclade is built
+        # (or, with --megatree-lazy, registered) exactly like --taxon create
+        # mode's all-query-less case. main()'s validation rejects
+        # --skip-qc + --megatree together, so qc_applied is always True here.
+        if self.megatree and len(staged_files) > self.max_tree_genomes:
+            self._enforce_total_genome_ceiling(self.clade_name, len(staged_files))
+            logger.info(f"  Genome count {len(staged_files)} > max_tree_genomes "
+                        f"{self.max_tree_genomes}: building a full-coverage "
+                        f"megatree (--megatree)")
+            self._run_megatree(
+                taxon_name=self.clade_name, raw_dir=staged_dir,
+                query_assemblies=[], taxonomy=taxonomy,
+                taxonomy_source='user_supplied', qc_applied=True)
+
+            tree_dir = self.results_dir / "trees" / "orthophyl"
+            tree_dir.mkdir(parents=True, exist_ok=True)
+            # _run_megatree names the merged tree from taxon_name as given
+            # (self.clade_name here, NOT the sanitized `safe`) -- match it.
+            merged_tree = tree_dir / f"{self.clade_name}_megatree.nwk"
+            if merged_tree.exists():
+                logger.info(f"  ✓ Published megatree: {merged_tree}")
+            else:
+                logger.warning(f"  ⚠ Megatree not found at expected location: {merged_tree}")
+
+            logger.info("=" * 70)
+            logger.info("LOCAL GENOME-INGEST MODE COMPLETE (megatree)!")
+            logger.info("*** NOTE: clade name/taxonomy is user-supplied, not assigned "
+                         "by NCBI ***")
+            logger.info("=" * 70)
+            logger.info(f"  Taxonomy routable: {is_routable}")
+            self._save_final_status()
+            return 0
+
         # ---- Oversized: diverse-subsample before QC ----
         qc_source_dir = local_dir
         if len(staged_files) > self.max_tree_genomes:
@@ -3563,7 +3636,8 @@ Examples:
         '--skip-qc',
         action='store_true',
         help='Skip CheckM2 QC on --genome-dir genomes (default: QC runs). Use this '
-             'only for genomes you have already quality-checked.'
+             'only for genomes you have already quality-checked. Not yet supported '
+             'together with --megatree.'
     )
 
     taxon_group = parser.add_argument_group(
@@ -3640,7 +3714,10 @@ Examples:
              'BACKBONE tree from --backbone-reps diverse reps per subclade, and graft '
              'each subclade tree onto its reps -> one merged tree containing every '
              'genome. High-support bipartition disagreements are flagged (not '
-             'resolved). Enforces --max-total-genomes. Overrides the default subsample.'
+             'resolved). Enforces --max-total-genomes. Overrides the default subsample. '
+             'Supported with --genome-dir (local mode has no query, so every subclade '
+             'is built/registered immediately, like --taxon create mode); not '
+             'combinable with --genome-dir --skip-qc.'
     )
     megatree_group.add_argument(
         '--backbone-reps',
@@ -3724,9 +3801,11 @@ Examples:
         parser.error("--update-existing requires --taxon mode.")
     if args.genome_dir and not args.clade_name:
         parser.error("--clade-name is required with --genome-dir.")
-    if args.genome_dir and args.megatree:
-        parser.error("--megatree is not supported with --genome-dir. Use "
-                      "--subsample-size / --max-tree-genomes for large local sets.")
+    if args.genome_dir and args.megatree and args.skip_qc:
+        parser.error("--skip-qc is not yet supported with --megatree "
+                      "--genome-dir (every subclade/backbone build QCs its "
+                      "own genomes). Drop --skip-qc, or use --megatree "
+                      "without --skip-qc.")
 
     # Configure logging based on verbosity
     if args.verbose:
