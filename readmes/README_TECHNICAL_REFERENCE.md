@@ -660,9 +660,9 @@ Flags are grouped below by subject, matching `--help`'s layout.
 | `--backbone-reps N` | 5 | Diverse representatives each subclade contributes to the backbone |
 | `--subclade-size N` | 150 | Per-subclade genome ceiling |
 | `--conflict-min-support N` | 90 | Support threshold for flagging a backbone/subclade bipartition conflict |
-| `--megatree-lazy` | False | Defer building subclades with no query at partition time; build on demand later |
-| `--megatree-hmm-reuse` | False | Give every subclade the backbone's orthogroup HMMs instead of its own OrthoFinder run |
-| `--megatree-hmm-reuse-skip-leftover` | False | With `--megatree-hmm-reuse`, drop genes unmatched by the backbone's HMMs instead of clustering them |
+| `--megatree-lazy` | False | Defer building subclades with no query at partition time; build on demand later. Implies `--megatree`. |
+| `--megatree-hmm-reuse` | False | Give every subclade the backbone's orthogroup HMMs instead of its own OrthoFinder run. Implies `--megatree`. |
+| `--megatree-hmm-reuse-skip-leftover` | False | With `--megatree-hmm-reuse`, drop genes unmatched by the backbone's HMMs instead of clustering them. Implies `--megatree`. |
 | `--placement {subclade,backbone}` | `subclade` | Tie-break for a query matching both a subclade and the backbone |
 
 #### Low importance

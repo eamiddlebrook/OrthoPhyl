@@ -534,13 +534,17 @@ member list + source genome directory recorded — instead of QC'd and built. Th
 lets an oversized taxon be partitioned once and have its subclades built
 incrementally, only as queries actually route to them.
 
+**`--megatree-lazy` implies `--megatree`** — passing it alone (without
+`--megatree`) still engages the full-coverage path; `--megatree` is only
+needed explicitly if you want to be unambiguous.
+
 ```bash
 python orthophyl_pipeline_wrapper.py \
     --input assemblies.tsv \
     --database-dir /data/databases/ \
     --output-dir /data/runs/ \
     --gather-script utils/gather_filter_asms.sh \
-    --megatree --megatree-lazy \
+    --megatree-lazy \
     --max-tree-genomes 2000 \
     --subclade-size 150 \
     --threads 64
@@ -631,12 +635,13 @@ with `--skip-hmm-assign-leftover` to restore the old log-and-drop behavior
 dropped from the tree).
 
 **Wrapper-level reuse (`--megatree-hmm-reuse`):** `orthophyl_pipeline_wrapper.py
---megatree --megatree-hmm-reuse` gives every subclade build the megatree
-backbone's HMMs automatically (via this same `--hmm-assign-dir` mechanism) —
-see section 10 above for the full megatree writeup. `--megatree-hmm-reuse`
-inherits leftover-routing for free; `--megatree-hmm-reuse-skip-leftover`
-threads `--skip-hmm-assign-leftover` through every subclade build in that path
-if you want the old behavior back.
+--megatree-hmm-reuse` (implies `--megatree`) gives every subclade build the
+megatree backbone's HMMs automatically (via this same `--hmm-assign-dir`
+mechanism) — see section 10 above for the full megatree writeup.
+`--megatree-hmm-reuse` inherits leftover-routing for free;
+`--megatree-hmm-reuse-skip-leftover` (also implies `--megatree`) threads
+`--skip-hmm-assign-leftover` through every subclade build in that path if you
+want the old behavior back.
 
 **Covered by:**
 - `tests/integration/test_hmm_assign.py` — real-tool end-to-end coverage of

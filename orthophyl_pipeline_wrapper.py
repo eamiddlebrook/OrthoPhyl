@@ -3746,7 +3746,7 @@ Examples:
     megatree_group.add_argument(
         '--megatree-lazy',
         action='store_true',
-        help='Megatree only: subclades with NO query at partition time are only '
+        help='Implies --megatree. Subclades with NO query at partition time are only '
              'REGISTERED (built=false placeholder: sketch, members, and source dir '
              'recorded) instead of built immediately. A later run whose query '
              'MASH-matches an unbuilt subclade builds it on demand, then ReLeafs. '
@@ -3756,7 +3756,7 @@ Examples:
     megatree_group.add_argument(
         '--megatree-hmm-reuse',
         action='store_true',
-        help='Megatree only: give every subclade the BACKBONE run\'s orthogroup '
+        help='Implies --megatree. Gives every subclade the BACKBONE run\'s orthogroup '
              'HMMs (via OrthoPhyl.sh --hmm-assign-dir) instead of each subclade '
              'running its own independent OrthoFinder orthogroup inference -- '
              'each subclade still computes its OWN alignment/trim/tree model. '
@@ -3770,10 +3770,11 @@ Examples:
     megatree_group.add_argument(
         '--megatree-hmm-reuse-skip-leftover',
         action='store_true',
-        help='Only meaningful with --megatree-hmm-reuse. Passes OrthoPhyl.sh '
-             '--skip-hmm-assign-leftover for every subclade build, restoring the '
-             'old behavior of dropping genes that match none of the backbone\'s '
-             'HMMs instead of running a real OrthoFinder pass on them. Default off.'
+        help='Implies --megatree. Only meaningful with --megatree-hmm-reuse. Passes '
+             'OrthoPhyl.sh --skip-hmm-assign-leftover for every subclade build, '
+             'restoring the old behavior of dropping genes that match none of the '
+             'backbone\'s HMMs instead of running a real OrthoFinder pass on them. '
+             'Default off.'
     )
     megatree_group.add_argument(
         '--placement',
@@ -3795,6 +3796,23 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    # Megatree-only boolean flags imply --megatree -- without this, passing
+    # e.g. --megatree-lazy alone silently does nothing (every internal check
+    # gates on self.megatree). --placement is deliberately excluded: it
+    # routes future queries against ANY existing megatree-shaped DB
+    # (including ones from prior runs), not behavior gated on self.megatree
+    # for this run.
+    if not args.megatree and (args.megatree_lazy or args.megatree_hmm_reuse
+                               or args.megatree_hmm_reuse_skip_leftover):
+        implied_by = [name for name, val in [
+            ('--megatree-lazy', args.megatree_lazy),
+            ('--megatree-hmm-reuse', args.megatree_hmm_reuse),
+            ('--megatree-hmm-reuse-skip-leftover', args.megatree_hmm_reuse_skip_leftover),
+        ] if val]
+        logger.info(f"  {' / '.join(implied_by)} given without --megatree -- "
+                    f"implying --megatree.")
+        args.megatree = True
 
     # Validate argument combinations (mutually_exclusive_group handles --input vs --taxon vs --genome-dir)
     if args.update_existing and not args.taxon:
