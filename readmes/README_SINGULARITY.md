@@ -226,6 +226,13 @@ singularity exec OrthoPhyl.v3.1.0.sif $assembly_router --help
    singularity exec --bind /data:/data OrthoPhyl.v3.1.0.sif ls /data
    ```
 
+6. **Point `SINGULARITY_TMPDIR` at local disk, not NFS**, on hosts that lack
+   unprivileged user namespaces/FUSE (every `exec`/`run` call prints
+   "Converting SIF file to temporary sandbox..." on these hosts, re-extracting
+   the whole multi-GB image each time). NFS-backed `SINGULARITY_TMPDIR` can
+   cause slow extractions and isolated subprocess failures mid-run — see
+   Troubleshooting below.
+
 ### Running Tests in Container
 
 See the dedicated section below for comprehensive testing documentation.
@@ -298,6 +305,45 @@ singularity exec OrthoPhyl.v3.1.0.sif \
         python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py --taxon ...
     "
 ```
+
+#### Issue: isolated subprocess failures mid-run (e.g. "mash: error while loading shared libraries: libgsl.so.25: cannot open shared object file") on a host with no missing library, no OOM, and no resource contention
+
+**Cause**: `SINGULARITY_TMPDIR` (not the pipeline's own `TMPDIR` — see above)
+points at NFS or other shared/networked storage. On hosts where Singularity
+can't do its normal fast squashfs mount (no unprivileged user namespaces /
+FUSE), *every* `singularity exec`/`run` call re-extracts the whole SIF into a
+fresh temporary sandbox first — you'll see `INFO: Converting SIF file to
+temporary sandbox...` on each invocation. This image's sandbox is large
+(conda envs + the baked-in CheckM2 database, likely 15-20 GB uncompressed).
+Extracting that onto NFS is slow, and NFS client-side attribute/data caching
+can make an individual file (e.g. a `.so` a subprocess `dlopen()`s moments
+after "successful" extraction) appear briefly missing or stale — producing an
+isolated single-call failure rather than every call failing identically. The
+same misconfiguration can also starve the node of memory during the (slow,
+NFS-bound) extraction step itself, surfacing as an unrelated-looking
+OOM-killed `unsquashfs` on a different run.
+
+**Diagnosis**: confirm every `singularity exec`/`run` call prints "Converting
+SIF file to temporary sandbox..." (true fast-mount hosts only do this once,
+or never), then check where extraction lands:
+```bash
+echo "SINGULARITY_TMPDIR=$SINGULARITY_TMPDIR TMPDIR=$TMPDIR"
+mount | grep -E "$(dirname "${SINGULARITY_TMPDIR:-${TMPDIR:-/tmp}}")"
+```
+If that mount is `nfs`/`nfs4`, or `df -T` on the directory shows a network
+filesystem type, this is almost certainly the cause.
+
+**Solution**: point `SINGULARITY_TMPDIR` at **local node disk**, not NFS or
+shared scratch:
+```bash
+export SINGULARITY_TMPDIR=/local/scratch/$USER   # whatever local disk exists on the node
+mkdir -p "$SINGULARITY_TMPDIR"
+singularity exec --bind /path/to/databases:/databases OrthoPhyl.v3.1.0.sif \
+    python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py ...
+```
+Note this is a *separate* setting from the pipeline/pytest `TMPDIR` covered
+earlier in this doc — `SINGULARITY_TMPDIR` governs where Singularity itself
+unpacks the container image, before your command inside it ever runs.
 
 ---
 
