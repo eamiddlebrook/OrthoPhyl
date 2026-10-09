@@ -635,6 +635,33 @@ class TestLocalGenomesMegatree:
         assert call["taxonomy_source"] == "user_supplied"
         assert call["qc_applied"] is True
 
+    def test_two_word_clade_name_sanitized_for_run_megatree_and_merged_tree(
+            self, Wrapper, tmp_path, monkeypatch):
+        """A binomial-shaped --clade-name (e.g. "Yersinia pestis") must NOT
+        reach _run_megatree or the merged-tree path raw -- confirmed in
+        production, the raw space broke a bash `cd $wd` downstream (via
+        subclade_partition.py's "{taxon}_N" subclade naming and
+        gather_filter_asms.sh). database_config.json's clade_name field
+        still records the real (space-containing) name elsewhere -- only
+        this method's own path-building is in scope here."""
+        genome_dir = _make_genome_dir(
+            tmp_path, stems=[f"g{i}" for i in range(10)])
+        w = _make_local_wrapper(
+            Wrapper, tmp_path, genome_dir=genome_dir,
+            clade_name="Yersinia pestis", megatree=True, max_tree_genomes=5)
+        monkeypatch.setattr(w, "_resolve_local_taxonomy",
+                             lambda: ("g__" + w.clade_name, False))
+
+        mega_calls = []
+        monkeypatch.setattr(w, "_run_megatree",
+                             lambda **k: mega_calls.append(k))
+        monkeypatch.setattr(w, "_save_final_status", lambda: None)
+
+        rc = w._run_local_genomes_mode()
+        assert rc == 0
+        assert len(mega_calls) == 1
+        assert mega_calls[0]["taxon_name"] == "Yersinia_pestis"
+
     def test_under_ceiling_with_megatree_falls_through_to_single_tree(
             self, Wrapper, tmp_path, monkeypatch):
         """Even with --megatree, a set under the ceiling is a plain single

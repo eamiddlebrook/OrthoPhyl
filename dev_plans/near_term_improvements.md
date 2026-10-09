@@ -215,3 +215,26 @@ BUSCO-specific scaffolding (fetching/converting a BUSCO HMM set) —
 `--hmm-assign-dir` already accepts any directory of `<id>.hmm` files
 regardless of origin, this item only changed what happens to *unmatched*
 sequences.
+
+## 5. Harder NCBI taxon resolution from `--clade-name` (not started)
+
+**Ask**: `NCBITaxonomy.resolve_taxon()` (`utils/taxon_assembly_gatherer.py:159`)
+only does an exact case-insensitive lookup against `name_to_taxid` (scientific
+names only, `_load_names()` at `:136`). `Yersinia_pestis` fails to resolve
+(real name has a space, not underscore). Want: (1) normalize `_`/`-` to
+spaces before lookup, (2) fall back to a fuzzy match (hamming/edit distance
+~1) if the exact/normalized lookup still misses, (3) for a two-token
+`Genus_species`-shaped name, try resolving the genus token first, then match
+the species token against children of that genus's taxid (rather than
+fuzzy-matching the whole binomial as one string).
+
+**Current callers**: `TaxonAssemblyGatherer.__init__` (`:238`, raises
+`ValueError` if unresolved) and `orthophyl_pipeline_wrapper.py`'s
+`_resolve_local_taxonomy` (`:391`, local-genome-ingest mode — already has a
+"fall back to name-only taxonomy" path for the unresolved case, so this is
+pure upside there: resolving more names routably instead of falling back).
+
+**Not yet designed**: whether fuzzy-match should apply at the genus level,
+species-within-genus level, or both; how much auto-correction is safe before
+silently matching the wrong taxon (e.g. hamming-1 among very short genus
+names could over-match). Needs a plan before implementing.

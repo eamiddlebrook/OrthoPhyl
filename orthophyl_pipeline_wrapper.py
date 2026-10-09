@@ -2859,7 +2859,16 @@ class PipelineWrapper:
         logger.info("\n" + "=" * 70)
         logger.info("TAXON MODE: CREATE NEW DATABASE")
         logger.info("=" * 70)
-        
+
+        # self.taxon (e.g. "Yersinia pestis") is used VERBATIM for NCBI
+        # queries/taxonomy resolution/logging below -- only path-building
+        # calls (download dirs, log files, subprocess argv components) use
+        # this sanitized form, mirroring batch mode's existing pattern in
+        # _parse_routing_results (sanitize_path_component's own docstring).
+        # Without this, a two-word taxon name breaks every "cd $wd"-style
+        # path the wrapper builds downstream (confirmed in production).
+        safe_taxon = sanitize_path_component(self.taxon)
+
         # Import taxon gatherer
         sys.path.insert(0, str(self.script_dir / "utils"))
         try:
@@ -2909,12 +2918,12 @@ class PipelineWrapper:
         raw_dir = download_dir / "assemblies_all.TMP"
 
         if (self.skip_download or
-                (self._check_checkpoint(f"download_{self.taxon}") and self.resume
+                (self._check_checkpoint(f"download_{safe_taxon}") and self.resume
                  and raw_dir.exists())):
             logger.info(f"  ✓ Raw download already complete, skipping")
         else:
             raw_dir = self._download_raw(self.taxon, download_dir)
-            self._write_checkpoint(f"download_{self.taxon}")
+            self._write_checkpoint(f"download_{safe_taxon}")
 
         raw_files = (list(raw_dir.glob("*.fna")) + list(raw_dir.glob("*.fasta"))
                      if raw_dir.exists() else [])
@@ -2932,7 +2941,7 @@ class PipelineWrapper:
         # this falls through to the normal single-tree path.
         if self.megatree and raw_count > self.max_tree_genomes:
             self._run_megatree(
-                taxon_name=self.taxon, raw_dir=raw_dir,
+                taxon_name=safe_taxon, raw_dir=raw_dir,
                 query_assemblies=[], taxonomy=taxonomy)
             logger.info("=" * 70)
             logger.info("TAXON MODE COMPLETE (megatree)!")
@@ -2949,7 +2958,7 @@ class PipelineWrapper:
                         f"{self.max_tree_genomes}: diverse-subsampling to "
                         f"{self.subsample_size} genomes")
             raw_dir = self._subsample_genomes(
-                self.taxon, raw_dir, self.subsample_size,
+                safe_taxon, raw_dir, self.subsample_size,
                 must_keep_stems=self._must_keep_stems())
             raw_files = (list(raw_dir.glob("*.fna")) + list(raw_dir.glob("*.fasta"))
                          if raw_dir.exists() else [])
@@ -2958,7 +2967,7 @@ class PipelineWrapper:
         # Single tree: QC the whole (possibly subsampled) raw set, build, and
         # create the taxon-flavored DB.
         genomes_to_keep = self._qc_subclade(
-            download_dir, raw_files, taxon_label=self.taxon, query_assemblies=[])
+            download_dir, raw_files, taxon_label=safe_taxon, query_assemblies=[])
         kept = (list(genomes_to_keep.glob("*.fna")) +
                 list(genomes_to_keep.glob("*.fasta")))
         if len(kept) < 4:
@@ -2967,7 +2976,7 @@ class PipelineWrapper:
         orthophyl_output = self.output_dir / "orthophyl_run"
         self._run_orthophyl(
             input_dir=genomes_to_keep, output_dir=orthophyl_output,
-            taxon_name=self.taxon, assemblies=[])
+            taxon_name=safe_taxon, assemblies=[])
         logger.info(f"\nCreating database for {self.taxon}...")
         self._create_taxon_database(
             taxon_name=self.taxon, orthophyl_output=orthophyl_output,
@@ -2985,7 +2994,11 @@ class PipelineWrapper:
         logger.info("\n" + "=" * 70)
         logger.info("TAXON MODE: UPDATE EXISTING DATABASE")
         logger.info("=" * 70)
-        
+
+        # See _run_taxon_create_mode's identical comment: self.taxon stays
+        # verbatim for NCBI/logging, safe_taxon is only for path-building.
+        safe_taxon = sanitize_path_component(self.taxon)
+
         # Import taxon gatherer
         sys.path.insert(0, str(self.script_dir / "utils"))
         try:
@@ -3056,7 +3069,7 @@ class PipelineWrapper:
         if self.gather_script:
             logger.info(f"\nQC-filtering {len(raw_files)} new assemblies (CheckM2)...")
             genomes_to_keep = self._qc_subclade(
-                download_dir, raw_files, taxon_label=self.taxon)
+                download_dir, raw_files, taxon_label=safe_taxon)
             kept = (list(genomes_to_keep.glob("*.fna")) +
                     list(genomes_to_keep.glob("*.fasta")))
             n_kept = len(kept)
@@ -3204,20 +3217,23 @@ class PipelineWrapper:
         # mode's all-query-less case. main()'s validation rejects
         # --skip-qc + --megatree together, so qc_applied is always True here.
         if self.megatree and len(staged_files) > self.max_tree_genomes:
-            self._enforce_total_genome_ceiling(self.clade_name, len(staged_files))
+            self._enforce_total_genome_ceiling(safe, len(staged_files))
             logger.info(f"  Genome count {len(staged_files)} > max_tree_genomes "
                         f"{self.max_tree_genomes}: building a full-coverage "
                         f"megatree (--megatree)")
             self._run_megatree(
-                taxon_name=self.clade_name, raw_dir=staged_dir,
+                taxon_name=safe, raw_dir=staged_dir,
                 query_assemblies=[], taxonomy=taxonomy,
                 taxonomy_source='user_supplied', qc_applied=True)
 
             tree_dir = self.results_dir / "trees" / "orthophyl"
             tree_dir.mkdir(parents=True, exist_ok=True)
-            # _run_megatree names the merged tree from taxon_name as given
-            # (self.clade_name here, NOT the sanitized `safe`) -- match it.
-            merged_tree = tree_dir / f"{self.clade_name}_megatree.nwk"
+            # _run_megatree names the merged tree from taxon_name as given --
+            # now the sanitized `safe` (NOT self.clade_name, which may
+            # contain spaces/other chars that break path construction
+            # downstream, e.g. subclade_partition.py's "{taxon}_N" naming
+            # and gather_filter_asms.sh's `cd $wd`) -- match it here.
+            merged_tree = tree_dir / f"{safe}_megatree.nwk"
             if merged_tree.exists():
                 logger.info(f"  ✓ Published megatree: {merged_tree}")
             else:

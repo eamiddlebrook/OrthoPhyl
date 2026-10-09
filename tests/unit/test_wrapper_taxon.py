@@ -379,6 +379,121 @@ class TestTaxonCreateMode:
         assert len(orthophyl_calls) == 0, "OrthoPhyl.sh should not run in dry-run mode"
 
 
+class TestTaxonNameWithSpaces:
+    """A binomial species name like "Yersinia pestis" is the NORM, not an
+    edge case, for --taxon. Confirmed in production: the raw space
+    propagated into a literal directory path (.../downloads/Yersinia
+    pestis_1), breaking a bash `cd $wd` downstream with "too many
+    arguments". NCBI queries/taxonomy resolution/logging must still see
+    the real name (with space); only path-building calls must see the
+    sanitized form."""
+
+    def test_create_mode_sanitizes_path_building_calls_only(
+        self, Wrapper, tmp_path, fake_gatherer_class, recording_run, monkeypatch
+    ):
+        db_dir = tmp_path / "databases"
+        db_dir.mkdir()
+        w = _make_taxon_wrapper(Wrapper, tmp_path, db_dir, taxon="Yersinia pestis",
+                                dry_run=False)
+
+        def patched_download_raw(taxon_name, output_dir, query_assemblies=None):
+            # The real NCBI download call must still see the raw name.
+            assert taxon_name == "Yersinia pestis"
+            raw = output_dir / "assemblies_all.TMP"
+            raw.mkdir(parents=True, exist_ok=True)
+            (raw / "GCF_000001.1.fna").write_text(">fake1\nATCG\n")
+            (raw / "GCF_000002.1.fna").write_text(">fake2\nATCG\n")
+            (raw / "GCF_000003.1.fna").write_text(">fake3\nATCG\n")
+            (raw / "GCF_000004.1.fna").write_text(">fake4\nATCG\n")
+            return raw
+        monkeypatch.setattr(w, "_download_raw", patched_download_raw)
+
+        qc_calls = []
+        def patched_qc(subclade_dir, raw_member_paths, taxon_label,
+                       query_assemblies=None):
+            qc_calls.append(taxon_label)
+            genomes_to_keep = subclade_dir / "genomes_to_keep"
+            genomes_to_keep.mkdir(parents=True, exist_ok=True)
+            for i in range(4):
+                (genomes_to_keep / f"GCF_00000{i}.1.fna").write_text(">f\nATCG\n")
+            return genomes_to_keep
+        monkeypatch.setattr(w, "_qc_subclade", patched_qc)
+
+        orthophyl_calls = []
+        def patched_run_op(input_dir, output_dir, taxon_name, assemblies,
+                           **kwargs):
+            orthophyl_calls.append(taxon_name)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            tree_dir = output_dir / "phylo_current" / "SpeciesTree"
+            tree_dir.mkdir(parents=True, exist_ok=True)
+            (tree_dir / "iqtree.SCO_strict.CDS.tree").write_text("(A,B);")
+        monkeypatch.setattr(w, "_run_orthophyl", patched_run_op)
+
+        import sys as _sys
+        fake_cls = _sys.modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer
+        monkeypatch.setattr(fake_cls, "query_ncbi", lambda self: [])
+
+        result = w.run()
+
+        # NCBI/logging-facing: real name, space intact.
+        assert fake_gatherer_class[0].taxon == "Yersinia pestis"
+
+        # Path-building calls: sanitized, no space.
+        assert qc_calls == ["Yersinia_pestis"]
+        assert orthophyl_calls == ["Yersinia_pestis"]
+
+        # Checkpoint flags must also use the sanitized name (a space would
+        # break the checkpoint filename too).
+        assert w._check_checkpoint("download_Yersinia_pestis") or \
+               (w.checkpoint_dir / "download_Yersinia_pestis.flag").exists()
+
+    def test_update_mode_sanitizes_qc_subclade_taxon_label(
+        self, Wrapper, tmp_path, fake_gatherer_class, recording_run, monkeypatch
+    ):
+        db_dir = tmp_path / "databases"
+        db_dir.mkdir()
+        existing_db = db_dir / "Yersinia_pestis_db"
+        existing_db.mkdir()
+        config = {
+            "clade_name": "Yersinia pestis",
+            "source_taxon_name": "Yersinia pestis",
+            "assembly_accessions": ["GCF_000001.1"],
+            "available_tree_methods": ["iqtree"],
+            "available_data_types": ["CDS"],
+        }
+        (existing_db / "database_config.json").write_text(json.dumps(config))
+
+        w = _make_taxon_wrapper(Wrapper, tmp_path, db_dir, taxon="Yersinia pestis",
+                                update_existing=True, dry_run=False)
+
+        import sys as _sys
+        fake_cls = _sys.modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer
+        monkeypatch.setattr(
+            fake_cls, "query_ncbi",
+            lambda self: [{'accession': 'GCF_000002.1',
+                          'organism_name': 'Yersinia pestis sp. B'}])
+
+        qc_calls = []
+        def patched_qc(subclade_dir, raw_member_paths, taxon_label,
+                       query_assemblies=None):
+            qc_calls.append(taxon_label)
+            genomes_to_keep = subclade_dir / "genomes_to_keep"
+            genomes_to_keep.mkdir(parents=True, exist_ok=True)
+            (genomes_to_keep / "GCF_000002.1.fna").write_text(">f\nATCG\n")
+            return genomes_to_keep
+        monkeypatch.setattr(w, "_qc_subclade", patched_qc)
+        monkeypatch.setattr(w, "_run_releaf", lambda **k: None)
+        monkeypatch.setattr(w, "_update_taxon_database_metadata", lambda **k: None)
+
+        existing_db_info = {
+            'db_dir': existing_db, 'config': config,
+            'clade_name': 'Yersinia pestis',
+        }
+        w._run_taxon_update_mode(existing_db_info)
+
+        assert qc_calls == ["Yersinia_pestis"]
+
+
 class TestTaxonUpdateMode:
     """Test taxon update mode (existing database)."""
     
