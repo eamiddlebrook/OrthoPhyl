@@ -135,6 +135,8 @@ then
 fi
 cd $store || exit 1
 
+SETUP_OP_TMPDIR
+
 export genome_dir=$store/genomes
 export wd=$store/phylo_current
 export run_notes=$store/run_notes.txt

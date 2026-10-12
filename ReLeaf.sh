@@ -63,6 +63,8 @@ fi
 ARG_PARSE_addem "$@"
 #test_args_addem
 
+SETUP_OP_TMPDIR
+
 
 # instead of $store, you can provide the files/directories directly
 # tree=

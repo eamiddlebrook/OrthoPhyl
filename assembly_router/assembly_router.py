@@ -62,6 +62,24 @@ def sanitize_path_component(s: str) -> str:
     return safe or 'unnamed'
 
 
+def pick_tmp_base(fallback: Path) -> Path:
+    """Writable scratch base for mkdtemp calls.
+
+    tempfile.mkdtemp()'s default `dir=None` resolves via
+    tempfile.gettempdir(), which falls back to /tmp -- read-only at runtime
+    under Singularity (same failure mode fixed for OrthoPhyl.sh/ReLeaf.sh via
+    SETUP_OP_TMPDIR in script_lib/bash_utils_and_aliases.sh). Honor an
+    already-validated TMPDIR (e.g. set by that bash fix when this script runs
+    as a subprocess of the wrapper), else prefer /dev/shm (writable tmpfs even
+    when /tmp isn't), else fall back to a known-writable directory instead of
+    letting tempfile silently resolve to /tmp.
+    """
+    for base in (os.environ.get("TMPDIR"), "/dev/shm", "/tmp"):
+        if base and os.path.isdir(base) and os.access(base, os.W_OK):
+            return Path(base)
+    return fallback
+
+
 def pick_nearest_subclade(candidates: List[Dict], dist_fn) -> Tuple[Optional[Dict], Optional[float]]:
     """
     Pick the candidate dict with the smallest dist_fn(candidate) value.
@@ -449,7 +467,8 @@ class MultiDatabaseRouter:
         import tempfile
         import shutil as _shutil
 
-        tmp_dir = Path(tempfile.mkdtemp(prefix="router_mash_"))
+        tmp_dir = Path(tempfile.mkdtemp(
+            prefix="router_mash_", dir=str(pick_tmp_base(self.output_dir))))
         try:
             query_prefix = tmp_dir / "query"
             self._run_mash([
