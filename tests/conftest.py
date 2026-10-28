@@ -173,6 +173,14 @@ def taxon_gatherer_module():
     )
 
 
+@pytest.fixture(scope="session")
+def geo_figures_module():
+    return load_module(
+        REPO_ROOT / "python_scripts" / "annotate_tree_by_country.py",
+        name="annotate_tree_by_country",
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Filesystem fixtures                                                         #
 # --------------------------------------------------------------------------- #

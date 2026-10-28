@@ -17,7 +17,7 @@ AUTHOR earlm@lanl.gov
 
 %post
     # instal conda and conda packages
-    micromamba install --yes --name base --channel bioconda --channel conda-forge prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer mash prodigal ete3 raxml trimal r-essentials scipy iqtree pytest
+    micromamba install --yes --name base --channel bioconda --channel conda-forge prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer mash prodigal ete3 raxml trimal r-essentials scipy iqtree pytest matplotlib
     # CheckM2 (DIAMOND + ML) replaces legacy CheckM1: no pplacer/reference-tree,
     #   so no python/setuptools pins and no ~40 GB RAM blow-up on placement.
     micromamba create --yes -n gather_genomes -c bioconda -c conda-forge checkm2 bbmap entrez-direct ncbi-datasets-cli pytest

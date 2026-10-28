@@ -33,6 +33,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def relative_symlink(link: Path, target: Path) -> None:
+    """Create `link` -> `target` using a relative path.
+
+    A relative symlink stays correct under any bind-mount mapping (e.g.
+    Singularity `--bind host:/container`), as long as `link` and `target`
+    are on the same mount -- unlike `target.resolve()`, which bakes in
+    whatever path the current process sees (the container's view), breaking
+    on the host or under a different container bind later. Duplicated from
+    OP_database_tool.py's identical helper since these scripts are loaded
+    by path, not imported.
+    """
+    target = target.resolve()
+    rel = os.path.relpath(target, link.parent.resolve())
+    if os.path.commonpath([target, link.parent.resolve()]) == os.sep:
+        logger.warning(
+            f"  ⚠ {link.name} and its target share no common path above '/' "
+            f"-- this symlink will only resolve where both paths are visible "
+            f"the same way (e.g. inside the same container bind)."
+        )
+    link.symlink_to(rel)
+
+
 def get_current_version(db_dir: Path) -> str:
     """Get current version name from database."""
     current_link = db_dir / "current"
@@ -150,7 +172,7 @@ def create_composite_orthophyl_dir(
         hmm_dest.parent.mkdir(parents=True, exist_ok=True)
         if hmm_dest.exists():
             hmm_dest.unlink()
-        hmm_dest.symlink_to(hmm_source.resolve())
+        relative_symlink(hmm_dest, hmm_source)
         logger.info(f"    ✓ Linked HMMs from base version")
     
     # 2. Alignments - from ReLeaf output (UPDATED)
@@ -162,7 +184,7 @@ def create_composite_orthophyl_dir(
         dest = phylo_dir / "AlignmentsProts.trm"
         if dest.exists():
             dest.unlink()
-        dest.symlink_to(prot_aln.resolve())
+        relative_symlink(dest, prot_aln)
         logger.info(f"    ✓ Linked protein alignments from ReLeaf")
     
     cds_aln = releaf_output_dir / "new_CDS_alignments.trm.nm"
@@ -170,7 +192,7 @@ def create_composite_orthophyl_dir(
         dest = phylo_dir / "AlignmentsCDS.trm"
         if dest.exists():
             dest.unlink()
-        dest.symlink_to(cds_aln.resolve())
+        relative_symlink(dest, cds_aln)
         logger.info(f"    ✓ Linked CDS alignments from ReLeaf")
     
     # 3. Trimmed columns - from base version (unchanged)
@@ -179,7 +201,7 @@ def create_composite_orthophyl_dir(
         trim_dest = phylo_dir / "trimmed_columns"
         if trim_dest.exists():
             trim_dest.unlink()
-        trim_dest.symlink_to(trim_source.resolve())
+        relative_symlink(trim_dest, trim_source)
         logger.info(f"    ✓ Linked trimmed columns from base version")
     
     # 4. Trees - from ReLeaf output (UPDATED)
@@ -194,7 +216,7 @@ def create_composite_orthophyl_dir(
             dest = trees_dir / new_name
             if dest.exists():
                 dest.unlink()
-            dest.symlink_to(tree_file.resolve())
+            relative_symlink(dest, tree_file)
         logger.info(f"    ✓ Linked trees from ReLeaf")
     
     # 5. IQTree info - from base version
@@ -204,7 +226,7 @@ def create_composite_orthophyl_dir(
         iqtree_dest.parent.mkdir(parents=True, exist_ok=True)
         if iqtree_dest.exists():
             iqtree_dest.unlink()
-        iqtree_dest.symlink_to(iqtree_source.resolve())
+        relative_symlink(iqtree_dest, iqtree_source)
         logger.info(f"    ✓ Linked IQTree info from base version")
     
     # 6. SCO sets - from base version (unchanged)
@@ -212,7 +234,7 @@ def create_composite_orthophyl_dir(
         dest = phylo_dir / sco_file.name
         if dest.exists():
             dest.unlink()
-        dest.symlink_to(sco_file.resolve())
+        relative_symlink(dest, sco_file)
     logger.info(f"    ✓ Linked SCO sets from base version")
 
 
@@ -288,7 +310,7 @@ def create_releaf_version(
     
     # Create symlink to ReLeaf output
     releaf_link = new_version_dir / "releaf_output"
-    releaf_link.symlink_to(releaf_output.resolve())
+    relative_symlink(releaf_link, releaf_output)
     
     # Create composite orthophyl_run directory
     composite_dir = new_version_dir / "orthophyl_run_composite"
@@ -322,7 +344,7 @@ def create_releaf_version(
             best_tree = tree_files[0]
         
         phylogeny_link = new_version_dir / "phylogeny.nwk"
-        phylogeny_link.symlink_to(best_tree.resolve())
+        relative_symlink(phylogeny_link, best_tree)
         logger.info(f"  ✓ Linked phylogeny: {best_tree.name}")
     
     # Update genome list

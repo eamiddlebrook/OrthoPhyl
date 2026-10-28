@@ -378,6 +378,27 @@ Flags are grouped below by subject, matching `--help`'s layout.
 | `--megatree-hmm-reuse-skip-leftover` | With `--megatree-hmm-reuse`, drop genes unmatched by the backbone's HMMs instead of clustering them. Implies `--megatree`. | False |
 | `--placement` | Tie-break for a query matching both a subclade and the backbone (`subclade`/`backbone`) | `subclade` |
 
+### Geographic figures (opt-in, `--geo`)
+
+Auto-generates a country-annotated tree, a world map of sample origins, and
+lines joining the top-K closest cross-country genome pairs by patristic
+distance (closer pairs drawn darker). Outputs land under
+`<results-dir>/figures/` as `<label>_geo_tree.<fmt>`, `<label>_geo_map.<fmt>`,
+`<label>_geo_pairs.tsv`, and `<label>_geo_countries.tsv`. Figure generation
+is non-fatal (a failure logs a warning and the run still succeeds); a
+missing `matplotlib` is checked fatally at startup, before any compute.
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--geo` | Generate the geo tree + map figures after each published tree. | False |
+| `--geo-tsv` | `genome_id<TAB>location` TSV. **Required** with `--genome-dir` (no NCBI metadata exists to fall back on); optional elsewhere, where it's merged on top of (overrides) NCBI `geo_loc_name` metadata. Implies `--geo`. | - |
+| `--geo-top-k` | Number of closest cross-country genome pairs to draw lines for. Implies `--geo` if non-default. | 100 |
+| `--geo-format` | Output image format (`png`/`svg`/`pdf`). | `png` |
+
+On the NCBI-download path, country data comes for free from each downloaded
+assembly's `geo_loc_name` metadata; `--genome-dir` mode has no such metadata,
+so `--geo-tsv` is mandatory there.
+
 ### Low importance
 
 | Argument | Description | Default |

@@ -44,15 +44,25 @@ The container includes:
 **IMPORTANT**: The database directory MUST be bind-mounted to be accessible inside the container.
 
 ```bash
-# Correct: Bind mount the database directory
+# Correct: Bind mount the database directory at an IDENTICAL path (host path
+# == container path). Databases now store internal paths (symlinks, sketch/
+# members files) relative to the database dir, so they resolve correctly
+# under any bind mapping that's consistent between build and later use --
+# an identity bind is the simplest way to guarantee that.
 singularity exec \
-    --bind /path/to/databases:/databases \
+    --bind /path/to/databases:/path/to/databases \
     OrthoPhyl.v3.1.0.sif \
     python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
         --input assemblies.tsv \
-        --database-dir /databases \
+        --database-dir /path/to/databases \
         --output-dir results/ \
         --threads 32
+
+# Also wrong, in a subtler way: binding to a DIFFERENT container-side path
+# (e.g. --bind /path/to/databases:/databases) works for the run that creates
+# it, but any absolute paths baked in at that point won't resolve later from
+# the host or from a container invoked with a different bind. Prefer an
+# identity bind so host and container paths always match.
 
 # Wrong: Database directory not mounted (will fail!)
 singularity exec OrthoPhyl.v3.1.0.sif \
@@ -264,9 +274,30 @@ singularity exec \
 
 **Solution**:
 ```bash
-# Add bind mount
-singularity exec --bind /path/to/databases:/databases ...
+# Add bind mount (identity bind -- see "Critical: Database Directory
+# Mounting" above for why host and container paths should match)
+singularity exec --bind /path/to/databases:/path/to/databases ...
 ```
+
+#### Issue: a database's `orthophyl_run` symlink (or a subclade's sketch/
+members file) is broken -- points at a path that doesn't exist
+
+**Cause**: the database was built under a bind mount where the container-side
+path differed from the host path (e.g. `--bind /host/dbs:/databases`).
+Up-to-date OrthoPhyl writes these paths relative to the database directory,
+so they resolve correctly under any *consistent* bind mapping -- but a
+database built before that fix, or built with a mismatched bind even on a
+current version, can still end up with an absolute, container-only path
+baked in.
+
+**Solution**: rebuild the database (preferred), or repair it manually:
+```bash
+# From inside the environment where the real orthophyl output is visible:
+cd /path/to/databases/<Taxon>_db
+ln -sfn "$(realpath --relative-to=. /real/path/to/orthophyl_run)" orthophyl_run
+```
+Going forward, always bind-mount the database directory at an identical
+host/container path to avoid this.
 
 #### Issue: "Permission denied" writing output
 

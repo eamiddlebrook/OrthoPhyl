@@ -13,6 +13,7 @@ AUTHOR earlm@lanl.gov
     apt-get install -y build-essential git
     apt-get install -y python3 pip libgl1
     apt-get install -y wget zip bc procps
+    apt-get install -y patchelf
     apt-get clean
 
 %post
@@ -22,7 +23,7 @@ AUTHOR earlm@lanl.gov
     #   `import cgi`, which was removed from the stdlib in Python 3.13 (PEP 594).
     #   Without this pin, micromamba resolves whatever the latest Python is at
     #   build time, silently breaking every `import ete3` in the pipeline.
-    micromamba install --yes --name base --channel bioconda --channel conda-forge python=3.12 prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer mash prodigal ete3 raxml trimal r-essentials scipy iqtree pytest
+    micromamba install --yes --name base --channel bioconda --channel conda-forge python=3.12 prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer mash prodigal ete3 raxml trimal r-essentials scipy iqtree pytest matplotlib
     # CheckM2 (DIAMOND + ML) replaces legacy CheckM1: no pplacer/reference-tree,
     #   so no python 3.10 / setuptools<82 pins are needed and there is no ~40 GB
     #   RAM blow-up on placement. This env never imports ete3, so it does not
@@ -36,6 +37,15 @@ AUTHOR earlm@lanl.gov
     chmod --recursive a+rw /opt/conda/envs/gather_genomes/bin
 
 %post
+    # TensorFlow's libtensorflow_cc.so.2 (pulled in by checkm2 -> keras) ships
+    #   with an executable-stack ELF flag that some kernels refuse to mmap:
+    #   "cannot enable executable stack as shared object requires: Invalid
+    #   argument". This breaks `import checkm2` itself, before the DB download
+    #   below ever runs. Clear the flag on every .so under the env's
+    #   tensorflow package -- a no-op if the flag isn't set.
+    find /opt/conda/envs/gather_genomes/lib/python3.12/site-packages/tensorflow \
+        -name "*.so*" -exec patchelf --clear-execstack {} \;
+
     # CheckM2 needs its DIAMOND reference database unpacked to a fixed location.
     #   Baked into the image so no runtime download is required.
     #   CHECKM2DB is exported in %environment below.

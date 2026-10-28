@@ -1,6 +1,8 @@
 """Tests for OP_database_tool.py (plan section 3)."""
 
 import json
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -98,6 +100,45 @@ class TestCreateDatabaseForRun:
         assert (db_dir / "README.txt").exists()
         assert (db_dir / "orthophyl_run").is_symlink()
 
+    def test_orthophyl_run_symlink_is_relative(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        run = orthophyl_run_skeleton(n_genomes=3)
+        out = tmp_path / "databases"
+        db_dir = db_creator_module.create_database_for_run(
+            run, ESCHERICHIA_TAX, "Escherichia", out
+        )
+        link = db_dir / "orthophyl_run"
+        raw_target = os.readlink(link)
+        assert not os.path.isabs(raw_target)
+        assert link.resolve() == run.resolve()
+
+    def test_orthophyl_run_symlink_survives_tree_move(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        """Simulates a different Singularity bind root: build the DB and run
+        under one path, move the whole tree elsewhere, and confirm the
+        symlink still resolves -- a relative link survives, an absolute one
+        (baked to the old mount) would not."""
+        a = tmp_path / "a"
+        a.mkdir()
+        run = orthophyl_run_skeleton(n_genomes=3)
+        shutil.move(str(run), str(a / "orthophyl_run"))
+        run_in_a = a / "orthophyl_run"
+        out = a / "databases"
+        db_creator_module.create_database_for_run(
+            run_in_a, ESCHERICHIA_TAX, "Escherichia", out
+        )
+
+        b = tmp_path / "b"
+        shutil.move(str(a), str(b))
+
+        db_dir = b / "databases" / "Escherichia_db"
+        link = db_dir / "orthophyl_run"
+        assert link.is_symlink()
+        assert link.resolve() == (b / "orthophyl_run").resolve()
+        assert (link / "genome_list").exists()
+
     def test_raises_on_existing_without_force(
         self, db_creator_module, orthophyl_run_skeleton, tmp_path
     ):
@@ -161,6 +202,82 @@ class TestCreateDatabaseForRun:
         assert config["qc_applied"] is False
 
 
+class TestMetadataFile:
+    """--metadata-file (plan section 4): copies an assembly metadata TSV
+    (e.g. all_asm_acc_metadata) into the DB for later --geo figure use,
+    recorded as a path relative to db_dir per the Singularity relative-path
+    convention (see assembly_router.py's sketch/members_file handling)."""
+
+    def test_metadata_file_copied_and_recorded_relative(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        run = orthophyl_run_skeleton()
+        out = tmp_path / "databases"
+        metadata = tmp_path / "all_asm_acc_metadata"
+        metadata.write_text("GCF_000001 species1 strain1 bios1 1234 ok ok USA\n")
+
+        db_dir = db_creator_module.create_database_for_run(
+            run, ESCHERICHIA_TAX, "Escherichia", out, metadata_file=str(metadata)
+        )
+        config = json.loads((db_dir / "database_config.json").read_text())
+        assert config["metadata_file"] == "assembly_metadata.tsv"
+        copied = db_dir / config["metadata_file"]
+        assert copied.exists()
+        assert copied.read_text() == metadata.read_text()
+
+    def test_metadata_file_resolves_after_move(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        """The recorded path is relative to db_dir, so it must still resolve
+        after the whole tree moves -- same guarantee as sketch_file/
+        members_file (test_orthophyl_run_symlink_survives_tree_move)."""
+        a = tmp_path / "a"
+        a.mkdir()
+        run = orthophyl_run_skeleton()
+        shutil.move(str(run), str(a / "orthophyl_run"))
+        run_in_a = a / "orthophyl_run"
+        metadata = a / "all_asm_acc_metadata"
+        metadata.write_text("GCF_000001 species1 strain1 bios1 1234 ok ok USA\n")
+        out = a / "databases"
+        db_creator_module.create_database_for_run(
+            run_in_a, ESCHERICHIA_TAX, "Escherichia", out, metadata_file=str(metadata)
+        )
+
+        b = tmp_path / "b"
+        shutil.move(str(a), str(b))
+
+        db_dir = b / "databases" / "Escherichia_db"
+        config = json.loads((db_dir / "database_config.json").read_text())
+        resolved = db_dir / config["metadata_file"]
+        assert resolved.exists()
+
+    def test_no_metadata_file_arg_leaves_field_none(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        """Every pre-existing caller omits --metadata-file; the config must
+        still default to metadata_file=None so they stay byte-identical."""
+        run = orthophyl_run_skeleton()
+        out = tmp_path / "databases"
+        db_dir = db_creator_module.create_database_for_run(
+            run, ESCHERICHIA_TAX, "Escherichia", out
+        )
+        config = json.loads((db_dir / "database_config.json").read_text())
+        assert config["metadata_file"] is None
+
+    def test_nonexistent_metadata_file_leaves_field_none(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        run = orthophyl_run_skeleton()
+        out = tmp_path / "databases"
+        db_dir = db_creator_module.create_database_for_run(
+            run, ESCHERICHIA_TAX, "Escherichia", out,
+            metadata_file=str(tmp_path / "does_not_exist.tsv"),
+        )
+        config = json.loads((db_dir / "database_config.json").read_text())
+        assert config["metadata_file"] is None
+        assert not (db_dir / "assembly_metadata.tsv").exists()
+
+
 class TestParseInputTable:
     def test_parses_three_columns(self, db_creator_module, tmp_path):
         tsv = tmp_path / "runs.tsv"
@@ -197,6 +314,23 @@ class TestMasterIndex:
         assert index["n_databases"] == 1
         assert index["databases"][0]["clade_rank"] == "g"
         assert (out / "database_summary.txt").exists()
+
+    def test_database_dir_is_relative_to_output_dir(self, db_creator_module, tmp_path):
+        out = tmp_path / "databases"
+        out.mkdir()
+        databases = [
+            {
+                "clade_name": "Escherichia",
+                "clade_taxonomy": ESCHERICHIA_TAX,
+                "database_dir": out / "Escherichia_db",
+                "n_genomes": 42,
+            }
+        ]
+        db_creator_module.create_master_index(databases, out)
+        index = json.loads((out / "database_index.json").read_text())
+        entry = index["databases"][0]["database_dir"]
+        assert not os.path.isabs(entry)
+        assert entry == "Escherichia_db"
 
     def test_taxonomy_source_surfaced_when_present(self, db_creator_module, tmp_path):
         out = tmp_path / "databases"

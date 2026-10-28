@@ -9,7 +9,7 @@ RUN apt-get -y update \
     && apt-get install -y wget zip bc \
     && apt-get clean
 RUN micromamba install --yes --name base --channel bioconda --channel conda-forge \
-    prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer pal2nal prodigal ete3 raxml trimal parallel r-essentials \
+    prodigal orthofinder=2.5.4 bbmap=39.01 fasttree hmmer pal2nal prodigal ete3 raxml trimal parallel r-essentials matplotlib \
     && micromamba clean --all --yes \
     && eval "$(micromamba shell hook --shell=bash)" \
     && micromamba activate \

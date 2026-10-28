@@ -30,6 +30,7 @@ import gzip
 import argparse
 import subprocess
 import shutil
+import importlib.util
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import logging
@@ -122,6 +123,12 @@ class PipelineWrapper:
         clade_rank: str = 'g',
         clade_taxonomy: Optional[str] = None,
         skip_qc: bool = False,
+        # NEW: geographic-origin figures (tree + world map with patristic
+        #   pair lines between sample countries)
+        geo: bool = False,
+        geo_tsv: Optional[Path] = None,
+        geo_top_k: int = 100,
+        geo_format: str = 'png',
     ):
         # Validate mutually exclusive mode flags (--input / --taxon / --genome-dir)
         modes_given = sum(bool(x) for x in (input_file, taxon, genome_dir))
@@ -276,6 +283,24 @@ class PipelineWrapper:
         #   assembly_router.py's --placement flag.
         self.placement = placement
 
+        # Geographic-origin figures: auto-generate a country-annotated tree +
+        #   world map (with top-K-closest patristic-distance pair lines
+        #   between sample countries) via python_scripts/annotate_tree_by_
+        #   country.py, hooked in after every tree-publish site. --geo-tsv/
+        #   --geo-top-k imply --geo (see main()'s post-parse fixups).
+        #   Figure generation itself is NON-FATAL (logged + warned on
+        #   failure); a missing matplotlib IS fatal at startup (see
+        #   _validate_dependencies) so --geo failures surface before hours of
+        #   compute, not after.
+        self.geo = geo
+        self.geo_tsv = Path(geo_tsv) if geo_tsv else None
+        if self.geo_tsv and not self.geo_tsv.exists():
+            raise ValueError(f"--geo-tsv does not exist: {self.geo_tsv}")
+        self.geo_top_k = geo_top_k
+        if geo_format not in ('png', 'svg', 'pdf'):
+            raise ValueError(f"--geo-format must be one of png/svg/pdf, got: {geo_format!r}")
+        self.geo_format = geo_format
+
         # Script paths (relative to this wrapper)
         self.script_dir = Path(__file__).parent
         self.assembly_router = self.script_dir / "assembly_router" / "assembly_router.py"
@@ -284,6 +309,7 @@ class PipelineWrapper:
         self.subclade_partitioner = self.script_dir / "python_scripts" / "subclade_partition.py"
         self.subsampler = self.script_dir / "python_scripts" / "subsample_genomes.py"
         self.megatree_grafter = self.script_dir / "python_scripts" / "megatree_graft.py"
+        self.geo_figures_script = self.script_dir / "python_scripts" / "annotate_tree_by_country.py"
         self.orthophyl_script = self.script_dir / "OrthoPhyl.sh"
         self.releaf_script = self.script_dir / "ReLeaf.sh"
         
@@ -596,6 +622,18 @@ class PipelineWrapper:
     
     def _validate_dependencies(self):
         """Check that all required scripts and tools are available."""
+        # --geo needs matplotlib for render_map/render_tree. Checked fatally
+        # at startup (rather than left to --geo's own non-fatal failure
+        # policy) so a missing dependency surfaces before hours of compute,
+        # not after the first tree is built.
+        if self.geo and importlib.util.find_spec("matplotlib") is None:
+            raise ImportError(
+                "--geo requires matplotlib, which is not installed in this "
+                "environment. Install it (e.g. `mamba install -n orthophyl "
+                "-c conda-forge matplotlib`, or add it to the container "
+                "recipe) or omit --geo."
+            )
+
         required_scripts = {
             'Assembly Router': self.assembly_router,
             'Database Creator': self.database_creator,
@@ -1302,11 +1340,21 @@ class PipelineWrapper:
         # Create the taxon DB from the backbone run (coherent HMM set for
         # ReLeaf). Marked is_backbone so the router can tell it apart from a
         # dense subclade sharing the same parent-level taxonomy (--placement).
+        # all_asm_acc_metadata (if any) is written by gather_filter_asms.sh as a
+        # sibling of raw_dir (assemblies_all.TMP); local genome-dir megatree runs
+        # have no such file, so this is None there.
+        metadata_file = raw_dir.parent / "all_asm_acc_metadata"
+        if not metadata_file.exists():
+            metadata_file = None
         self._create_database_entry(
             taxon_name=taxon_name, orthophyl_output=backbone_out,
             taxonomy=taxonomy,
             subclade_meta={'is_backbone': True, 'parent_taxon': taxon_name},
-            taxonomy_source=taxonomy_source, qc_applied=qc_applied)
+            taxonomy_source=taxonomy_source, qc_applied=qc_applied,
+            metadata_file=metadata_file)
+
+        self._generate_geo_figures(merged_tree, f"{taxon_name}_megatree",
+                                   metadata_file=metadata_file)
 
     def _build_megatree_subclades_independent(
             self, taxon_name: str, raw_dir: Path, subclades: List[Dict],
@@ -1571,6 +1619,82 @@ class PipelineWrapper:
         # Fall back to the canonical path so the error message is actionable.
         return orthophyl_output / "FINAL_SPECIES_TREES" / "SCO_strict.CDS.iqtree.treefile"
 
+    @staticmethod
+    def _locate_releaf_tree(releaf_output: Path) -> Optional[Path]:
+        """Find a ReLeaf run's newly-grafted tree in new_trees/.
+
+        script_lib/functions_addem.sh writes
+        new_trees/iqtree.<SCO_set>.<CDS|PROT>.addasm.treefile -- SCO_set varies
+        by run (SCO_strict, SCO_3, ...), so this globs rather than hardcoding
+        it. Prefers CDS over PROT, IQ-TREE over FastTree, matching the
+        original (broken) candidate-list's intended preference order.
+        """
+        tree_dir = releaf_output / "new_trees"
+        if not tree_dir.exists():
+            return None
+        candidates = (
+            list(tree_dir.glob("*.CDS.*treefile")) +
+            list(tree_dir.glob("*.PROT.*treefile")) +
+            list(tree_dir.glob("*treefile")) +
+            list(tree_dir.glob("*.tree")) +
+            list(tree_dir.glob("*.nwk"))
+        )
+        seen = set()
+        for c in candidates:
+            if c not in seen and c.is_file():
+                return c
+            seen.add(c)
+        return None
+
+    def _generate_geo_figures(self, tree_file: Path, label: str,
+                              metadata_file: Optional[Path] = None) -> None:
+        """Render a country-annotated tree + world map for one published tree.
+
+        Shells out to annotate_tree_by_country.py. Figure generation is
+        NON-FATAL by design (see CLAUDE.md's --geo architecture note): a
+        failure here is logged as a warning, not raised, so a cosmetic
+        rendering problem never takes down a multi-hour pipeline run after
+        the tree itself is already safely published. (A missing matplotlib
+        is instead checked fatally at startup, in _validate_dependencies.)
+        Requires at least one of metadata_file / self.geo_tsv -- the script
+        itself enforces this, so a call with neither just fails fast here.
+        """
+        if not self.geo:
+            return
+        if metadata_file is None and self.geo_tsv is None:
+            logger.warning(f"  ⚠ --geo: no metadata or --geo-tsv available for "
+                            f"{label}; skipping geo figures")
+            return
+        figures_dir = self.results_dir / "figures"
+        figures_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [sys.executable, str(self.geo_figures_script),
+               '--tree', str(tree_file),
+               '--out-dir', str(figures_dir),
+               '--label', label,
+               '--format', self.geo_format,
+               '--top-k', str(self.geo_top_k)]
+        if metadata_file is not None:
+            cmd.extend(['--metadata', str(metadata_file)])
+        if self.geo_tsv is not None:
+            cmd.extend(['--geo-tsv', str(self.geo_tsv)])
+        self._log_command(cmd)
+        if self.dry_run:
+            logger.info(f"  [DRY RUN] Would generate geo figures for {label}")
+            return
+        try:
+            env = dict(os.environ, QT_QPA_PLATFORM='offscreen')
+            log_file = self.logs_dir / f"geo_{label}.log"
+            with open(log_file, 'w') as f:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT,
+                                        text=True, env=env)
+            if result.returncode != 0:
+                logger.warning(f"  ⚠ --geo figure generation failed for {label} "
+                                f"(exit {result.returncode}); see {log_file}")
+            else:
+                logger.info(f"  ✓ Geo figures generated for {label}: {figures_dir}")
+        except OSError as e:
+            logger.warning(f"  ⚠ --geo figure generation failed for {label}: {e}")
+
     def _phase_subclade_build(self, subclade_build_batch: Dict[str, List[Dict]]):
         """Phase 3c: build lazily-registered subclades on demand, then ReLeaf.
 
@@ -1782,6 +1906,11 @@ class PipelineWrapper:
                 and self._is_subclade_db_built(sc_name)):
             logger.info(f"  ✓ Database already created for {sc_name} (resuming)")
         else:
+            # all_asm_acc_metadata (if any) is a sibling of raw_dir
+            # (assemblies_all.TMP); absent for local genome-dir subclades.
+            metadata_file = raw_dir.parent / "all_asm_acc_metadata"
+            if not metadata_file.exists():
+                metadata_file = None
             self._create_database_entry(
                 taxon_name=sc_name,
                 orthophyl_output=orthophyl_output,
@@ -1789,7 +1918,8 @@ class PipelineWrapper:
                 subclade_meta=subclade_meta,
                 force=force,
                 taxonomy_source=taxonomy_source,
-                qc_applied=qc_applied)
+                qc_applied=qc_applied,
+                metadata_file=metadata_file)
             self._write_checkpoint(f"database_{ckey}")
 
     def _is_subclade_db_built(self, sc_name: str) -> bool:
@@ -2465,7 +2595,7 @@ class PipelineWrapper:
         logger.info(f"  ✓ OrthoPhyl complete for {taxon_name}")
         
         # Verify queries are in tree
-        tree_file = output_dir / "FINAL_SPECIES_TREES" / "SCO_strict.CDS.iqtree.treefile"
+        tree_file = self._locate_species_tree(output_dir)
         if tree_file.exists():
             self._verify_queries_in_tree(tree_file, assemblies)
         else:
@@ -2505,6 +2635,7 @@ class PipelineWrapper:
         force: bool = False,
         taxonomy_source: str = 'ncbi',
         qc_applied: bool = True,
+        metadata_file: Optional[Path] = None,
     ):
         """Create new database entry from OrthoPhyl run.
 
@@ -2518,6 +2649,10 @@ class PipelineWrapper:
         taxonomy_source/qc_applied are provenance flags (default 'ncbi'/True keep
         every existing caller byte-identical); the local-genome-ingest mode passes
         'user_supplied' and the actual QC status.
+
+        metadata_file (optional): an assembly metadata TSV (e.g.
+        all_asm_acc_metadata) to copy into the DB, for later --geo figure use.
+        Omitted by default so every existing caller stays byte-identical.
         """
         logger.info(f"\n  Creating database entry for {taxon_name}...")
         # taxon_name can carry a batch TSV's free-text taxonomy value verbatim;
@@ -2551,6 +2686,8 @@ class PipelineWrapper:
                 cmd.extend(['--members-file', str(subclade_meta['members_file'])])
             if subclade_meta.get('source_genome_dir'):
                 cmd.extend(['--source-genome-dir', str(subclade_meta['source_genome_dir'])])
+            if metadata_file:
+                cmd.extend(['--metadata-file', str(metadata_file)])
 
             self._log_command(cmd)
             if self.dry_run:
@@ -2590,6 +2727,8 @@ class PipelineWrapper:
         ]
         if not qc_applied:
             cmd.append('--qc-not-applied')
+        if metadata_file:
+            cmd.extend(['--metadata-file', str(metadata_file)])
 
         self._log_command(cmd)
 
@@ -2626,30 +2765,50 @@ class PipelineWrapper:
         releaf_trees = []
         for db_dir in self.database_dir.glob("*_db"):
             releaf_output = db_dir / 'orthophyl_run' / 'ReLeaf_dir'
-            # Try multiple possible tree file names
-            tree_candidates = [
-                releaf_output / "new_trees" / "SCO_strict.CDS.iqtree.treefile.addasm",
-                releaf_output / "new_trees" / "SCO_strict.CDS.iqtree.treefile",
-                releaf_output / "new_trees" / "SCO_strict.PROT.iqtree.treefile.addasm",
-                releaf_output / "new_trees" / "SCO_strict.PROT.iqtree.treefile"
-            ]
-            for tree_file in tree_candidates:
-                if tree_file.exists():
-                    dst = trees_dir / "releaf" / f"{db_dir.name}_phylogeny.nwk"
-                    shutil.copy(tree_file, dst)
-                    releaf_trees.append(db_dir.name)
-                    logger.info(f"  ✓ Collected ReLeaf tree: {db_dir.name} ({tree_file.name})")
-                    break
-        
+            tree_file = self._locate_releaf_tree(releaf_output)
+            if tree_file is not None:
+                dst = trees_dir / "releaf" / f"{db_dir.name}_phylogeny.nwk"
+                shutil.copy(tree_file, dst)
+                releaf_trees.append(db_dir.name)
+                logger.info(f"  ✓ Collected ReLeaf tree: {db_dir.name} ({tree_file.name})")
+
+                # ReLeaf trees combine the DB's original (NCBI-downloaded)
+                # genomes with newly-placed query genomes, which have no NCBI
+                # row -- the DB's own persisted metadata_file (task #14,
+                # relative to db_dir) covers the former; --geo-tsv is the
+                # only source for the latter.
+                metadata_file = None
+                config_file = db_dir / "database_config.json"
+                if config_file.exists():
+                    try:
+                        with open(config_file) as f:
+                            db_config = json.load(f)
+                        rel_metadata = db_config.get('metadata_file')
+                        if rel_metadata:
+                            candidate = db_dir / rel_metadata
+                            if candidate.exists():
+                                metadata_file = candidate
+                    except (json.JSONDecodeError, OSError):
+                        pass
+                self._generate_geo_figures(dst, db_dir.name, metadata_file=metadata_file)
+
         # Collect OrthoPhyl trees
         orthophyl_trees = []
         for taxon_dir in (self.orthophyl_dir / "orthophyl_runs").glob("*/"):
-            tree_file = taxon_dir / "FINAL_SPECIES_TREES" / "SCO_strict.CDS.iqtree.treefile"
+            tree_file = self._locate_species_tree(taxon_dir)
             if tree_file.exists():
                 dst = trees_dir / "orthophyl" / f"{taxon_dir.name}_phylogeny.nwk"
                 shutil.copy(tree_file, dst)
                 orthophyl_trees.append(taxon_dir.name)
                 logger.info(f"  ✓ Collected OrthoPhyl tree: {taxon_dir.name}")
+
+                # Novel-taxon trees from batch mode download to
+                # orthophyl_dir/downloads/<taxon>/, same layout as
+                # _process_orthophyl_taxon's own download_dir.
+                metadata_file = self.orthophyl_dir / "downloads" / taxon_dir.name / "all_asm_acc_metadata"
+                if not metadata_file.exists():
+                    metadata_file = None
+                self._generate_geo_figures(dst, taxon_dir.name, metadata_file=metadata_file)
         
         # Generate summary report
         self._generate_summary_report(releaf_trees, orthophyl_trees)
@@ -2978,9 +3137,27 @@ class PipelineWrapper:
             input_dir=genomes_to_keep, output_dir=orthophyl_output,
             taxon_name=safe_taxon, assemblies=[])
         logger.info(f"\nCreating database for {self.taxon}...")
+        metadata_file = download_dir / "all_asm_acc_metadata"
+        if not metadata_file.exists():
+            metadata_file = None
         self._create_taxon_database(
             taxon_name=self.taxon, orthophyl_output=orthophyl_output,
-            gatherer=gatherer, genomes_to_keep=genomes_to_keep)
+            gatherer=gatherer, genomes_to_keep=genomes_to_keep,
+            metadata_file=metadata_file)
+
+        # ---- Publish the tree into 03_results ----
+        tree_dir = self.results_dir / "trees" / "orthophyl"
+        tree_dir.mkdir(parents=True, exist_ok=True)
+        tree_file = self._locate_species_tree(orthophyl_output)
+        if tree_file.exists():
+            published_tree = tree_dir / f"{safe_taxon}_phylogeny.nwk"
+            shutil.copy(tree_file, published_tree)
+            logger.info(f"  ✓ Published tree: {published_tree}")
+            self._generate_geo_figures(published_tree, safe_taxon,
+                                       metadata_file=metadata_file)
+        else:
+            logger.warning(f"  ⚠ Species tree not found at expected location: {tree_file}")
+
         logger.info("=" * 70)
         logger.info("TAXON MODE COMPLETE!")
         logger.info("=" * 70)
@@ -3316,8 +3493,12 @@ class PipelineWrapper:
         tree_dir.mkdir(parents=True, exist_ok=True)
         tree_file = self._locate_species_tree(orthophyl_output)
         if tree_file.exists():
-            shutil.copy(tree_file, tree_dir / f"{safe}_phylogeny.nwk")
-            logger.info(f"  ✓ Published tree: {tree_dir / f'{safe}_phylogeny.nwk'}")
+            published_tree = tree_dir / f"{safe}_phylogeny.nwk"
+            shutil.copy(tree_file, published_tree)
+            logger.info(f"  ✓ Published tree: {published_tree}")
+            # Local genome-dir mode has no NCBI metadata -- geo figures rely
+            # entirely on --geo-tsv (main()'s validation requires it with --geo).
+            self._generate_geo_figures(published_tree, safe)
         else:
             logger.warning(f"  ⚠ Species tree not found at expected location: {tree_file}")
 
@@ -3345,7 +3526,8 @@ class PipelineWrapper:
         taxon_name: str,
         orthophyl_output: Path,
         gatherer,
-        genomes_to_keep: Path
+        genomes_to_keep: Path,
+        metadata_file: Optional[Path] = None,
     ):
         """Create database with taxon metadata.
 
@@ -3353,6 +3535,9 @@ class PipelineWrapper:
         directory produced by gather_filter_asms.sh (each ``.fna``/``.fasta``
         filename is an assembly accession). This records exactly the genomes
         that went into the tree, rather than the pre-QC NCBI candidate list.
+
+        metadata_file (optional): all_asm_acc_metadata from the raw download,
+        copied into the DB for later --geo figure use.
         """
         # Get taxonomy from gatherer
         taxonomy = gatherer.get_taxonomy_string()
@@ -3361,7 +3546,8 @@ class PipelineWrapper:
         self._create_database_entry(
             taxon_name=taxon_name,
             orthophyl_output=orthophyl_output,
-            taxonomy=taxonomy
+            taxonomy=taxonomy,
+            metadata_file=metadata_file,
         )
 
         # Update database config with taxon metadata. Must match
@@ -3436,7 +3622,12 @@ class PipelineWrapper:
         config['source_taxon_name'] = clade_name
         config['source_taxid'] = None
         config['source_rank'] = None
-        config['source_genome_dir'] = str(source_genome_dir.resolve())
+        # Relative to db_dir, matching OP_database_tool.py's convention -- so
+        # this survives a different bind-mount mapping than at creation time
+        # (see assembly_router.py's _load_single_database, which resolves it
+        # against db_dir).
+        config['source_genome_dir'] = os.path.relpath(
+            source_genome_dir.resolve(), db_dir.resolve())
         config['assembly_accessions'] = accessions
         config['n_assemblies_at_creation'] = len(accessions)
         config['last_updated'] = datetime.now().isoformat()
@@ -3803,6 +3994,44 @@ Examples:
              'instead. Threaded to assembly_router.py --placement.'
     )
 
+    geo_group = parser.add_argument_group(
+        'Geographic figures (opt-in, --geo)',
+        'Auto-generate a country-annotated tree + world map per published tree')
+    geo_group.add_argument(
+        '--geo',
+        action='store_true',
+        help='Auto-generate a country-annotated tree and world map (with lines '
+             'joining the --geo-top-k closest cross-country genome pairs by '
+             'patristic distance) for every tree this run publishes. Uses NCBI '
+             'geo_loc_name metadata where available; --genome-dir mode has no '
+             'such metadata and requires --geo-tsv. Figure generation failures '
+             'are logged as warnings and do not fail the run; a missing '
+             'matplotlib IS fatal at startup.'
+    )
+    geo_group.add_argument(
+        '--geo-tsv',
+        type=Path,
+        default=None,
+        help='Implies --geo. Optional genome_id<TAB>location TSV supplying '
+             'sample locations (required with --genome-dir, since local mode '
+             'has no NCBI metadata). Overrides NCBI metadata per-genome when '
+             'both are present.'
+    )
+    geo_group.add_argument(
+        '--geo-top-k',
+        type=int,
+        default=100,
+        help='Implies --geo. Number of closest cross-country genome pairs (by '
+             'patristic distance) to draw as lines on the world map. Default 100.'
+    )
+    geo_group.add_argument(
+        '--geo-format',
+        choices=['png', 'svg', 'pdf'],
+        default='png',
+        help='Only used with --geo. Image format for the generated tree/map '
+             'figures. Default png.'
+    )
+
     low_importance_group = parser.add_argument_group('Low importance')
     low_importance_group.add_argument(
         '-v', '--verbose',
@@ -3830,6 +4059,16 @@ Examples:
                     f"implying --megatree.")
         args.megatree = True
 
+    # --geo-tsv/--geo-top-k imply --geo, same pattern as the megatree flags above.
+    if not args.geo and (args.geo_tsv is not None or args.geo_top_k != 100):
+        implied_by = [name for name, val in [
+            ('--geo-tsv', args.geo_tsv is not None),
+            ('--geo-top-k', args.geo_top_k != 100),
+        ] if val]
+        logger.info(f"  {' / '.join(implied_by)} given without --geo -- "
+                    f"implying --geo.")
+        args.geo = True
+
     # Validate argument combinations (mutually_exclusive_group handles --input vs --taxon vs --genome-dir)
     if args.update_existing and not args.taxon:
         parser.error("--update-existing requires --taxon mode.")
@@ -3840,6 +4079,9 @@ Examples:
                       "--genome-dir (every subclade/backbone build QCs its "
                       "own genomes). Drop --skip-qc, or use --megatree "
                       "without --skip-qc.")
+    if args.genome_dir and args.geo and not args.geo_tsv:
+        parser.error("--genome-dir --geo requires --geo-tsv (local mode has "
+                      "no NCBI geo_loc_name metadata to fall back on).")
 
     # Configure logging based on verbosity
     if args.verbose:
@@ -3882,6 +4124,10 @@ Examples:
         clade_rank=args.clade_rank,
         clade_taxonomy=args.clade_taxonomy,
         skip_qc=args.skip_qc,
+        geo=args.geo,
+        geo_tsv=args.geo_tsv,
+        geo_top_k=args.geo_top_k,
+        geo_format=args.geo_format,
     )
 
     return wrapper.run()

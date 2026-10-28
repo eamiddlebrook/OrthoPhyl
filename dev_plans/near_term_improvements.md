@@ -238,3 +238,102 @@ pure upside there: resolving more names routably instead of falling back).
 species-within-genus level, or both; how much auto-correction is safe before
 silently matching the wrong taxon (e.g. hamming-1 among very short genus
 names could over-match). Needs a plan before implementing.
+
+## 6. `--geo` flag: auto-generate a geographic-origin tree + map figure [DONE]
+
+**Ask**: when `--geo` is passed to `orthophyl_pipeline_wrapper.py`, automatically
+produce a figure combining the species tree with each genome's geographic
+origin (e.g. a tree with tip points/colors keyed to collection location, plus
+a companion world map).
+
+**Implementation**: `python_scripts/annotate_tree_by_country.py` renders three
+outputs per labeled tree (`<label>_geo_tree.<fmt>`, `<label>_geo_map.<fmt>`,
+`<label>_geo_pairs.tsv`, `<label>_geo_countries.tsv`) under
+`<results-dir>/figures/`:
+- A country-colored tree (ete3).
+- A world map (plain matplotlib + a bundled, public-domain Natural Earth
+  110m admin-0 dataset in `python_scripts/data/` -- no cartopy/geopandas, no
+  network fetch, so it works offline/in containers).
+- Lines joining the **top-K closest cross-country genome pairs by patristic
+  distance** (`--geo-top-k`, default 100; `top_k_cross_country_pairs()`,
+  numpy-vectorized per-LCA outer-sum, bounded heap, chunked so memory stays
+  bounded at megatree scale). Same-country and Unknown-country pairs are
+  excluded. Line alpha follows `pair_alphas()`: `alpha = 1 - d/d_max`, so the
+  single most-distant (K-th) pair in the drawn set is fully transparent and
+  the closest pair is darkest -- note a lone pair is simultaneously closest
+  *and* K-th, so it gets alpha 0, not 1 (only an all-zero-distance set gets
+  the alpha-1 special case).
+
+Country resolution (`load_country_coords()`/`resolve_country_latlon()`) uses
+the Natural Earth label points plus `python_scripts/data/country_aliases.tsv`
+(INSDC `geo_loc_name` names -> Natural Earth names or explicit lat/lon).
+Aliases resolve via a fixed-point multi-pass loop, not a single pass, because
+a `"country"`-kind alias can point at another alias that is itself only a
+`"latlon"` entry (e.g. `"Cape Verde" -> "Cabo Verde"`) rather than straight at
+a Natural Earth name -- a single pass is order-dependent on dict iteration
+order and can silently leave such chains unresolved.
+
+**Metadata sources**: NCBI-download paths get country data for free via
+`all_asm_acc_metadata`'s `geo_loc_name` column (collected by
+`gather_filter_asms.sh`'s `merge_metadata_geoloc`); the metadata file's path
+is persisted on the DB (`OP_database_tool.py --metadata-file`, recorded as a
+path relative to `db_dir`, same convention as `sketch_file`/`members_file`)
+so later ReLeaf/batch trees can still look it up. `--genome-dir` mode has no
+NCBI metadata, so `--geo` there requires `--geo-tsv genome_id<TAB>location`
+(enforced at argparse time -- `--genome-dir --geo` without `--geo-tsv` is a
+hard `parser.error`). Supplying `--geo-tsv` or a non-default `--geo-top-k`
+implies `--geo`, mirroring the `--megatree`-implication pattern.
+
+**Hook sites** (all four tree-publish points): megatree publish, local-genome
+mode publish, taxon-create-mode publish, and batch `_phase_aggregation` (both
+novel-taxon and ReLeaf-published trees). `_generate_geo_figures()` itself is
+**non-fatal** -- subprocess failure or `OSError` logs a warning and the
+pipeline still returns 0, so a bad geo figure never fails an otherwise-good
+tree build. The one fatal check is at startup: a missing `matplotlib` raises
+immediately in `_validate_dependencies` when `self.geo` is True, so the user
+finds out before hours of compute rather than after.
+
+**Fixed in scope**: `_phase_aggregation` and its tree lookup previously
+hardcoded a nonexistent filename (`SCO_strict.CDS.iqtree.treefile`), so batch
+trees were never actually published/found; this was switched to the existing
+`_locate_species_tree` pattern-matcher (plus a glob for the ReLeaf
+`new_trees/*addasm*` tree), which was a precondition for `--geo` having
+anything to draw in batch mode.
+
+**Still future work**: the BioSample `lat_lon` attribute is not extracted
+anywhere in the metadata pipeline -- country/region-level resolution via the
+alias gazetteer is all that's implemented. Precise lat/lon per genome
+(instead of country centroids + jitter) remains a possible follow-up.
+
+Tests: `tests/unit/test_geo_figures.py` (34 tests: pair-distance algorithm
+incl. brute-force cross-check, alpha rule, country/alias resolution incl.
+every-alias-resolves, TSV/metadata parsing and merge precedence, render smoke
+tests), `tests/unit/test_wrapper_geo.py` (25 tests: flag implication,
+construction-time validation, fatal matplotlib check, `_generate_geo_figures`
+command/env/error-handling, all hook sites), `test_db_creator.py`'s
+`TestMetadataFile` (4 tests: `--metadata-file` copy/record/resolve-after-move,
+defaults when omitted or nonexistent).
+
+## 7. `--geo` has no hook on `--taxon --update-existing` (low priority, not started)
+
+**Ask** (self-identified gap while explaining `--geo`'s megatree/ReLeaf
+interactions, not a user-reported bug): `--geo` combined with `--taxon
+--update-existing` (`_run_taxon_update_mode`,
+`orthophyl_pipeline_wrapper.py:3169`) silently produces no figures.
+
+**Why**: every other tree-publish site calls `_generate_geo_figures`, either
+directly (megatree publish, taxon-create-mode publish, local-genome-mode
+publish) or indirectly via `_phase_aggregation`'s `*_db` sweep (batch-mode
+ReLeaf, including the lazy-subclade-build-then-ReLeaf route, since those
+trees land under `self.database_dir` same as everything else
+`_phase_aggregation` walks). `_run_taxon_update_mode` runs `_run_releaf`
+directly (`:3281`) and returns without ever routing through
+`_phase_aggregation` or calling the helper itself.
+
+**Fix shape (sketch, not a commitment)**: add a `_generate_geo_figures` call
+after `_run_releaf` succeeds in `_run_taxon_update_mode`, mirroring the
+taxon-create-mode publish block -- tree is the DB's updated
+`ReLeaf_dir`-published tree (same lookup `_phase_aggregation` uses), metadata
+is the DB's persisted `metadata_file` (same convention as the batch-mode
+ReLeaf hook). Low priority: `--taxon --update-existing --geo` together is
+likely a rare combination in practice.

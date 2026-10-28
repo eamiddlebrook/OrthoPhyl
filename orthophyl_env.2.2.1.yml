@@ -194,6 +194,9 @@ dependencies:
   - make=4.4.1=hb9d3cd8_2
   - markupsafe=3.0.2=py312h178313f_1
   - mash=2.3=hb105d93_9
+  # --geo figures (python_scripts/annotate_tree_by_country.py); unpinned like
+  #   the pytest entries below since this was added by hand, not frozen.
+  - matplotlib>=3.5
   - matplotlib-inline=0.1.7=pyhd8ed1ab_0
   - mcl=22.282=pl5321h031d066_2
   - mistune=3.0.2=pyhd8ed1ab_1

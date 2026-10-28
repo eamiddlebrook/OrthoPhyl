@@ -1,0 +1,142 @@
+# country_aliases.tsv
+# Maps INSDC/NCBI geo_loc_name country-level vocabulary (and common NCBI
+# region/sea entries) to names in ne_110m_countries.json, or to an explicit
+# lat/lon when there is no matching country polygon (oceans, seas, regions).
+# Format: insdc_name<TAB>kind<TAB>value
+#   kind=country  value=name in ne_110m_countries.json "countries"[].name
+#   kind=latlon   value=lat,lon
+#
+# Only entries that DIFFER from (or have no match in) ne_110m_countries.json
+# names need to be listed here; an exact name match is tried first.
+USA	country	United States of America
+United States	country	United States of America
+Viet Nam	country	Vietnam
+South Korea	country	South Korea
+Korea, South	country	South Korea
+Republic of Korea	country	South Korea
+North Korea	country	North Korea
+Korea, North	country	North Korea
+Democratic People's Republic of Korea	country	North Korea
+Czech Republic	country	Czechia
+Russian Federation	country	Russia
+Lao People's Democratic Republic	country	Laos
+Myanmar	country	Myanmar
+Burma	country	Myanmar
+Ivory Coast	country	Côte d'Ivoire
+Cote d'Ivoire	country	Côte d'Ivoire
+Congo	country	Congo
+Republic of the Congo	country	Congo
+Democratic Republic of the Congo	country	Dem. Rep. Congo
+Congo, Democratic Republic	country	Dem. Rep. Congo
+Congo, the Democratic Republic of the	country	Dem. Rep. Congo
+Swaziland	country	eSwatini
+Eswatini	country	eSwatini
+Macedonia	country	North Macedonia
+Former Yugoslav Republic of Macedonia	country	North Macedonia
+Cape Verde	country	Cabo Verde
+Cabo Verde	latlon	16.0,-24.0
+East Timor	country	Timor-Leste
+Brunei Darussalam	country	Brunei
+Syrian Arab Republic	country	Syria
+Iran (Islamic Republic of)	country	Iran
+Bolivia, Plurinational State of	country	Bolivia
+Venezuela, Bolivarian Republic of	country	Venezuela
+Tanzania, United Republic of	country	Tanzania
+Moldova, Republic of	country	Moldova
+Micronesia	latlon	6.9,158.2
+Micronesia, Federated States of	latlon	6.9,158.2
+Marshall Islands	latlon	7.1,171.2
+Kiribati	latlon	1.4,173.0
+Nauru	latlon	-0.5,166.9
+Palau	latlon	7.5,134.6
+Tuvalu	latlon	-7.1,177.6
+Tonga	latlon	-21.2,-175.2
+Samoa	latlon	-13.8,-172.1
+American Samoa	latlon	-14.3,-170.7
+Cook Islands	latlon	-21.2,-159.8
+French Polynesia	latlon	-17.7,-149.4
+Maldives	latlon	3.2,73.2
+Mauritius	latlon	-20.3,57.6
+Seychelles	latlon	-4.6,55.5
+Comoros	latlon	-11.9,43.3
+Sao Tome and Principe	latlon	0.3,6.7
+Dominica	latlon	15.4,-61.4
+Grenada	latlon	12.1,-61.7
+Saint Lucia	latlon	13.9,-61.0
+Saint Vincent and the Grenadines	latlon	13.0,-61.2
+Saint Kitts and Nevis	latlon	17.3,-62.7
+Antigua and Barbuda	latlon	17.1,-61.8
+Barbados	latlon	13.2,-59.5
+Bahamas	country	Bahamas
+Hong Kong	latlon	22.3,114.2
+Macau	latlon	22.2,113.6
+Macao	latlon	22.2,113.6
+Singapore	latlon	1.35,103.8
+Malta	latlon	35.9,14.4
+Andorra	latlon	42.5,1.5
+Monaco	latlon	43.7,7.4
+Liechtenstein	latlon	47.2,9.6
+San Marino	latlon	43.9,12.5
+Vatican	latlon	41.9,12.5
+Holy See (Vatican City State)	latlon	41.9,12.5
+Bahrain	latlon	26.0,50.6
+Timor-Leste	country	Timor-Leste
+United Kingdom	country	United Kingdom
+UK	country	United Kingdom
+Great Britain	country	United Kingdom
+Gibraltar	latlon	36.1,-5.3
+Jersey	latlon	49.2,-2.1
+Guernsey	latlon	49.5,-2.6
+Isle of Man	latlon	54.2,-4.5
+French Guiana	country	France
+Netherlands Antilles	latlon	12.2,-69.1
+Curacao	latlon	12.2,-69.0
+Aruba	latlon	12.5,-70.0
+Bonaire, Saint Eustatius and Saba	latlon	12.2,-68.3
+Puerto Rico	country	Puerto Rico
+US Virgin Islands	latlon	18.3,-64.9
+Virgin Islands, U.S.	latlon	18.3,-64.9
+British Virgin Islands	latlon	18.4,-64.6
+Virgin Islands, British	latlon	18.4,-64.6
+Guam	latlon	13.4,144.8
+Northern Mariana Islands	latlon	15.1,145.7
+New Caledonia	country	New Caledonia
+French Polynesia	latlon	-17.7,-149.4
+Wallis and Futuna	latlon	-13.3,-176.2
+Niue	latlon	-19.0,-169.9
+Tokelau	latlon	-9.2,-171.8
+Pitcairn	latlon	-25.1,-130.1
+Reunion	latlon	-21.1,55.5
+Mayotte	latlon	-12.8,45.2
+Saint Helena	latlon	-15.9,-5.7
+Falkland Islands (Islas Malvinas)	country	Falkland Is.
+South Georgia and the South Sandwich Islands	latlon	-54.4,-36.6
+Antarctica	country	Antarctica
+Greenland	country	Greenland
+Faroe Islands	latlon	62.0,-6.8
+Svalbard	latlon	78.2,15.6
+West Bank	country	Palestine
+Gaza Strip	country	Palestine
+Palestinian Territory	country	Palestine
+Western Sahara	country	W. Sahara
+Taiwan	country	Taiwan
+Kosovo	country	Kosovo
+#
+# NCBI/INSDC ocean, sea and region entries -- centroids are approximate
+# representative points, not true geographic centroids.
+Atlantic Ocean	latlon	0.0,-30.0
+Pacific Ocean	latlon	0.0,-160.0
+Indian Ocean	latlon	-10.0,75.0
+Arctic Ocean	latlon	85.0,0.0
+Southern Ocean	latlon	-65.0,0.0
+Baltic Sea	latlon	58.0,19.0
+Mediterranean Sea	latlon	35.0,18.0
+Red Sea	latlon	20.0,38.0
+Black Sea	latlon	43.5,34.0
+Caribbean Sea	latlon	15.0,-75.0
+North Sea	latlon	56.0,3.0
+Gulf of Mexico	latlon	25.0,-90.0
+Coral Sea	latlon	-17.0,155.0
+South China Sea	latlon	12.0,113.0
+Bering Sea	latlon	58.0,-178.0
+Borneo	latlon	0.5,114.5

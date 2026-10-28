@@ -53,6 +53,58 @@ class TestLoadDatabases:
         with pytest.raises(ValueError, match="No databases found"):
             Router(database_dir=empty, output_dir=tmp_path / "out")
 
+    def test_loads_relative_database_dir_from_index(
+        self, Router, two_db_dir, tmp_path
+    ):
+        """database_index.json stores database_dir relative to the index's
+        own directory (see OP_database_tool.py's create_master_index) -- a
+        relative entry must resolve and load correctly."""
+        index = {
+            "created": "2025-01-01T00:00:00",
+            "version": "1.0",
+            "n_databases": 1,
+            "databases": [
+                {
+                    "clade_name": "Escherichia",
+                    "clade_taxonomy": ESCHERICHIA_TAX,
+                    "clade_rank": "g",
+                    "clade_rank_name": "genus",
+                    "database_dir": "Escherichia_db",
+                    "n_genomes": 2840,
+                }
+            ],
+        }
+        (two_db_dir / "database_index.json").write_text(json.dumps(index))
+        router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
+        names = [db["clade_name"] for db in router.databases]
+        assert names == ["Escherichia"]
+
+    def test_loads_legacy_absolute_database_dir_from_index(
+        self, Router, two_db_dir, tmp_path
+    ):
+        """Pre-fix databases wrote an absolute database_dir in the index;
+        Path.__truediv__ passes an absolute operand through unchanged, so
+        these must keep loading without migration."""
+        index = {
+            "created": "2025-01-01T00:00:00",
+            "version": "1.0",
+            "n_databases": 1,
+            "databases": [
+                {
+                    "clade_name": "Escherichia",
+                    "clade_taxonomy": ESCHERICHIA_TAX,
+                    "clade_rank": "g",
+                    "clade_rank_name": "genus",
+                    "database_dir": str((two_db_dir / "Escherichia_db").resolve()),
+                    "n_genomes": 2840,
+                }
+            ],
+        }
+        (two_db_dir / "database_index.json").write_text(json.dumps(index))
+        router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
+        names = [db["clade_name"] for db in router.databases]
+        assert names == ["Escherichia"]
+
 
 class TestTaxonomySourceProvenance:
     def test_defaults_to_ncbi_when_absent(self, Router, two_db_dir, tmp_path):

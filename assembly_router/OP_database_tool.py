@@ -63,6 +63,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def relative_symlink(link: Path, target: Path) -> None:
+    """Create `link` -> `target` using a relative path.
+
+    A relative symlink stays correct under any bind-mount mapping (e.g.
+    Singularity `--bind host:/container`), as long as `link` and `target`
+    are on the same mount -- unlike `target.resolve()`, which bakes in
+    whatever path the current process sees (the container's view), breaking
+    on the host or under a different container bind later.
+    """
+    target = target.resolve()
+    rel = os.path.relpath(target, link.parent.resolve())
+    if os.path.commonpath([target, link.parent.resolve()]) == os.sep:
+        logger.warning(
+            f"  ⚠ {link.name} and its target share no common path above '/' "
+            f"-- this symlink will only resolve where both paths are visible "
+            f"the same way (e.g. inside the same container bind)."
+        )
+    link.symlink_to(rel)
+
+
 class GTDBTaxonomy:
     """Parse GTDB taxonomy strings."""
     
@@ -340,9 +360,13 @@ def create_database_for_run(
     taxonomy_source: str = "ncbi",
     qc_applied: bool = True,
     register_only: bool = False,
+    metadata_file: Optional[str] = None,
 ) -> Path:
     """
     Create a database directory for a single OrthoPhyl run.
+
+    metadata_file (optional): path to an assembly metadata TSV (e.g.
+    all_asm_acc_metadata) to copy into the DB, independent of subclade_meta.
 
     subclade_meta (optional): metadata for a MASH-partitioned subclade. When
         provided, extra fields (is_subclade, parent_taxon, subclade_id,
@@ -485,7 +509,14 @@ def create_database_for_run(
     config["subclade_id"] = sm.get("subclade_id")
     # A DB is "built" (real tree) unless we're registering it lazily.
     config["built"] = (not register_only)
-    config["source_genome_dir"] = sm.get("source_genome_dir")
+    src_genome_dir = sm.get("source_genome_dir")
+    if src_genome_dir:
+        # Stored relative to db_dir so it survives a different bind-mount
+        # mapping between build time and load time (see relative_symlink).
+        config["source_genome_dir"] = os.path.relpath(
+            Path(src_genome_dir).resolve(), db_dir.resolve())
+    else:
+        config["source_genome_dir"] = None
     # Marks the megatree's sparse overview DB, distinct from its dense subclades.
     config["is_backbone"] = bool(sm.get("is_backbone", False))
     # sketch_file / members_file are set to the in-DB copies below (if provided).
@@ -500,14 +531,27 @@ def create_database_for_run(
     if src_sketch and os.path.exists(src_sketch):
         dest_sketch = db_dir / "subclade_sketch.msh"
         shutil.copy(src_sketch, dest_sketch)
-        config["sketch_file"] = str(dest_sketch)
+        # Relative (bare filename): resolved against db_dir on load, so this
+        # survives a different bind-mount mapping than at creation time.
+        config["sketch_file"] = dest_sketch.name
         logger.info("  ✓ Copied subclade sketch")
     src_members = sm.get("members_file")
     if src_members and os.path.exists(src_members):
         dest_members = db_dir / "subclade_members.txt"
         shutil.copy(src_members, dest_members)
-        config["members_file"] = str(dest_members)
+        config["members_file"] = dest_members.name
         logger.info("  ✓ Copied subclade member list")
+
+    # Optional assembly metadata (e.g. all_asm_acc_metadata), used by
+    #   python_scripts/annotate_tree_by_country.py for --geo figures. Not
+    #   subclade-specific, so it's read from the top-level metadata_file arg
+    #   rather than subclade_meta.
+    config["metadata_file"] = None
+    if metadata_file and os.path.exists(metadata_file):
+        dest_metadata = db_dir / "assembly_metadata.tsv"
+        shutil.copy(metadata_file, dest_metadata)
+        config["metadata_file"] = dest_metadata.name
+        logger.info("  ✓ Copied assembly metadata")
 
     config_file = db_dir / "database_config.json"
     with open(config_file, 'w') as f:
@@ -536,7 +580,7 @@ def create_database_for_run(
             orthophyl_link.unlink()
 
         try:
-            orthophyl_link.symlink_to(orthophyl_dir.resolve())
+            relative_symlink(orthophyl_link, orthophyl_dir)
             logger.info(f"  ✓ Created symlink: orthophyl_run")
         except OSError as e:
             logger.warning(f"  ⚠ Could not create symlink: {e}")
@@ -555,9 +599,12 @@ def create_database_for_run(
 
     if register_only:
         # No OrthoPhyl run yet -- the genome list IS the subclade's member list.
-        if config.get("members_file") and os.path.exists(config["members_file"]):
-            with open(config["members_file"]) as f:
-                genome_names = [line.strip() for line in f if line.strip()]
+        # config["members_file"] is now relative to db_dir; resolve it here.
+        if config.get("members_file"):
+            members_path = db_dir / config["members_file"]
+            if members_path.exists():
+                with open(members_path) as f:
+                    genome_names = [line.strip() for line in f if line.strip()]
     else:
         # Try to extract genome names
         for source in ['genome_list', 'all_input_list']:
@@ -772,7 +819,11 @@ def create_master_index(databases: List[Dict], output_dir: Path):
             "clade_taxonomy": db['clade_taxonomy'],
             "clade_rank": tax.get_most_specific_rank(),
             "clade_rank_name": tax.get_rank_name(tax.get_most_specific_rank()),
-            "database_dir": str(db['database_dir']),
+            # Relative to output_dir so the index survives a different
+            # bind-mount mapping than at write time (see assembly_router.py's
+            # _load_databases, which resolves it against self.database_dir).
+            "database_dir": os.path.relpath(
+                Path(db['database_dir']).resolve(), output_dir.resolve()),
             "n_genomes": db['n_genomes']
         }
         # Surface subclade/built status in the index when known (read back from
@@ -936,6 +987,11 @@ Input Format (TSV):
     parser.add_argument('--source-genome-dir',
                         help='Directory holding the subclade raw member FASTAs '
                              '(for lazy build re-staging).')
+    parser.add_argument('--metadata-file',
+                        help='Optional assembly metadata TSV (e.g. '
+                             'all_asm_acc_metadata from gather_filter_asms.sh) to '
+                             'copy into the DB for later use (e.g. --geo figures). '
+                             'Not required; the router does not read it.')
     parser.add_argument('--n-genomes', type=int, default=0,
                         help='Member count to record for the subclade (also used '
                              'for a lazily-registered subclade).')
@@ -1010,6 +1066,7 @@ Input Format (TSV):
                 taxonomy_source=args.taxonomy_source,
                 qc_applied=not args.qc_not_applied,
                 register_only=args.register_only,
+                metadata_file=args.metadata_file,
             )
         except FileExistsError:
             logger.info("Database already exists; nothing to do (use --force to rebuild)")
@@ -1097,6 +1154,7 @@ Input Format (TSV):
                 subclade_meta=subclade_meta,
                 taxonomy_source=args.taxonomy_source,
                 qc_applied=not args.qc_not_applied,
+                metadata_file=args.metadata_file,
             )
             
             # Read back config

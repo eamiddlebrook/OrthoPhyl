@@ -234,7 +234,11 @@ class MultiDatabaseRouter:
             with open(index_file, 'r') as f:
                 index = json.load(f)
             for db_info in index['databases']:
-                db_dir = Path(db_info['database_dir'])
+                # database_dir is stored relative to self.database_dir (so the
+                # index survives a different bind-mount mapping than at write
+                # time); Path.__truediv__ passes an absolute legacy value
+                # through unchanged.
+                db_dir = self.database_dir / db_info['database_dir']
                 if db_dir.exists():
                     databases.append(self._load_single_database(db_dir))
         else:
@@ -254,6 +258,13 @@ class MultiDatabaseRouter:
         
         tax = GTDBTaxonomy(config['clade_taxonomy'])
 
+        def _resolve_in_db(value):
+            # sketch_file/members_file/source_genome_dir are stored relative to
+            # db_dir (see OP_database_tool.py's relative_symlink/create_database_
+            # for_run); db_dir / value passes an absolute legacy value through
+            # unchanged.
+            return str(db_dir / value) if value else value
+
         return {
             'db_dir': db_dir,
             'clade_name': config['clade_name'],
@@ -266,9 +277,9 @@ class MultiDatabaseRouter:
             'is_subclade': config.get('is_subclade', False),
             'parent_taxon': config.get('parent_taxon'),
             'subclade_id': config.get('subclade_id'),
-            'sketch_file': config.get('sketch_file'),
-            'members_file': config.get('members_file'),
-            'source_genome_dir': config.get('source_genome_dir'),
+            'sketch_file': _resolve_in_db(config.get('sketch_file')),
+            'members_file': _resolve_in_db(config.get('members_file')),
+            'source_genome_dir': _resolve_in_db(config.get('source_genome_dir')),
             'built': config.get('built', True),
             'is_backbone': config.get('is_backbone', False),
             'taxonomy_source': config.get('taxonomy_source', 'ncbi'),

@@ -21,6 +21,7 @@ All external process execution (gather script, OrthoPhyl, DB creator) is mocked.
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -749,7 +750,11 @@ class TestCreateLocalDatabase:
         assert config["source_taxon_name"] == "Blorptaxon"
         assert config["source_taxid"] is None
         assert config["source_rank"] is None
-        assert config["source_genome_dir"] == str(w.genome_dir.resolve())
+        # Stored relative to db_dir (survives a different bind-mount mapping
+        # than at creation time; see assembly_router.py's _load_single_database,
+        # which resolves it back against db_dir).
+        assert not os.path.isabs(config["source_genome_dir"])
+        assert (db_dir / config["source_genome_dir"]).resolve() == w.genome_dir.resolve()
         assert sorted(config["assembly_accessions"]) == ["k0", "k1", "k2", "k3"]
 
     def test_finds_db_when_clade_name_has_slash(

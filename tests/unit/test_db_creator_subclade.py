@@ -8,6 +8,7 @@ builds.
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -57,9 +58,45 @@ class TestBuiltSubclade:
         # Files copied into the DB dir.
         assert (db_dir / "subclade_sketch.msh").exists()
         assert (db_dir / "subclade_members.txt").exists()
-        # In-DB copies referenced by config.
-        assert config["sketch_file"] == str(db_dir / "subclade_sketch.msh")
-        assert config["members_file"] == str(db_dir / "subclade_members.txt")
+        # Config stores bare in-DB filenames (relative to db_dir), not
+        # absolute paths -- so the DB survives a different bind-mount
+        # mapping than at creation time.
+        assert config["sketch_file"] == "subclade_sketch.msh"
+        assert config["members_file"] == "subclade_members.txt"
+        assert not os.path.isabs(config["sketch_file"])
+        assert not os.path.isabs(config["members_file"])
+
+    def test_router_loads_sketch_and_members_as_absolute(
+            self, db_creator_module, router_module, orthophyl_run_skeleton,
+            sketch_and_members, tmp_path):
+        """The config stores bare filenames; the router resolves them back
+        to absolute, existing paths against db_dir when loading."""
+        run = orthophyl_run_skeleton(n_genomes=4)
+        sketch, members = sketch_and_members
+        out = tmp_path / "databases"
+        out.mkdir()
+        subclade_meta = {
+            "is_subclade": True,
+            "parent_taxon": "Escherichia",
+            "subclade_id": 1,
+            "sketch_file": str(sketch),
+            "members_file": str(members),
+            "source_genome_dir": str(tmp_path / "raw"),
+            "built": True,
+        }
+        db_creator_module.create_database_for_run(
+            orthophyl_dir=run, clade_taxonomy=ESCHERICHIA_TAX,
+            clade_name="Escherichia_1", output_dir=out,
+            subclade_meta=subclade_meta,
+        )
+        router = router_module.MultiDatabaseRouter(
+            database_dir=out, output_dir=tmp_path / "router_out")
+        loaded = next(
+            db for db in router.databases if db["clade_name"] == "Escherichia_1")
+        assert os.path.isabs(loaded["sketch_file"])
+        assert os.path.isabs(loaded["members_file"])
+        assert Path(loaded["sketch_file"]).exists()
+        assert Path(loaded["members_file"]).exists()
 
     def test_non_subclade_unchanged(
             self, db_creator_module, orthophyl_run_skeleton, tmp_path):
@@ -214,7 +251,10 @@ class TestRegisterOnly:
             subclade_meta=subclade_meta, register_only=True,
         )
         config = json.loads((db_dir / "database_config.json").read_text())
-        assert config["source_genome_dir"] == str(raw_dir)
+        # Stored relative to db_dir (survives a different bind-mount mapping
+        # than at creation time); db_dir / value resolves it back.
+        assert not os.path.isabs(config["source_genome_dir"])
+        assert (db_dir / config["source_genome_dir"]).resolve() == raw_dir.resolve()
 
     def test_register_then_force_build_promotes_to_built_true(
             self, db_creator_module, orthophyl_run_skeleton, sketch_and_members, tmp_path):

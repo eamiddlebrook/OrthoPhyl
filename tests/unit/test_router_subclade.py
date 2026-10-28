@@ -141,6 +141,21 @@ class TestSubcladeFieldsLoaded:
         assert d1["subclade_id"] == 1
         assert Path(d1["sketch_file"]).exists()
 
+    def test_legacy_absolute_config_paths_still_load(
+        self, Router, two_subclades, tmp_path
+    ):
+        """make_db_dir writes sketch_file/members_file as absolute paths,
+        matching pre-fix databases. db_dir / value passes an absolute
+        operand through unchanged, so these must keep resolving to existing
+        files without any migration."""
+        router = Router(database_dir=two_subclades, output_dir=tmp_path / "out")
+        by_name = {d["clade_name"]: d for d in router.databases}
+        d1 = by_name["Andreesenella_1"]
+        assert Path(d1["sketch_file"]).is_absolute()
+        assert Path(d1["sketch_file"]).exists()
+        assert Path(d1["members_file"]).is_absolute()
+        assert Path(d1["members_file"]).exists()
+
     def test_is_backbone_field_present(self, Router, two_subclades_and_backbone, tmp_path):
         router = Router(database_dir=two_subclades_and_backbone, output_dir=tmp_path / "out")
         by_name = {d["clade_name"]: d for d in router.databases}
