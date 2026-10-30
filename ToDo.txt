@@ -46,6 +46,19 @@ protein trees
     concatenate
     alignment assesments
 [X] clean up the paralog remover
+[] wrapper stdout: print per-assembly routing result (query taxonomy as parsed by the router, matched DB or "NO MATCH")
+    router's per-assembly logging (MATCH FOUND / NO MATCH FOUND) only goes to logs/routing.log unless -v
+    "Routing Summary" in orthophyl_pipeline_wrapper.py (_phase_routing) only prints counts
+    routing_decision_*.json already has everything (assembly_id, pipeline, query_taxonomy, matched_database, reason) for all 3 decision types -> just log it in _parse_routing_results
+[] router: reconcile near-miss taxonomy strings instead of NO MATCH (e.g. query.tsv family differed from DB's clade_taxonomy)
+    is_within_clade (assembly_router.py) needs EVERY rank above the DB's rank to match exactly -> one upstream typo/renamed family = NO MATCH
+    simple version: if the strict match finds nothing, fall back to matching genus (+ species if the DB is species-rank); genus_species should be unique
+        accept the match, ignore differences at higher ranks (d/p/c/o/f)
+        log the mismatched ranks (query vs DB value) as a warning in routing.log + add a 'taxonomy_mismatches' field to routing_decision_*.json / the routing report
+        strict match still wins when it succeeds; fallback only runs on NO MATCH
+    also helps name-only DBs (--genome-dir with unresolved --clade-name, e.g. bare g__MyClade) vs a full-lineage query
+    caveats: genus homonyms across domains (require domain to match?); DBs above genus rank (family/order DBs) have no genus to key on -> strict only
+    later: fuzzy/edit-distance match, or resolve both strings against the NCBI taxdump / GTDB synonyms
 
 ## add new sequences to old analysis
     {X} switch to MASCE for codon aware alignments 
