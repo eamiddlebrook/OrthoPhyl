@@ -293,6 +293,9 @@ ADD_2_ALIGNMENTS () {
         percent=1
     fi
 
+    local failed_OGs_file=$addasm_dir/logs/ADD_2_ALIGNMENTS.failed_OGs
+    rm -f $failed_OGs_file
+
     J=0
     for OG_alignment in $OLD_alignments/OG*
     do
@@ -313,9 +316,10 @@ ADD_2_ALIGNMENTS () {
         then
             #echo "adding new sequences to $OG"
             sed 's/!/N/g' -i $OG_alignment
-            mafft --add $new_OG_seqs/${OG}.fa* --keeplength $OG_alignment \
+            ( mafft --add $new_OG_seqs/${OG}.fa* --keeplength $OG_alignment \
                 > ${new_alignments}/${OG}.new_aligned.fa \
-                2>> $addasm_dir/logs/${OG}.mafft_out &
+                2>> $addasm_dir/logs/${OG}.mafft_out \
+                || echo $OG >> $failed_OGs_file ) &
         else
             #echo "NOT adding to $OG"
             ln -sr $OG_alignment ${new_alignments}/${OG}.new_aligned.fa
@@ -323,6 +327,20 @@ ADD_2_ALIGNMENTS () {
     J=$((J+1))
     done
     wait
+
+    if [ -s $failed_OGs_file ]
+    then
+        num_failed=$(wc -l < $failed_OGs_file)
+        echo ""
+        echo "ERROR: mafft --add failed for $num_failed of $num_alignments orthogroups."
+        echo "This usually means mafft could not run correctly (e.g. a mismatch between"
+        echo "the active conda/mafft install and the container, or a corrupted install)."
+        echo "See $addasm_dir/logs/<OG>.mafft_out for the failing OGs, e.g.:"
+        head -n 5 $failed_OGs_file | sed 's/^/  /'
+        echo "Failing OG list: $failed_OGs_file"
+        echo ""
+        exit 1
+    fi
 }
 
 

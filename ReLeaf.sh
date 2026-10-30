@@ -23,10 +23,16 @@ echo "Loading required files and environment..."
 # grab the Orthophyl directory no matter where script was run from
 #used for loading stuff from git repo
 export script_home=$(dirname "$(readlink -f "$0")")
-source $HOME/.bash_profile
-source $HOME/.bashrc
 source $script_home/control_file.ReLeaf.defaults || { echo "cannot open control_file.ReLeaf.defaults. This file is required for telling OrthoPhyl what parameters to use if not provided on the CMD line"; exit 1 ;}
-source $script_home/control_file.paths || { echo "cannot open control_file.paths. This file is required for telling OrthoPhyl where some exteranl programs are."; exit 1 ;}
+
+# if not in a singularity or docker container, grab the "conda init" section of .bash_profile or .bashrc
+#    and import paths to external programs and the conda environment
+if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]]
+then
+    source $HOME/.bash_profile
+    source $HOME/.bashrc
+    source $script_home/control_file.paths || { echo "cannot open control_file.paths. This file is required for telling OrthoPhyl where some exteranl programs are."; exit 1 ;}
+fi
 
 
 #############################################
