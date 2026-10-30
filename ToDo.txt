@@ -1,23 +1,5 @@
 # Tasks to better OP
-## working on...
-protein trees
-    [X] check that CDS,PROT,BOTH options work in main function
-    [X] rename CDS specific parameters 
-    [X] pal2nal complains about internal prot trimming....need to fix
-        [X] TRIMAL works great!!!
-	[X] reorder the whole workflow!!!
-        [] test reordered workflow
-    [X] fix CDS concat call to run on all OG_SCO_* like prot
-    [X] write functions for prot specific workflow
-        [X] TRIM_PROTS
-	    [X] concatenate_prots
-	    [X] build_ML_trees
-	    [X] build_gene_trees
-	    [X] build_ASTRAL_trees
     
-# Low priority
-[] fix OrthoFinder only SCO ident
-[X] add back in Alignments assesment
 
 ## big task
 {X} switch from FastANI to MASH for for protein shortlist
@@ -28,7 +10,7 @@ protein trees
 [] synteny aware orthology (like genespace)
 [] add "best genomes" choice to ANI subsample 
 [] add root assemblies for automatic tree generation
-[] allow users to input precomputted HMMs
+[X] allow users to input precomputted HMMs
 [X] fix all dirtbag multithreading to use number of jobs 
 [] something about saturation
     entropy? Nah
@@ -60,8 +42,17 @@ protein trees
     caveats: genus homonyms across domains (require domain to match?); DBs above genus rank (family/order DBs) have no genus to key on -> strict only
     later: fuzzy/edit-distance match, or resolve both strings against the NCBI taxdump / GTDB synonyms
 
+## wrapper output dir is confusing for ReLeaf runs
+[] wrapper --output-dir looks like "the" output dir, but ReLeaf's actual output lands in the DATABASE dir, not there
+    _run_releaf (orthophyl_pipeline_wrapper.py) calls ReLeaf.sh -s <database_dir>/orthophyl_run -- ReLeaf's -s always writes to <storage_dir>/ReLeaf_dir, so output goes inside the matched DB's orthophyl_run, not --output-dir
+    _create_releaf_version then versions that ReLeaf_dir INTO the db (v2_releaf_..., repoints `current`) -- the db dir is the durable/versioned state, by design (next ReLeaf run starts from it)
+    _phase_aggregation only copies the resulting tree back out to <output-dir>/03_results/trees/releaf/ afterward -- a convenience copy, not the source of truth
+    --output-dir only ever holds: logs, routing_decision_*.json, staged input genomes (01_releaf_only/<db>/input_genomes/), and the final report/copy
+    confusing because "new output dir" implies all outputs live there; real new tree/alignments are a level removed, inside the db you pointed --database-dir at
+    ideas: log explicitly where ReLeaf output actually landed (db dir path) right after _run_releaf finishes; maybe rename --output-dir references/docs to make clear it's "run logs + results copy", not primary output
+
 ## add new sequences to old analysis
-    {X} switch to MASCE for codon aware alignments 
+    {X} switch to MASCE for codon aware alignments > then change to a custom method because MACSE is crazy slow
     {X} trimal backtranslation isnt trimming aware and doesnt throw an error...
         {X} save trimmed prot columns, translate columns to nuc, then trim nuc with them
     {X }Revert to MAFFT because MACSE is so damn slow!!!
