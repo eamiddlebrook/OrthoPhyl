@@ -41,6 +41,7 @@ import colorsys
 import glob
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -476,12 +477,17 @@ def resolve_country_latlon(country_name, name_to_latlon):
     return name_to_latlon.get(country_name.strip().lower())
 
 
-def _jitter(name, lat, lon, magnitude=1.5):
+def _jitter(name, lat, lon, max_radius=1.5):
     """Deterministic small offset so genomes from the same country don't
-    all stack on one point."""
+    all stack on one point. Samples uniformly within a disk of radius
+    max_radius (degrees) -- not a square -- so offsets never land farther
+    from the country point than max_radius in any direction."""
     h = hashlib.sha256(name.encode("utf-8")).digest()
-    dlat = (h[0] / 255.0 - 0.5) * 2 * magnitude
-    dlon = (h[1] / 255.0 - 0.5) * 2 * magnitude
+    u = h[0] / 255.0
+    angle = (h[1] / 255.0) * 2 * math.pi
+    r = max_radius * math.sqrt(u)
+    dlat = r * math.sin(angle)
+    dlon = r * math.cos(angle)
     return lat + dlat, lon + dlon
 
 
@@ -556,6 +562,11 @@ def render_tree(tree_path, out_path, leaf_country, acc_species, color_map,
     return country_counts, missing
 
 
+def _dot_area_points2(n):
+    """Scatter marker area (points^2) for a country with n samples."""
+    return 25 * (n ** 0.5)
+
+
 def render_map(out_path, leaf_country, country_counts, pairs, alphas, color_map,
                land_polygons, name_to_latlon, img_format, dpi, title=None):
     """Render the world map: country points sized by sample count, plus
@@ -577,18 +588,42 @@ def render_map(out_path, leaf_country, country_counts, pairs, alphas, color_map,
         else:
             resolved[country] = coord
 
-    jittered = {}
-    for name, country in leaf_country.items():
-        if country in resolved:
-            lat, lon = resolved[country]
-            jittered[name] = _jitter(name, lat, lon)
-
     fig, ax = plt.subplots(figsize=(14, 7))
 
     if land_polygons:
         pc = PolyCollection(land_polygons, facecolor="#e8e8e0",
                             edgecolor="#b0b0a8", linewidths=0.3, zorder=1)
         ax.add_collection(pc)
+
+    # Axis limits/aspect must be finalized before converting between data
+    # (degrees) and display (points) units below, so jitter radii can be
+    # expressed in degrees but bounded by each country's actual on-screen
+    # dot radius -- otherwise jittered line endpoints can land outside the
+    # dot they belong to.
+    ax.set_xlim(-180, 180)
+    ax.set_ylim(-90, 90)
+    ax.set_aspect("equal")
+    ax.apply_aspect()
+
+    p0 = ax.transData.transform((0, 0))
+    p1 = ax.transData.transform((1, 0))
+    p2 = ax.transData.transform((0, 1))
+    points_per_degree = (
+        (abs(p1[0] - p0[0]) + abs(p2[1] - p0[1])) / 2.0
+    ) * 72.0 / fig.dpi
+
+    def dot_radius_degrees(n):
+        radius_points = math.sqrt(_dot_area_points2(n) / math.pi)
+        return radius_points / points_per_degree
+
+    jittered = {}
+    for name, country in leaf_country.items():
+        if country in resolved:
+            lat, lon = resolved[country]
+            n = country_counts.get(country, 0)
+            # Keep every jittered sample point strictly inside its
+            # country's rendered dot.
+            jittered[name] = _jitter(name, lat, lon, max_radius=0.6 * dot_radius_degrees(n))
 
     if pairs:
         segments = []
@@ -608,13 +643,10 @@ def render_map(out_path, leaf_country, country_counts, pairs, alphas, color_map,
     for country in legend_order:
         lat, lon = resolved[country]
         n = country_counts.get(country, 0)
-        ax.scatter([lon], [lat], s=25 * (n ** 0.5),
+        ax.scatter([lon], [lat], s=_dot_area_points2(n),
                    color=color_map.get(country, "#999999"),
                    edgecolor="black", linewidths=0.5, zorder=3)
 
-    ax.set_xlim(-180, 180)
-    ax.set_ylim(-90, 90)
-    ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():
@@ -629,8 +661,17 @@ def render_map(out_path, leaf_country, country_counts, pairs, alphas, color_map,
         for c in legend_order
     ]
     if handles:
-        ax.legend(handles=handles, loc="lower left", fontsize=8,
-                   framealpha=0.9, ncol=1)
+        # A single lower-left column works fine for a handful of countries,
+        # but at dense-map scale (dozens of countries) that column grows
+        # taller than the map itself and covers data. Past that point, lay
+        # the legend out in several columns below the map instead.
+        if len(handles) > 20:
+            ncol = math.ceil(len(handles) / 12)
+            ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.02),
+                       fontsize=8, framealpha=0.9, ncol=ncol)
+        else:
+            ax.legend(handles=handles, loc="lower left", fontsize=8,
+                       framealpha=0.9, ncol=1)
 
     save_kwargs = {"bbox_inches": "tight"}
     if img_format == "png":

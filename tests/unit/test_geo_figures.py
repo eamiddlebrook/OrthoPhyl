@@ -298,6 +298,41 @@ class TestParseMetadata:
 
 
 # --------------------------------------------------------------------------- #
+# _jitter                                                                     #
+# --------------------------------------------------------------------------- #
+
+class TestJitter:
+    def test_offsets_stay_within_disk(self, atbc):
+        import math
+
+        radius = 1.5
+        for i in range(200):
+            name = f"genome_{i}"
+            lat, lon = atbc._jitter(name, 10.0, 20.0, max_radius=radius)
+            dist = math.hypot(lat - 10.0, lon - 20.0)
+            assert dist <= radius + 1e-9
+
+    def test_deterministic_per_name(self, atbc):
+        a1 = atbc._jitter("GCF_000001", 10.0, 20.0, max_radius=1.5)
+        a2 = atbc._jitter("GCF_000001", 10.0, 20.0, max_radius=1.5)
+        assert a1 == a2
+
+    def test_different_names_differ(self, atbc):
+        a = atbc._jitter("GCF_000001", 10.0, 20.0, max_radius=1.5)
+        b = atbc._jitter("GCF_000002", 10.0, 20.0, max_radius=1.5)
+        assert a != b
+
+    def test_smaller_radius_shrinks_offsets(self, atbc):
+        import math
+
+        for i in range(50):
+            name = f"genome_{i}"
+            lat_small, lon_small = atbc._jitter(name, 0.0, 0.0, max_radius=0.1)
+            dist_small = math.hypot(lat_small, lon_small)
+            assert dist_small <= 0.1 + 1e-9
+
+
+# --------------------------------------------------------------------------- #
 # Render smoke tests                                                          #
 # --------------------------------------------------------------------------- #
 
