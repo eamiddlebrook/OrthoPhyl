@@ -363,3 +363,168 @@ class TestRenderSmoke:
         assert out.stat().st_size > 0
         assert counts == {"USA": 1, "Canada": 1}
         assert missing == []
+
+    def test_render_tree_with_highlight_still_renders(self, atbc, tmp_path):
+        tree_path = tmp_path / "t.nwk"
+        tree_path.write_text("(A1:1,B1:1,Q1:1);")
+        color_map = atbc.build_color_map({"USA", "Canada"})
+        out = tmp_path / "tree_hl.png"
+        counts, missing = atbc.render_tree(
+            str(tree_path), str(out), {"A1": "USA", "B1": "Canada", "Q1": "USA"}, {},
+            color_map, False, "png", 72, title="test", highlight={"Q1"})
+        assert out.exists()
+        assert out.stat().st_size > 0
+        assert counts == {"USA": 2, "Canada": 1}
+
+
+# --------------------------------------------------------------------------- #
+# parse_id_list / match_highlight_leaves                                     #
+# --------------------------------------------------------------------------- #
+
+class TestParseIdList:
+    def test_empty_value(self, atbc):
+        assert atbc.parse_id_list(None) == []
+        assert atbc.parse_id_list("") == []
+
+    def test_comma_list(self, atbc):
+        assert atbc.parse_id_list("g1, g2 ,g3") == ["g1", "g2", "g3"]
+
+    def test_file(self, atbc, tmp_path):
+        f = tmp_path / "ids.txt"
+        f.write_text("g1\n# a comment\n\ng2\n")
+        assert atbc.parse_id_list(str(f)) == ["g1", "g2"]
+
+
+class TestMatchHighlightLeaves:
+    def test_exact_match(self, atbc):
+        assert atbc.match_highlight_leaves(["A1", "B1"], ["A1"]) == {"A1"}
+
+    def test_no_ids_returns_empty(self, atbc):
+        assert atbc.match_highlight_leaves(["A1", "B1"], []) == set()
+
+    def test_absent_id_ignored(self, atbc):
+        assert atbc.match_highlight_leaves(["A1", "B1"], ["ZZZ"]) == set()
+
+    def test_extension_variant_matches(self, atbc):
+        # leaf has no extension, the highlight ID does.
+        assert atbc.match_highlight_leaves(["A1"], ["A1.fna"]) == {"A1"}
+
+    def test_version_suffix_variant_matches(self, atbc):
+        assert atbc.match_highlight_leaves(["GCF_000001.1"], ["GCF_000001"]) == {"GCF_000001.1"}
+
+
+# --------------------------------------------------------------------------- #
+# query_distances / query_top_k_neighbors / query_country_summary            #
+# --------------------------------------------------------------------------- #
+
+class TestQueryDistances:
+    def test_matches_brute_force(self, atbc):
+        nwk = "((A1:1,A2:2):1,(B1:3,B2:1):2,(C1:1,C2:1):5);"
+        tree = _tree(nwk)
+        dists = dict(atbc.query_distances(tree, "A1"))
+        for name in ["A2", "B1", "B2", "C1", "C2"]:
+            assert dists[name] == pytest.approx(tree.get_distance("A1", name))
+        assert "A1" not in dists
+
+    def test_unknown_query_returns_empty(self, atbc):
+        tree = _tree("(A1:1,B1:1);")
+        assert atbc.query_distances(tree, "ZZZ") == []
+
+    def test_matches_brute_force_random_tree(self, atbc):
+        import random
+        random.seed(777)
+        n = 30
+        names = [f"L{i}" for i in range(n)]
+        nodes = [f"{name}:{random.uniform(0.1, 5.0):.3f}" for name in names]
+        random.shuffle(nodes)
+        while len(nodes) > 1:
+            new_nodes = []
+            for i in range(0, len(nodes) - 1, 2):
+                branch = random.uniform(0.1, 5.0)
+                new_nodes.append(f"({nodes[i]},{nodes[i+1]}):{branch:.3f}")
+            if len(nodes) % 2 == 1:
+                new_nodes.append(nodes[-1])
+            nodes = new_nodes
+        tree = _tree(nodes[0] + ";")
+
+        query = "L0"
+        dists = dict(atbc.query_distances(tree, query))
+        for name in names:
+            if name == query:
+                continue
+            assert dists[name] == pytest.approx(tree.get_distance(query, name))
+        assert len(dists) == n - 1
+
+
+class TestQueryTopKNeighbors:
+    def test_includes_same_country_excludes_unknown(self, atbc):
+        dists = [("S1", 1.0), ("U1", 0.5), ("O1", 2.0)]
+        leaf_country = {"S1": "USA", "U1": "Unknown", "O1": "Canada"}
+        got = atbc.query_top_k_neighbors(dists, leaf_country, 10)
+        assert got == [("S1", 1.0), ("O1", 2.0)]
+
+    def test_sorted_ascending_and_capped(self, atbc):
+        dists = [("A", 3.0), ("B", 1.0), ("C", 2.0)]
+        leaf_country = {"A": "USA", "B": "USA", "C": "Canada"}
+        got = atbc.query_top_k_neighbors(dists, leaf_country, 2)
+        assert got == [("B", 1.0), ("C", 2.0)]
+
+    def test_k_zero_returns_empty(self, atbc):
+        dists = [("A", 1.0)]
+        leaf_country = {"A": "USA"}
+        assert atbc.query_top_k_neighbors(dists, leaf_country, 0) == []
+
+    def test_k_larger_than_available(self, atbc):
+        dists = [("A", 1.0)]
+        leaf_country = {"A": "USA"}
+        assert atbc.query_top_k_neighbors(dists, leaf_country, 100) == [("A", 1.0)]
+
+
+class TestQueryCountrySummary:
+    def test_min_median_nearest(self, atbc):
+        dists = [("A", 3.0), ("B", 1.0), ("C", 5.0), ("D", 2.0)]
+        leaf_country = {"A": "USA", "B": "USA", "C": "USA", "D": "Canada"}
+        summary = atbc.query_country_summary(dists, leaf_country)
+        n, min_d, median_d, nearest = summary["USA"]
+        assert n == 3
+        assert min_d == 1.0
+        assert median_d == 3.0
+        assert nearest == "B"
+        n2, min_d2, median_d2, nearest2 = summary["Canada"]
+        assert (n2, min_d2, median_d2, nearest2) == (1, 2.0, 2.0, "D")
+
+    def test_unknown_excluded(self, atbc):
+        dists = [("A", 1.0), ("U", 0.1)]
+        leaf_country = {"A": "USA"}  # U absent -> Unknown
+        summary = atbc.query_country_summary(dists, leaf_country)
+        assert "Unknown" not in summary
+        assert list(summary.keys()) == ["USA"]
+
+    def test_sorted_by_min_distance(self, atbc):
+        dists = [("A", 5.0), ("B", 1.0)]
+        leaf_country = {"A": "USA", "B": "Canada"}
+        summary = atbc.query_country_summary(dists, leaf_country)
+        assert list(summary.keys()) == ["Canada", "USA"]
+
+
+class TestRenderQueryMapSmoke:
+    def test_writes_nonempty_file_with_same_country_and_cross_country(self, atbc, tmp_path):
+        pytest.importorskip("matplotlib")
+        land_polygons, name_to_latlon = atbc.load_country_coords()
+        color_map = atbc.build_color_map({"USA", "Canada"})
+        leaf_country = {"Q1": "USA", "S1": "USA", "O1": "Canada"}
+        counts = {"USA": 2, "Canada": 1}
+        query_neighbors = {"Q1": [("S1", 1.0), ("O1", 5.0)]}
+        out = tmp_path / "query_map.png"
+        atbc.render_query_map(str(out), leaf_country, counts, query_neighbors,
+                              color_map, land_polygons, name_to_latlon, "png", 72,
+                              title="test")
+        assert out.exists()
+        assert out.stat().st_size > 0
+
+    def test_two_queries_same_country_get_different_offsets(self, atbc):
+        land_polygons, name_to_latlon = atbc.load_country_coords()
+        lat, lon = atbc.resolve_country_latlon("USA", name_to_latlon)
+        pos1 = atbc._query_offset("Q1", lat, lon)
+        pos2 = atbc._query_offset("Q2", lat, lon)
+        assert pos1 != pos2

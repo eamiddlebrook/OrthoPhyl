@@ -552,3 +552,167 @@ class TestPhaseAggregationGeoHook:
         w._phase_aggregation()
         assert len(geo_calls) == 1
         assert geo_calls[0][2] is None
+
+
+# --------------------------------------------------------------------------- #
+# --geo-highlight / --geo-query-top-k implication, via main()                #
+# --------------------------------------------------------------------------- #
+
+class TestGeoHighlightImplication:
+    def test_geo_highlight_alone_implies_geo(self, wrapper_module, tmp_path, monkeypatch):
+        argv = _base_argv(tmp_path) + ["--geo-highlight", "g1,g2"]
+        rc, captured = _run_main_capturing_wrapper(wrapper_module, monkeypatch, argv)
+        assert rc == 0
+        assert captured["geo"] is True
+
+    def test_geo_query_top_k_alone_implies_geo(self, wrapper_module, tmp_path, monkeypatch):
+        argv = _base_argv(tmp_path) + ["--geo-query-top-k", "5"]
+        rc, captured = _run_main_capturing_wrapper(wrapper_module, monkeypatch, argv)
+        assert rc == 0
+        assert captured["geo"] is True
+
+    def test_geo_query_top_k_default_does_not_imply_geo(self, wrapper_module, tmp_path, monkeypatch):
+        argv = _base_argv(tmp_path)
+        rc, captured = _run_main_capturing_wrapper(wrapper_module, monkeypatch, argv)
+        assert rc == 0
+        assert captured["geo"] is False
+
+
+# --------------------------------------------------------------------------- #
+# _parse_id_list (module-level, shared by _must_keep_stems and highlighting) #
+# --------------------------------------------------------------------------- #
+
+class TestParseIdList:
+    def test_none_or_empty(self, wrapper_module):
+        assert wrapper_module._parse_id_list(None) == []
+        assert wrapper_module._parse_id_list("") == []
+
+    def test_comma_list(self, wrapper_module):
+        assert wrapper_module._parse_id_list("g1, g2 ,g3") == ["g1", "g2", "g3"]
+
+    def test_file_path(self, wrapper_module, tmp_path):
+        f = tmp_path / "ids.txt"
+        f.write_text("g1\n\ng2\n")
+        assert wrapper_module._parse_id_list(str(f)) == ["g1", "g2"]
+
+    def test_must_keep_stems_unchanged_behavior(self, Wrapper, tmp_path):
+        """_must_keep_stems now delegates to _parse_id_list; confirm its
+        existing comma-list and file behavior is unchanged."""
+        w = Wrapper(database_dir=tmp_path / "db", output_dir=tmp_path / "out",
+                    must_keep="GCF_1,GCF_2")
+        assert w._must_keep_stems() == ["GCF_1", "GCF_2"]
+
+        must_keep_file = tmp_path / "keep.txt"
+        must_keep_file.write_text("GCF_3\nGCF_4\n")
+        w2 = Wrapper(database_dir=tmp_path / "db2", output_dir=tmp_path / "out2",
+                     must_keep=str(must_keep_file))
+        assert w2._must_keep_stems() == ["GCF_3", "GCF_4"]
+
+    def test_must_keep_unset_returns_empty(self, Wrapper, tmp_path):
+        w = Wrapper(database_dir=tmp_path / "db", output_dir=tmp_path / "out")
+        assert w._must_keep_stems() == []
+
+
+# --------------------------------------------------------------------------- #
+# _collect_geo_query_ids                                                     #
+# --------------------------------------------------------------------------- #
+
+class TestCollectGeoQueryIds:
+    def test_defaults_to_empty_set(self, Wrapper, tmp_path):
+        w = Wrapper(database_dir=tmp_path / "db", output_dir=tmp_path / "out", geo=True)
+        assert w._geo_query_ids == set()
+
+    def test_collects_releaf_and_orthophyl_and_subclade_build(self, Wrapper, tmp_path):
+        w = Wrapper(database_dir=tmp_path / "db", output_dir=tmp_path / "out", geo=True)
+        routing_results = {
+            'releaf_batch': [
+                {'assembly_id': 'Q1', 'assembly_path': '/tmp/Q1.fna'},
+            ],
+            'orthophyl_batch': {
+                'TaxonA': [{'assembly_id': 'Q2', 'assembly_path': '/tmp/Q2.fasta'}],
+            },
+            'subclade_build_batch': {
+                'SubA': [{'assembly_id': 'Q3', 'assembly_path': '/tmp/Q3.fna'}],
+            },
+        }
+        w._collect_geo_query_ids(routing_results)
+        assert w._geo_query_ids == {'Q1', 'Q2', 'Q3'}
+
+    def test_empty_batches_give_empty_set(self, Wrapper, tmp_path):
+        w = Wrapper(database_dir=tmp_path / "db", output_dir=tmp_path / "out", geo=True)
+        w._collect_geo_query_ids({'releaf_batch': [], 'orthophyl_batch': {},
+                                   'subclade_build_batch': {}})
+        assert w._geo_query_ids == set()
+
+
+# --------------------------------------------------------------------------- #
+# _generate_geo_figures: --highlight wiring                                 #
+# --------------------------------------------------------------------------- #
+
+class TestGenerateGeoFiguresHighlight:
+    def _capture(self, monkeypatch, wrapper_module):
+        captured = {}
+
+        class FakeCompleted:
+            returncode = 0
+
+        def fake_run(cmd, stdout=None, stderr=None, text=None, env=None):
+            captured["cmd"] = cmd
+            if stdout is not None:
+                stdout.write("ok\n")
+            return FakeCompleted()
+
+        monkeypatch.setattr(wrapper_module.subprocess, "run", fake_run)
+        return captured
+
+    def test_no_highlight_omits_flag(self, geo_wrapper, tmp_path, monkeypatch, wrapper_module):
+        geo_tsv = tmp_path / "locs.tsv"
+        geo_tsv.write_text("g1\tUSA\n")
+        w = geo_wrapper(geo_tsv=geo_tsv)
+        captured = self._capture(monkeypatch, wrapper_module)
+
+        w._generate_geo_figures(tmp_path / "t.nwk", "label", metadata_file=None)
+        assert "--highlight" not in captured["cmd"]
+        assert "--query-top-k" not in captured["cmd"]
+
+    def test_geo_highlight_flag_passed(self, geo_wrapper, tmp_path, monkeypatch, wrapper_module):
+        geo_tsv = tmp_path / "locs.tsv"
+        geo_tsv.write_text("g1\tUSA\n")
+        w = geo_wrapper(geo_tsv=geo_tsv, geo_highlight="g1,g2", geo_query_top_k=7)
+        captured = self._capture(monkeypatch, wrapper_module)
+
+        w._generate_geo_figures(tmp_path / "t.nwk", "label", metadata_file=None)
+        cmd = captured["cmd"]
+        assert "--highlight" in cmd
+        assert "--query-top-k" in cmd and "7" in cmd
+
+        highlight_file = cmd[cmd.index("--highlight") + 1]
+        ids = set(open(highlight_file).read().split())
+        assert ids == {"g1", "g2"}
+
+    def test_routed_queries_default_highlighted(self, geo_wrapper, tmp_path, monkeypatch, wrapper_module):
+        geo_tsv = tmp_path / "locs.tsv"
+        geo_tsv.write_text("g1\tUSA\n")
+        w = geo_wrapper(geo_tsv=geo_tsv)
+        w._geo_query_ids = {"Q1", "Q2"}
+        captured = self._capture(monkeypatch, wrapper_module)
+
+        w._generate_geo_figures(tmp_path / "t.nwk", "label", metadata_file=None)
+        cmd = captured["cmd"]
+        assert "--highlight" in cmd
+        highlight_file = cmd[cmd.index("--highlight") + 1]
+        ids = set(open(highlight_file).read().split())
+        assert ids == {"Q1", "Q2"}
+
+    def test_routed_queries_and_geo_highlight_are_unioned(
+            self, geo_wrapper, tmp_path, monkeypatch, wrapper_module):
+        geo_tsv = tmp_path / "locs.tsv"
+        geo_tsv.write_text("g1\tUSA\n")
+        w = geo_wrapper(geo_tsv=geo_tsv, geo_highlight="g9")
+        w._geo_query_ids = {"Q1"}
+        captured = self._capture(monkeypatch, wrapper_module)
+
+        w._generate_geo_figures(tmp_path / "t.nwk", "label", metadata_file=None)
+        highlight_file = captured["cmd"][captured["cmd"].index("--highlight") + 1]
+        ids = set(open(highlight_file).read().split())
+        assert ids == {"Q1", "g9"}

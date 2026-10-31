@@ -22,6 +22,21 @@ This script renders, per tree:
     transparent and the closest pair is fully opaque.
   - <label>_geo_pairs.tsv and <label>_geo_countries.tsv data exports.
 
+Query / highlighted genomes (--highlight, a comma list or a file of one ID
+per line -- the wrapper passes every routed query here by default) get
+special treatment:
+  - starred, bold-red tip labels on the tree figure
+  - a red-starred marker, radially offset from its true country point, on
+    the overview map (so a highlighted genome doesn't sit exactly on top of
+    its country point)
+  - a combined <label>_geo_query_map.<fmt>: lines from every highlighted
+    leaf (still at its offset position) to its --query-top-k nearest
+    genomes by patristic distance -- any country, same-country included --
+    colored by distance. The offset is what makes same-country lines
+    visible instead of collapsing into the jitter cloud.
+  - <label>_geo_query_neighbors.tsv and <label>_geo_query_countries.tsv
+    data exports.
+
 Tree rendering requires the OrthoPhyl conda env (ships ete3) and renders
 headlessly via offscreen Qt -- no $DISPLAY needed. The map requires
 matplotlib and numpy; if matplotlib is unavailable, pass --no-map to skip it
@@ -105,6 +120,16 @@ def parse_args():
                         "by patristic distance (0 disables pair lines).")
     p.add_argument("--no-map", action="store_true",
                    help="Skip the world-map figure (tree figure and TSV exports still run).")
+    p.add_argument("--highlight", default=None,
+                   help="Query/highlighted genome IDs: a comma-separated list, or a path "
+                        "to a file with one ID per line (same list-or-file convention as "
+                        "the wrapper's --must-keep). Highlighted leaves are starred on the "
+                        "tree/map and get a dedicated query-centric map. IDs not present "
+                        "in a given tree are ignored.")
+    p.add_argument("--query-top-k", type=int, default=25,
+                   help="Per highlighted leaf, draw lines to its N nearest genomes by "
+                        "patristic distance (any country, same-country included) on the "
+                        "query map. 0 disables the query map and its lines.")
     args = p.parse_args()
     if bool(args.tree) == bool(args.trees_dir):
         p.error("exactly one of --tree or --trees-dir is required")
@@ -250,6 +275,34 @@ def build_leaf_country_map(leaf_names, acc_country, geo_tsv_country):
     return leaf_country, missing
 
 
+def parse_id_list(value):
+    """Parse a comma-separated ID list OR a path to a file of one ID per
+    line (same list-or-file convention as the wrapper's --must-keep /
+    --geo-highlight). Returns [] for a falsy value."""
+    if not value:
+        return []
+    if os.path.isfile(value):
+        with open(value) as fh:
+            return [ln.strip() for ln in fh if ln.strip() and not ln.lstrip().startswith("#")]
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
+def match_highlight_leaves(leaf_names, ids):
+    """Return the subset of leaf_names matching any of `ids`, tolerating
+    the usual extension/version-suffix variants via _candidate_keys."""
+    if not ids:
+        return set()
+    id_set = set(ids)
+    expanded = set()
+    for i in id_set:
+        expanded.update(_candidate_keys(i))
+    matched = set()
+    for name in leaf_names:
+        if any(ck in expanded for ck in _candidate_keys(name)):
+            matched.add(name)
+    return matched
+
+
 def build_color_map(countries):
     """Assign a stable, distinct color per country. Unknown -> light grey."""
     ordered = sorted(c for c in countries if c != UNKNOWN)
@@ -299,6 +352,19 @@ def load_tree(path):
 # Patristic top-K cross-country pairs                                        #
 # --------------------------------------------------------------------------- #
 
+def _node_depths(tree):
+    """Root-to-node cumulative branch length for every node, keyed by node
+    object. Shared by top_k_cross_country_pairs and query_distances so both
+    get d(a, b) = depth(a) + depth(b) - 2*depth(mrca) from one preorder walk."""
+    depth = {tree: 0.0}
+    for node in tree.traverse("preorder"):
+        if node.is_root():
+            depth[node] = 0.0
+        else:
+            depth[node] = depth[node.up] + (node.dist or 0.0)
+    return depth
+
+
 def top_k_cross_country_pairs(tree, leaf_country, k, row_chunk=2000):
     """Return the K closest (by patristic distance) genome pairs whose
     leaves have two different, known countries, as a list of
@@ -328,12 +394,7 @@ def top_k_cross_country_pairs(tree, leaf_country, k, row_chunk=2000):
     name_to_idx = {name: i for i, name in enumerate(names)}
     countries = np.array([leaf_country.get(n, UNKNOWN) for n in names], dtype=object)
 
-    depth = {tree: 0.0}
-    for node in tree.traverse("preorder"):
-        if node.is_root():
-            depth[node] = 0.0
-        else:
-            depth[node] = depth[node.up] + (node.dist or 0.0)
+    depth = _node_depths(tree)
     leaf_depth = np.array([depth[leaf] for leaf in leaves], dtype=float)
 
     # max-heap of size <=k on distance, via negation (heap[0] = largest d kept)
@@ -392,6 +453,88 @@ def pair_alphas(dists):
     if d_max <= 0:
         return [1.0 for _ in dists]
     return [max(0.0, 1.0 - d / d_max) for d in dists]
+
+
+# --------------------------------------------------------------------------- #
+# Query/highlighted-leaf distances                                           #
+# --------------------------------------------------------------------------- #
+
+def query_distances(tree, query_leaf_name, depth=None):
+    """Return [(leaf_name, distance)] from `query_leaf_name` to every other
+    leaf in `tree`, by walking up from the query leaf rather than computing
+    a full all-pairs matrix.
+
+    For each ancestor of the query (root included), every leaf under one of
+    that ancestor's OTHER children has that ancestor as its MRCA with the
+    query (a leaf under the SAME child the query descends through has a
+    deeper, more specific MRCA, and is handled at that deeper ancestor
+    instead). d(query, x) = depth(query) + depth(x) - 2*depth(ancestor).
+    This is O(n) total (each leaf is visited exactly once, at the ancestor
+    that is its actual MRCA with the query), vs. O(n^2) for an all-pairs
+    scan -- important since this runs once per highlighted leaf.
+    """
+    query_leaf = None
+    for leaf in tree.get_leaves():
+        if leaf.name == query_leaf_name:
+            query_leaf = leaf
+            break
+    if query_leaf is None:
+        return []
+
+    if depth is None:
+        depth = _node_depths(tree)
+    q_depth = depth[query_leaf]
+
+    dists = []
+    node = query_leaf
+    while node.up is not None:
+        parent = node.up
+        parent_depth = depth[parent]
+        for sibling in parent.children:
+            if sibling is node:
+                continue
+            for leaf in sibling.get_leaves():
+                if leaf is query_leaf:
+                    continue
+                d = q_depth + depth[leaf] - 2.0 * parent_depth
+                dists.append((leaf.name, d))
+        node = parent
+    return dists
+
+
+def query_top_k_neighbors(dists, leaf_country, k):
+    """From query_distances() output, return the K nearest leaves with a
+    KNOWN country (Unknown-country leaves can't be placed on the map, so
+    they're excluded here -- same-country and other-query neighbors are
+    kept), sorted ascending by distance."""
+    if k <= 0:
+        return []
+    known = [(name, d) for name, d in dists if leaf_country.get(name, UNKNOWN) != UNKNOWN]
+    known.sort(key=lambda t: t[1])
+    return known[:k]
+
+
+def query_country_summary(dists, leaf_country):
+    """From query_distances() output, return one row per country with
+    known-country neighbors: {country: (n, min_d, median_d, nearest_name)},
+    sorted by ascending min_d. Covers every country the query has a
+    relative in, not just those that made the top-K cut."""
+    import statistics
+
+    by_country = {}
+    for name, d in dists:
+        country = leaf_country.get(name, UNKNOWN)
+        if country == UNKNOWN:
+            continue
+        by_country.setdefault(country, []).append((name, d))
+
+    summary = {}
+    for country, pairs in by_country.items():
+        pairs.sort(key=lambda t: t[1])
+        ds = [d for _, d in pairs]
+        nearest_name, min_d = pairs[0]
+        summary[country] = (len(pairs), min_d, statistics.median(ds), nearest_name)
+    return dict(sorted(summary.items(), key=lambda kv: kv[1][1]))
 
 
 # --------------------------------------------------------------------------- #
@@ -491,19 +634,38 @@ def _jitter(name, lat, lon, max_radius=1.5):
     return lat + dlat, lon + dlon
 
 
+def _query_offset(name, lat, lon, radius=8.0):
+    """Deterministic radial offset for a highlighted/query genome, well
+    outside the ordinary _jitter cloud (default magnitude 1.5) around its
+    true country point. This is what makes same-country query->neighbor
+    lines visible instead of collapsing into the jitter cloud -- several
+    queries from the same country get different angles (hashed from name)
+    so they fan out rather than stacking on one offset point."""
+    h = hashlib.sha256((name + "|query-offset").encode("utf-8")).digest()
+    angle = (h[0] / 255.0) * 2 * math.pi
+    dlat = radius * math.sin(angle)
+    dlon = radius * math.cos(angle)
+    return lat + dlat, lon + dlon
+
+
 # --------------------------------------------------------------------------- #
 # Rendering                                                                   #
 # --------------------------------------------------------------------------- #
 
 def render_tree(tree_path, out_path, leaf_country, acc_species, color_map,
-                want_species, img_format, dpi, title=None):
-    """Render one annotated tree. Returns (country_counts, missing_accessions)."""
+                want_species, img_format, dpi, title=None, highlight=None):
+    """Render one annotated tree. Returns (country_counts, missing_accessions).
+
+    highlight (optional set of leaf names): starred, bold-red tip labels and
+    a highlighted-row background, for query/--geo-highlight genomes.
+    """
     from ete3 import TreeStyle, NodeStyle, RectFace, TextFace
 
     tree = load_tree(tree_path)
     if tree is None:
         return {}, []
 
+    highlight = highlight or set()
     tree_name = title or os.path.basename(tree_path)
     country_counts = {}
     missing = []
@@ -518,15 +680,27 @@ def render_tree(tree_path, out_path, leaf_country, acc_species, color_map,
         country_counts[country] = country_counts.get(country, 0) + 1
 
         color = color_map.get(country, color_map[UNKNOWN])
+        is_hit = acc in highlight
 
         ns = NodeStyle()
-        ns["size"] = 0
+        ns["size"] = 8 if is_hit else 0
+        if is_hit:
+            ns["fgcolor"] = "#d62728"
+            ns["bgcolor"] = "#fff3c4"  # light-yellow row band marks the whole leaf row
         leaf.set_style(ns)
 
-        # optional richer tip label
+        # tip label: draw it ourselves (rather than ts.show_leaf_name) so a
+        # highlighted leaf can be bold/red/starred regardless of whether
+        # --label-with-species is also in play.
+        label = acc
         if want_species and acc in acc_species and acc_species[acc]:
-            leaf.add_face(TextFace(f"{acc}  {acc_species[acc]}", fsize=9),
-                          column=0, position="branch-right")
+            label = f"{acc}  {acc_species[acc]}"
+        if is_hit:
+            label = f"★ {label}"
+            label_face = TextFace(label, fsize=9, bold=True, fgcolor="#d62728")
+        else:
+            label_face = TextFace(label, fsize=9)
+        leaf.add_face(label_face, column=0, position="branch-right")
 
         # aligned color strip keyed to country
         strip = RectFace(width=18, height=14, fgcolor=color, bgcolor=color)
@@ -534,7 +708,7 @@ def render_tree(tree_path, out_path, leaf_country, acc_species, color_map,
         leaf.add_face(strip, column=1, position="aligned")
 
     ts = TreeStyle()
-    ts.show_leaf_name = not want_species  # avoid double labels when species shown
+    ts.show_leaf_name = False  # tip labels are drawn explicitly above
     ts.show_branch_support = False
     ts.mode = "r"  # rectangular
     ts.scale = None
@@ -554,6 +728,11 @@ def render_tree(tree_path, out_path, leaf_country, acc_species, color_map,
         ts.legend.add_face(swatch, column=0)
         label = f"{country} (n={country_counts.get(country, 0)})"
         ts.legend.add_face(TextFace(label, fsize=10), column=1)
+    if highlight:
+        star = TextFace("★", fsize=12, bold=True, fgcolor="#d62728")
+        ts.legend.add_face(star, column=0)
+        n_hit = sum(1 for leaf in tree.get_leaves() if leaf.name in highlight)
+        ts.legend.add_face(TextFace(f"query / highlighted (n={n_hit})", fsize=10), column=1)
 
     render_kwargs = {"tree_style": ts}
     if img_format == "png":
@@ -568,15 +747,22 @@ def _dot_area_points2(n):
 
 
 def render_map(out_path, leaf_country, country_counts, pairs, alphas, color_map,
-               land_polygons, name_to_latlon, img_format, dpi, title=None):
+               land_polygons, name_to_latlon, img_format, dpi, title=None,
+               highlight=None):
     """Render the world map: country points sized by sample count, plus
     top-K closest cross-country genome-pair lines. Returns the set of
-    countries that could not be geocoded."""
+    countries that could not be geocoded.
+
+    highlight (optional set of leaf names): drawn as red-starred markers at
+    a radial offset from their true country point (see _query_offset),
+    with a thin dashed leader line back to that point.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.collections import LineCollection, PolyCollection
 
+    highlight = highlight or set()
     unresolved = set()
     resolved = {}
     for country in country_counts:
@@ -617,6 +803,7 @@ def render_map(out_path, leaf_country, country_counts, pairs, alphas, color_map,
         return radius_points / points_per_degree
 
     jittered = {}
+    highlight_pos = {}
     for name, country in leaf_country.items():
         if country in resolved:
             lat, lon = resolved[country]
@@ -624,6 +811,8 @@ def render_map(out_path, leaf_country, country_counts, pairs, alphas, color_map,
             # Keep every jittered sample point strictly inside its
             # country's rendered dot.
             jittered[name] = _jitter(name, lat, lon, max_radius=0.6 * dot_radius_degrees(n))
+            if name in highlight:
+                highlight_pos[name] = _query_offset(name, lat, lon)
 
     if pairs:
         segments = []
@@ -647,6 +836,20 @@ def render_map(out_path, leaf_country, country_counts, pairs, alphas, color_map,
                    color=color_map.get(country, "#999999"),
                    edgecolor="black", linewidths=0.5, zorder=3)
 
+    # Highlighted/query genomes: dashed leader line from the true country
+    # point out to the offset marker, then a red star at the offset.
+    for name, (lat, lon) in highlight_pos.items():
+        true_lat, true_lon = jittered.get(name, (lat, lon))
+        country = leaf_country.get(name, UNKNOWN)
+        base = resolved.get(country)
+        if base is not None:
+            ax.plot([base[1], lon], [base[0], lat], linestyle="--",
+                    color="#d62728", linewidth=0.7, alpha=0.7, zorder=3)
+        ax.scatter([lon], [lat], marker="*", s=180, color="#d62728",
+                   edgecolor="black", linewidths=0.6, zorder=5)
+        ax.annotate(name, (lon, lat), fontsize=7, color="#d62728",
+                    xytext=(3, 3), textcoords="offset points", zorder=5)
+
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():
@@ -660,6 +863,10 @@ def render_map(out_path, leaf_country, country_counts, pairs, alphas, color_map,
                     label=f"{c} (n={country_counts.get(c, 0)})")
         for c in legend_order
     ]
+    if highlight_pos:
+        handles.append(plt.Line2D([0], [0], marker="*", linestyle="", markersize=12,
+                                   color="#d62728",
+                                   label=f"query / highlighted (n={len(highlight_pos)})"))
     if handles:
         # A single lower-left column works fine for a handful of countries,
         # but at dense-map scale (dozens of countries) that column grows
@@ -672,6 +879,120 @@ def render_map(out_path, leaf_country, country_counts, pairs, alphas, color_map,
         else:
             ax.legend(handles=handles, loc="lower left", fontsize=8,
                        framealpha=0.9, ncol=1)
+
+    save_kwargs = {"bbox_inches": "tight"}
+    if img_format == "png":
+        save_kwargs["dpi"] = dpi
+    fig.savefig(out_path, **save_kwargs)
+    plt.close(fig)
+    return unresolved
+
+
+def render_query_map(out_path, leaf_country, country_counts, query_neighbors,
+                     color_map, land_polygons, name_to_latlon, img_format, dpi,
+                     title=None):
+    """Render the combined query-centric map: every highlighted leaf (at its
+    radially-offset position, per _query_offset) connected by distance-
+    colored lines to its own --query-top-k nearest neighbors (any country,
+    same-country included -- the offset is what keeps those lines visible
+    instead of collapsing into the jitter cloud). All queries share one map.
+
+    query_neighbors: {query_name: [(neighbor_name, distance), ...]}, already
+    restricted to known-country neighbors and sorted ascending by distance
+    (query_top_k_neighbors() output). Returns the set of countries that
+    could not be geocoded.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection, PolyCollection
+
+    unresolved = set()
+    resolved = {}
+    for country in country_counts:
+        if country == UNKNOWN:
+            continue
+        coord = resolve_country_latlon(country, name_to_latlon)
+        if coord is None:
+            unresolved.add(country)
+        else:
+            resolved[country] = coord
+
+    jittered = {}
+    for name, country in leaf_country.items():
+        if country in resolved:
+            jittered[name] = _jitter(name, *resolved[country])
+
+    query_pos = {}
+    for query_name in query_neighbors:
+        country = leaf_country.get(query_name, UNKNOWN)
+        if country in resolved:
+            query_pos[query_name] = _query_offset(query_name, *resolved[country])
+
+    # Distance colormap: plasma's low end is dark purple, high end is bright
+    # yellow, so mapping d/d_max straight through cmap already gives
+    # closer=darker/more-saturated, farther=brighter -- no inversion needed,
+    # and the colorbar below uses the exact same cmap + norm as the lines.
+    all_dists = [d for neighbors in query_neighbors.values() for _, d in neighbors
+                 if neighbors]
+    cmap = matplotlib.colormaps["plasma"]
+    d_max = max(all_dists) if all_dists else 1.0
+    d_max = d_max if d_max > 0 else 1.0
+
+    fig, ax = plt.subplots(figsize=(14, 7))
+
+    if land_polygons:
+        pc = PolyCollection(land_polygons, facecolor="#e8e8e0",
+                            edgecolor="#b0b0a8", linewidths=0.3, zorder=1)
+        ax.add_collection(pc)
+
+    # faint context: every resolved country point, still tinted by its
+    # normal country color so this map reads as the same geography as the
+    # overview map, just de-emphasized.
+    for country, (lat, lon) in resolved.items():
+        n = country_counts.get(country, 0)
+        ax.scatter([lon], [lat], s=15 * (n ** 0.5),
+                   color=color_map.get(country, "#cccccc"), alpha=0.5,
+                   edgecolor="#999999", linewidths=0.3, zorder=2)
+
+    segments = []
+    colors = []
+    for query_name, neighbors in query_neighbors.items():
+        if query_name not in query_pos:
+            continue
+        q_lat, q_lon = query_pos[query_name]
+        for neighbor_name, d in neighbors:
+            if neighbor_name not in jittered:
+                continue
+            n_lat, n_lon = jittered[neighbor_name]
+            segments.append([(q_lon, q_lat), (n_lon, n_lat)])
+            colors.append(cmap(min(d / d_max, 1.0)))
+    if segments:
+        lc = LineCollection(segments, colors=colors, linewidths=1.1, zorder=3)
+        ax.add_collection(lc)
+
+    for query_name, (lat, lon) in query_pos.items():
+        ax.scatter([lon], [lat], marker="*", s=220, color="#d62728",
+                   edgecolor="black", linewidths=0.7, zorder=5)
+        ax.annotate(query_name, (lon, lat), fontsize=8, fontweight="bold",
+                    color="#d62728", xytext=(4, 4), textcoords="offset points",
+                    zorder=5)
+
+    ax.set_xlim(-180, 180)
+    ax.set_ylim(-90, 90)
+    ax.set_aspect("equal")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    if title:
+        ax.set_title(title, fontsize=12, fontweight="bold")
+
+    if segments:
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=matplotlib.colors.Normalize(0, d_max))
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, shrink=0.5, pad=0.02)
+        cbar.set_label("patristic distance to query (closer = darker)", fontsize=8)
 
     save_kwargs = {"bbox_inches": "tight"}
     if img_format == "png":
@@ -748,6 +1069,10 @@ def main():
     if args.geo_tsv:
         geo_tsv_country = parse_geo_tsv(args.geo_tsv)
 
+    highlight_ids = parse_id_list(args.highlight)
+    if highlight_ids:
+        eprint(f"[highlight] {len(highlight_ids)} ID(s) requested for highlighting")
+
     land_polygons, name_to_latlon = ([], {})
     if not args.no_map:
         try:
@@ -783,10 +1108,19 @@ def main():
         leaf_names = [leaf.name for leaf in tree.get_leaves()]
         leaf_country, missing = build_leaf_country_map(leaf_names, acc_country, geo_tsv_country)
 
+        highlight = match_highlight_leaves(leaf_names, highlight_ids)
+        if highlight_ids and not highlight:
+            eprint(f"[highlight] {label}: none of the {len(highlight_ids)} "
+                   f"highlighted ID(s) matched a leaf in this tree")
+        elif highlight:
+            eprint(f"[highlight] {label}: {len(highlight)}/{len(highlight_ids)} "
+                   f"highlighted ID(s) matched")
+
         tree_out = os.path.join(out_dir, f"{label}_geo_tree.{args.format}")
         counts, _ = render_tree(
             tp, tree_out, leaf_country, acc_species, color_map,
-            args.label_with_species, args.format, args.dpi, title=label)
+            args.label_with_species, args.format, args.dpi, title=label,
+            highlight=highlight)
         if not counts:
             continue
         rendered += 1
@@ -810,7 +1144,8 @@ def main():
             map_out = os.path.join(out_dir, f"{label}_geo_map.{args.format}")
             unresolved = render_map(
                 map_out, leaf_country, counts, pairs, alphas, color_map,
-                land_polygons, name_to_latlon, args.format, args.dpi, title=label)
+                land_polygons, name_to_latlon, args.format, args.dpi, title=label,
+                highlight=highlight)
             print(f"[rendered] {label} -> {map_out}")
             all_unresolved.update(unresolved)
 
@@ -823,6 +1158,51 @@ def main():
                     fh.write(f"{country}\t{n}\t{coord[0]:.4f}\t{coord[1]:.4f}\n")
                 else:
                     fh.write(f"{country}\t{n}\tunresolved\tunresolved\n")
+
+        # Query/highlighted-leaf distance exports + combined query map.
+        if highlight and args.query_top_k > 0:
+            depth = _node_depths(tree)
+            all_dists = {q: query_distances(tree, q, depth=depth) for q in sorted(highlight)}
+            query_neighbors = {q: query_top_k_neighbors(d, leaf_country, args.query_top_k)
+                               for q, d in all_dists.items()}
+
+            neighbors_path = os.path.join(out_dir, f"{label}_geo_query_neighbors.tsv")
+            with open(neighbors_path, "w") as fh:
+                fh.write("query\tneighbor\tquery_country\tneighbor_country\t"
+                         "same_country\tdistance\trank\n")
+                for q, neighbors in query_neighbors.items():
+                    q_country = leaf_country.get(q, UNKNOWN)
+                    for rank, (neighbor, d) in enumerate(neighbors, start=1):
+                        n_country = leaf_country.get(neighbor, UNKNOWN)
+                        fh.write(f"{q}\t{neighbor}\t{q_country}\t{n_country}\t"
+                                 f"{q_country == n_country}\t{d:.6g}\t{rank}\n")
+
+            countries_summary_path = os.path.join(out_dir, f"{label}_geo_query_countries.tsv")
+            with open(countries_summary_path, "w") as fh:
+                fh.write("query\tcountry\tn_genomes\tmin_distance\tmedian_distance\t"
+                         "nearest_genome\n")
+                for q, dists in all_dists.items():
+                    for country, (n, min_d, median_d, nearest) in \
+                            query_country_summary(dists, leaf_country).items():
+                        fh.write(f"{q}\t{country}\t{n}\t{min_d:.6g}\t{median_d:.6g}\t"
+                                 f"{nearest}\n")
+
+            if not args.no_map:
+                drawable = {q: neighbors for q, neighbors in query_neighbors.items()
+                           if leaf_country.get(q, UNKNOWN) != UNKNOWN and neighbors}
+                skipped = set(query_neighbors) - set(drawable)
+                if skipped:
+                    eprint(f"[highlight] {label}: query map skips "
+                           f"{len(skipped)} highlighted leaf(ves) with an "
+                           f"Unknown/unresolved country or no known-country "
+                           f"neighbor: {sorted(skipped)}")
+                if drawable:
+                    query_map_out = os.path.join(
+                        out_dir, f"{label}_geo_query_map.{args.format}")
+                    render_query_map(
+                        query_map_out, leaf_country, counts, drawable, color_map,
+                        land_polygons, name_to_latlon, args.format, args.dpi, title=label)
+                    print(f"[rendered] {label} -> {query_map_out}")
 
     # Summary report
     print("\n===== summary =====")

@@ -72,6 +72,21 @@ def sanitize_path_component(s: str) -> str:
     return safe or 'unnamed'
 
 
+def _parse_id_list(value: Optional[str]) -> List[str]:
+    """Parse a comma-separated ID list OR a path to a file of one ID per
+    line. Shared by --must-keep (_must_keep_stems) and --geo-highlight;
+    returns [] for a falsy value. IDs are returned as-is (callers match
+    them against basenames/stems themselves, since extensions don't matter
+    for either use)."""
+    if not value:
+        return []
+    p = Path(value)
+    if p.exists() and p.is_file():
+        with open(p) as f:
+            return [ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith('#')]
+    return [s.strip() for s in value.split(',') if s.strip()]
+
+
 class PipelineWrapper:
     """Main wrapper class for OrthoPhyl/ReLeaf pipeline."""
 
@@ -129,6 +144,8 @@ class PipelineWrapper:
         geo_tsv: Optional[Path] = None,
         geo_top_k: int = 100,
         geo_format: str = 'png',
+        geo_highlight: Optional[str] = None,
+        geo_query_top_k: int = 25,
     ):
         # Validate mutually exclusive mode flags (--input / --taxon / --genome-dir)
         modes_given = sum(bool(x) for x in (input_file, taxon, genome_dir))
@@ -300,6 +317,15 @@ class PipelineWrapper:
         if geo_format not in ('png', 'svg', 'pdf'):
             raise ValueError(f"--geo-format must be one of png/svg/pdf, got: {geo_format!r}")
         self.geo_format = geo_format
+        # --geo-highlight: comma list or file of genome IDs to highlight on the
+        #   tree/map in modes with no routed query (--taxon, --genome-dir). Batch
+        #   mode (--input) highlights its routed queries by DEFAULT (no flag
+        #   needed) via self._geo_query_ids, populated in run() after routing;
+        #   --geo-highlight is unioned on top of that in _generate_geo_figures.
+        #   Same comma-list-or-file convention as --must-keep (_parse_id_list).
+        self.geo_highlight = geo_highlight
+        self.geo_query_top_k = geo_query_top_k
+        self._geo_query_ids: set = set()
 
         # Script paths (relative to this wrapper)
         self.script_dir = Path(__file__).parent
@@ -506,7 +532,8 @@ class PipelineWrapper:
         """Run original batch mode workflow."""
         # Phase 2: Routing
         routing_results = self._phase_routing()
-        
+        self._collect_geo_query_ids(routing_results)
+
         # Phase 3a: ReLeaf route
         if routing_results['releaf_batch']:
             self._phase_releaf(routing_results['releaf_batch'])
@@ -1646,6 +1673,32 @@ class PipelineWrapper:
             seen.add(c)
         return None
 
+    def _collect_geo_query_ids(self, routing_results: Dict) -> None:
+        """Populate self._geo_query_ids from a batch-mode routing result, so
+        --geo highlights every routed query by default (no flag needed).
+
+        Called right after _phase_routing() (both the live and --resume/
+        checkpoint-loaded paths go through _run_batch_mode, so this always
+        runs before any geo figures are generated). Covers all three routing
+        outcomes -- ReLeaf, OrthoPhyl, and the lazy subclade-build batch --
+        and records both assembly_id and the raw assembly_path's stem, since
+        annotate_tree_by_country.py's --highlight matching (and the tree
+        leaf names it's matched against) may use either form.
+        """
+        ids = set()
+        for asm in routing_results.get('releaf_batch', []):
+            ids.add(asm['assembly_id'])
+            ids.add(Path(asm['assembly_path']).stem)
+        for batch in routing_results.get('orthophyl_batch', {}).values():
+            for asm in batch:
+                ids.add(asm['assembly_id'])
+                ids.add(Path(asm['assembly_path']).stem)
+        for batch in routing_results.get('subclade_build_batch', {}).values():
+            for asm in batch:
+                ids.add(asm['assembly_id'])
+                ids.add(Path(asm['assembly_path']).stem)
+        self._geo_query_ids = ids
+
     def _generate_geo_figures(self, tree_file: Path, label: str,
                               metadata_file: Optional[Path] = None) -> None:
         """Render a country-annotated tree + world map for one published tree.
@@ -1658,6 +1711,12 @@ class PipelineWrapper:
         is instead checked fatally at startup, in _validate_dependencies.)
         Requires at least one of metadata_file / self.geo_tsv -- the script
         itself enforces this, so a call with neither just fails fast here.
+
+        Highlighting: self._geo_query_ids (batch mode's routed queries,
+        default-on, empty in taxon/local-genome modes) is unioned with
+        --geo-highlight (works in every mode) and written to a per-label
+        file (avoids argv length limits when a batch routes many queries),
+        passed to the script as --highlight.
         """
         if not self.geo:
             return
@@ -1677,6 +1736,16 @@ class PipelineWrapper:
             cmd.extend(['--metadata', str(metadata_file)])
         if self.geo_tsv is not None:
             cmd.extend(['--geo-tsv', str(self.geo_tsv)])
+
+        highlight_ids = self._geo_query_ids | set(_parse_id_list(self.geo_highlight))
+        if highlight_ids:
+            safe_label = sanitize_path_component(label)
+            highlight_file = figures_dir / f"{safe_label}_highlight_ids.txt"
+            with open(highlight_file, 'w') as f:
+                f.write('\n'.join(sorted(highlight_ids)) + '\n')
+            cmd.extend(['--highlight', str(highlight_file),
+                        '--query-top-k', str(self.geo_query_top_k)])
+
         self._log_command(cmd)
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would generate geo figures for {label}")
@@ -2272,13 +2341,7 @@ class PipelineWrapper:
         Returns [] when unset. Accessions are returned as-is; the subsampler
         matches them against member basenames by stem, so extensions don't matter.
         """
-        if not self.must_keep:
-            return []
-        p = Path(self.must_keep)
-        if p.exists() and p.is_file():
-            with open(p) as f:
-                return [ln.strip() for ln in f if ln.strip()]
-        return [s.strip() for s in self.must_keep.split(',') if s.strip()]
+        return _parse_id_list(self.must_keep)
 
     def _stage_local_genomes(self, dest: Path) -> Path:
         """Normalize every FASTA in self.genome_dir into <dest>/<stem>.fna.
@@ -4031,6 +4094,26 @@ Examples:
         help='Only used with --geo. Image format for the generated tree/map '
              'figures. Default png.'
     )
+    geo_group.add_argument(
+        '--geo-highlight',
+        type=str,
+        default=None,
+        help='Implies --geo. Comma-separated genome ID list, or a path to a '
+             'file with one ID per line, to star/highlight on the tree, the '
+             'overview map, and a dedicated query-centric map. In batch '
+             '(--input) mode this is UNIONED with the run\'s own routed '
+             'query assemblies, which are highlighted by default with no '
+             'flag needed; --taxon/--genome-dir runs have no routed '
+             'queries, so this is their only way to highlight genomes.'
+    )
+    geo_group.add_argument(
+        '--geo-query-top-k',
+        type=int,
+        default=25,
+        help='Implies --geo. Per highlighted/query genome, number of its '
+             'nearest genomes (any country, same-country included) to draw '
+             'lines to on the dedicated query-centric map. Default 25.'
+    )
 
     low_importance_group = parser.add_argument_group('Low importance')
     low_importance_group.add_argument(
@@ -4059,11 +4142,16 @@ Examples:
                     f"implying --megatree.")
         args.megatree = True
 
-    # --geo-tsv/--geo-top-k imply --geo, same pattern as the megatree flags above.
-    if not args.geo and (args.geo_tsv is not None or args.geo_top_k != 100):
+    # --geo-tsv/--geo-top-k/--geo-highlight/--geo-query-top-k imply --geo,
+    # same pattern as the megatree flags above.
+    if not args.geo and (args.geo_tsv is not None or args.geo_top_k != 100
+                          or args.geo_highlight is not None
+                          or args.geo_query_top_k != 25):
         implied_by = [name for name, val in [
             ('--geo-tsv', args.geo_tsv is not None),
             ('--geo-top-k', args.geo_top_k != 100),
+            ('--geo-highlight', args.geo_highlight is not None),
+            ('--geo-query-top-k', args.geo_query_top_k != 25),
         ] if val]
         logger.info(f"  {' / '.join(implied_by)} given without --geo -- "
                     f"implying --geo.")
@@ -4128,6 +4216,8 @@ Examples:
         geo_tsv=args.geo_tsv,
         geo_top_k=args.geo_top_k,
         geo_format=args.geo_format,
+        geo_highlight=args.geo_highlight,
+        geo_query_top_k=args.geo_query_top_k,
     )
 
     return wrapper.run()
