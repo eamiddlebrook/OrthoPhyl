@@ -8,8 +8,14 @@
     {} Add variable to evo distance? need more and shorter kmers for order level stuff 
 
 [] synteny aware orthology (like genespace)
-[] add "best genomes" choice to ANI subsample 
+[] add "best genomes" choice to ANI subsample
 [] add root assemblies for automatic tree generation
+[] collapse near-identical ("strain-level") genomes before they hit max-tree-genomes/subsample/partition
+    no ANI/MASH-based dereplication exists anywhere today -- only accession-string dedup (RefSeq-over-GenBank twins, version collapse, see small-task item below)
+    a heavily oversampled species (many near-identical isolates/strains in RefSeq+GenBank) counts every genome individually toward --max-tree-genomes, --subsample-size, and megatree partitioning -- no actual diversity gain, just inflated counts and wasted OrthoFinder/tree compute
+    idea: add a layer below subclade in the megatree hierarchy (backbone -> subclade -> strain): collapse near-identical genomes to one representative for the subclade-level tree, but allow a flag (e.g. --build-strain-trees) to still build/attach the full oversampled strain tree underneath for whoever wants it
+    needs more design before planning: how to detect "near-identical" (ANI/MASH threshold, and where that threshold lives relative to subclade_partition.py's existing clustering), how the representative is picked, how the strain tree would graft back onto its representative leaf (reuse megatree_graft.py's MRCA-replace?), how ReLeaf/routing treats a collapsed strain group (does a new query that matches a collapsed-away strain route to the representative, or trigger a lazy strain-tree build like --megatree-lazy subclades?)
+    related: see "Megatree database layout cleanup" project memory for the existing backbone/subclade nesting convention this would extend
 [X] allow users to input precomputted HMMs
 [X] fix all dirtbag multithreading to use number of jobs 
 [] something about saturation
@@ -21,6 +27,11 @@
 [] option to partition by third position (or mask out)
 
 ## small task
+[] max_tree_genomes count (orthophyl_pipeline_wrapper.py _process_orthophyl_taxon, ~line 1182) is taken before version-redundancy dedup runs
+    filter_NCBI_genomes (utils/gather_filter_asms.sh) already removes RefSeq/GenBank twin redundancy (GCF_ over GCA_) at download time, before the raw_count > max_tree_genomes check -- that part is fine
+    but filter_for_redundancy / dedupe_accessions (python_scripts/filter_redundant_genomes.py, collapses multiple versions of the same base accession e.g. GCA_X.1 vs GCA_X.2) lives in the QC half of gather_filter_asms.sh, which only runs per-subclade/per-subsample AFTER the megatree-vs-subsample decision is already made
+    so raw_count can be inflated by stale/superseded assembly versions, possibly tipping a taxon into the megatree/subsample path it wouldn't need otherwise
+    fix: run (or extract) the version-collapse dedup during the download-only half, before raw_count is computed, same place filter_NCBI_genomes already runs
 [] move all hmm seach stuff out of annot_prots.shortlist
 [] add checkpoints for smaller steps 
     trimming
@@ -41,6 +52,12 @@
     also helps name-only DBs (--genome-dir with unresolved --clade-name, e.g. bare g__MyClade) vs a full-lineage query
     caveats: genus homonyms across domains (require domain to match?); DBs above genus rank (family/order DBs) have no genus to key on -> strict only
     later: fuzzy/edit-distance match, or resolve both strings against the NCBI taxdump / GTDB synonyms
+
+## audit backgrounded-job loops for unchecked exit status
+[] functions_addem.sh ADD_2_ALIGNMENTS backgrounded each `mafft --add` call and never checked exit status (fixed in 1a9c64e)
+    root cause was unrelated (ReLeaf.sh leaking host conda env into Singularity containers -> host mafft binary broken inside container)
+    but the real damage was this: ~3873/3909 mafft calls failed silently, dropping those OGs' alignments to empty/symlinked-through, surfacing only much later as a cryptic IQ-TREE "taxon not in constraint tree" error
+    check for the same pattern elsewhere: backgrounded `&` jobs + `wait` with no per-job exit status check, in functions_addem.sh and functions.sh (e.g. other mafft/hmmsearch/iqtree loops)
 
 ## wrapper output dir is confusing for ReLeaf runs
 [] wrapper --output-dir looks like "the" output dir, but ReLeaf's actual output lands in the DATABASE dir, not there
