@@ -830,7 +830,19 @@ routing
 
 ### Resume Behavior
 
-When `--resume` is specified:
+When `--resume` is specified without `--output-dir`, the wrapper first has to
+find which prior run to resume: it computes the same `<run_name>` the
+original run would have used (from `--taxon`/`--clade-name`, or `run` for
+batch mode) and picks the newest dir under
+`<database-dir>/.pipeline_runs/` whose name matches
+`<run_name>_<timestamp>` *and* contains a `checkpoints/` subdirectory (a dir
+without one never got past initialization, so there's nothing to resume).
+If none match, it warns and starts a fresh timestamped run instead -- it
+never silently resumes from a different taxon's/clade's run. Passing
+`--output-dir` explicitly always skips this discovery and uses that path
+as-is.
+
+Once an output dir is settled on, for each phase:
 
 1. **Check Each Phase**:
    ```python

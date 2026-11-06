@@ -163,10 +163,37 @@ class PipelineWrapper:
         if output_dir:
             self.output_dir = Path(output_dir)
         else:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             run_name = self._default_run_name(taxon or clade_name)
-            self.output_dir = self.database_dir / '.pipeline_runs' / f'{run_name}_{timestamp}'
-            logger.info(f"No --output-dir provided, using: {self.output_dir}")
+            resumed_dir = (self._find_resume_output_dir(self.database_dir, run_name)
+                           if resume and self.database_dir else None)
+            if resumed_dir:
+                self.output_dir = resumed_dir
+                logger.info(f"--resume without --output-dir: resuming newest prior "
+                            f"run matching '{run_name}_*': {self.output_dir}")
+                pipeline_runs = self.database_dir / '.pipeline_runs'
+                pattern = re.compile(rf'^{re.escape(run_name)}_\d{{8}}_\d{{6}}$')
+                n_other = sum(1 for p in pipeline_runs.iterdir()
+                              if p.is_dir() and pattern.match(p.name)
+                              and (p / 'checkpoints').is_dir()
+                              and p != resumed_dir)
+                if n_other:
+                    logger.info(f"  ({n_other} other matching run(s) found; "
+                                f"pass --output-dir to resume a different one)")
+            else:
+                if resume:
+                    logger.warning(
+                        f"--resume given but no prior run matching "
+                        f"'{run_name}_*' found under "
+                        f"{self.database_dir / '.pipeline_runs' if self.database_dir else '<database-dir>/.pipeline_runs'}"
+                        f" -- starting a fresh run")
+                if run_name == 'run':
+                    logger.warning(
+                        "  batch mode's default run name is always 'run' -- "
+                        "if you have multiple batch runs, pass --output-dir "
+                        "explicitly to avoid ambiguity")
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                self.output_dir = self.database_dir / '.pipeline_runs' / f'{run_name}_{timestamp}'
+                logger.info(f"No --output-dir provided, using: {self.output_dir}")
         
         self.threads = threads
         # Default to the bundled gather_filter_asms.sh when --gather-script is
@@ -374,6 +401,35 @@ class PipelineWrapper:
         # Sanitize the name for use as a directory component
         safe = re.sub(r'[^A-Za-z0-9._-]+', '_', taxon).strip('_')
         return safe or 'run'
+
+    @staticmethod
+    def _find_resume_output_dir(database_dir: Path, run_name: str) -> Optional[Path]:
+        """Find the newest prior run dir matching run_name under
+        <database_dir>/.pipeline_runs, for --resume without --output-dir.
+
+        Without this, --resume alone can't find anything to resume: the
+        caller would otherwise fall through to a brand-new timestamped dir
+        with no checkpoints in it, silently starting over instead of
+        resuming. Only candidates that actually have a checkpoints/
+        subdirectory count -- a dir whose name matches but that never got
+        through _phase_initialization has nothing to resume either.
+
+        Matching is anchored to the full <run_name>_<8 digits>_<6 digits>
+        shape (the exact format __init__ generates below), not a prefix --
+        otherwise 'TaxID28' would wrongly match 'TaxID286_...', and
+        'Pseudomonas' would wrongly match 'Pseudomonas_aeruginosa_...'.
+        Lexical sort on the name is correct (not mtime, which changes on
+        touch/copy) because the timestamp format is fixed-width.
+        """
+        pipeline_runs = database_dir / '.pipeline_runs'
+        if not pipeline_runs.is_dir():
+            return None
+        pattern = re.compile(rf'^{re.escape(run_name)}_\d{{8}}_\d{{6}}$')
+        candidates = sorted(
+            (p for p in pipeline_runs.iterdir()
+             if p.is_dir() and pattern.match(p.name) and (p / 'checkpoints').is_dir()),
+            key=lambda p: p.name)
+        return candidates[-1] if candidates else None
 
     @staticmethod
     def _validate_clade_taxonomy(taxonomy: str, clade_name: str) -> str:
@@ -3909,7 +3965,10 @@ Examples:
     core_group.add_argument(
         '--output-dir',
         help='Output directory for all results (default: <database-dir>/.pipeline_runs/<taxon>_<timestamp>, '
-             'where <taxon> is the --taxon name, "TaxID<num>" for a numeric TaxID, or "run" for batch mode)'
+             'where <taxon> is the --taxon name, "TaxID<num>" for a numeric TaxID, or "run" for batch mode). '
+             'With --resume and no --output-dir, the newest prior run dir matching that '
+             'same <taxon>_* pattern under .pipeline_runs/ is reused automatically instead '
+             'of starting a fresh timestamped run'
     )
 
     run_control_group = parser.add_argument_group(
@@ -3917,7 +3976,10 @@ Examples:
     run_control_group.add_argument(
         '--resume',
         action='store_true',
-        help='Resume from last checkpoint'
+        help='Resume from last checkpoint. If --output-dir is also omitted, automatically '
+             'resumes the newest prior run dir for this taxon/clade under '
+             '<database-dir>/.pipeline_runs/ (falls back to a fresh run with a warning if '
+             'none is found); pass --output-dir explicitly to resume a specific one'
     )
     run_control_group.add_argument(
         '--dry-run',

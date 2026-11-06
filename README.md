@@ -439,12 +439,19 @@ python orthophyl_pipeline_wrapper.py \
 
 **Solution**:
 ```bash
-# Check for checkpoint files
+# If you passed --output-dir explicitly, check it has checkpoint files
 ls results/checkpoints/
 
 # If missing, checkpoints may have been deleted
 # Re-run without --resume to start fresh
 ```
+
+If `--output-dir` was omitted on the original run, `--resume` alone (still
+without `--output-dir`) automatically reuses the newest matching prior run
+dir under `<database-dir>/.pipeline_runs/<taxon>_<timestamp>/` -- no need to
+dig up the exact timestamped path. If no matching run is found, it logs a
+warning and starts a fresh run instead of resuming nothing. Pass
+`--output-dir` explicitly to pin down a specific run.
 
 ### 3. Out of Memory During CheckM2
 

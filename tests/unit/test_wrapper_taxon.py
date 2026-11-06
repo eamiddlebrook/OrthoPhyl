@@ -750,6 +750,141 @@ class TestGathererInterfaceContract:
         # Check required attributes (set during __init__)
         # We can't instantiate without network access, but we can check the class structure
         # In a real test, you'd create a minimal instance with mocked network calls
-        
+
         # This test passing means the interface contract is satisfied
         # If it fails, bug B4 is present
+
+
+def _make_run_dir(database_dir: Path, name: str, with_checkpoints: bool = True) -> Path:
+    """Create a fake prior-run dir under <database_dir>/.pipeline_runs/<name>,
+    optionally with a checkpoints/ subdir (the discovery helper's signal that
+    this run actually got through initialization)."""
+    run_dir = database_dir / '.pipeline_runs' / name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if with_checkpoints:
+        (run_dir / 'checkpoints').mkdir(exist_ok=True)
+    return run_dir
+
+
+class TestResumeOutputDirDiscovery:
+    """--resume without --output-dir should reuse the newest prior run dir
+    matching this taxon/clade's run-name pattern under
+    <database-dir>/.pipeline_runs/, instead of silently starting a fresh
+    run with nothing to resume."""
+
+    def test_picks_newest_of_several_matching_runs(self, Wrapper, tmp_path):
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        _make_run_dir(db_dir, "TaxID286_20260101_120000")
+        newest = _make_run_dir(db_dir, "TaxID286_20260301_090000")
+        _make_run_dir(db_dir, "TaxID286_20260215_000000")
+
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, db_dir, taxon="286",
+            output_dir=None, resume=True)
+
+        assert w.output_dir == newest
+
+    def test_skips_newer_run_without_checkpoints_dir(self, Wrapper, tmp_path):
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        usable = _make_run_dir(db_dir, "TaxID286_20260101_120000")
+        # Newer by name, but never got through initialization -- nothing to resume.
+        _make_run_dir(db_dir, "TaxID286_20260301_090000", with_checkpoints=False)
+
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, db_dir, taxon="286",
+            output_dir=None, resume=True)
+
+        assert w.output_dir == usable
+
+    def test_does_not_cross_match_longer_taxon_name(self, Wrapper, tmp_path):
+        """'TaxID286' must not match 'TaxID2860_...', and 'Pseudomonas' must
+        not match 'Pseudomonas_aeruginosa_...' -- matching is anchored to the
+        full <run_name>_<8digits>_<6digits> shape, not a prefix."""
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        _make_run_dir(db_dir, "TaxID2860_20260301_090000")
+
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, db_dir, taxon="286",
+            output_dir=None, resume=True)
+
+        # No real match for "TaxID286" -- falls back to a fresh timestamped dir.
+        assert w.output_dir.name.startswith("TaxID286_")
+        assert w.output_dir.name != "TaxID2860_20260301_090000"
+        assert not w.output_dir.exists()
+
+    def test_named_taxon_with_space_matches_sanitized_pattern(self, Wrapper, tmp_path):
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        expected = _make_run_dir(db_dir, "Pseudomonas_aeruginosa_20260301_090000")
+        # Must not be picked up by the "Pseudomonas aeruginosa" run.
+        _make_run_dir(db_dir, "Pseudomonas_20260401_000000")
+
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, db_dir, taxon="Pseudomonas aeruginosa",
+            output_dir=None, resume=True)
+
+        assert w.output_dir == expected
+
+    def test_no_match_falls_back_to_fresh_dir_with_warning(self, Wrapper, tmp_path, caplog):
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+
+        with caplog.at_level("WARNING"):
+            w = _make_taxon_wrapper(
+                Wrapper, tmp_path, db_dir, taxon="286",
+                output_dir=None, resume=True)
+
+        assert w.output_dir.name.startswith("TaxID286_")
+        assert not w.output_dir.exists()
+        assert any("no prior run matching" in r.message for r in caplog.records)
+
+    def test_resume_false_always_creates_fresh_dir(self, Wrapper, tmp_path):
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        existing = _make_run_dir(db_dir, "TaxID286_20260101_120000")
+
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, db_dir, taxon="286",
+            output_dir=None, resume=False)
+
+        assert w.output_dir != existing
+        assert w.output_dir.name.startswith("TaxID286_")
+
+    def test_explicit_output_dir_skips_discovery(self, Wrapper, tmp_path):
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        _make_run_dir(db_dir, "TaxID286_20260101_120000")
+        explicit = tmp_path / "explicit_out"
+
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, db_dir, taxon="286",
+            output_dir=explicit, resume=True)
+
+        assert w.output_dir == explicit
+
+    def test_batch_mode_finds_newest_run_dir_and_warns_on_ambiguity(
+            self, Wrapper, tmp_path, caplog):
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        newest = _make_run_dir(db_dir, "run_20260301_090000")
+        _make_run_dir(db_dir, "run_20260101_120000")
+
+        fake_gather = tmp_path / "fake_gather.sh"
+        fake_gather.write_text("#!/bin/bash\necho fake\n")
+        fake_gather.chmod(0o755)
+
+        with caplog.at_level("INFO"):
+            w = Wrapper(
+                input_file=tmp_path / "assemblies.tsv",
+                database_dir=db_dir,
+                output_dir=None,
+                threads=4,
+                gather_script=fake_gather,
+                resume=True,
+            )
+
+        assert w.output_dir == newest
+        assert any("other matching run" in r.message for r in caplog.records)
