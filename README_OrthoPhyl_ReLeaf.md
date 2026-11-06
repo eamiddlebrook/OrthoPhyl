@@ -1,4 +1,4 @@
-# **OrthoPhyl2 (v3.1.0)**: Bigger and Better Orthology-based Phylogenomics
+# **OrthoPhyl2 (v3.3)**: Bigger and Better Orthology-based Phylogenomics
 # Now Freaturing **ReLeaf!**: Rapidly Add Samples to Previous OrthoPhyl Runs
 <br /> <br />
 ## Table of Contents
@@ -6,7 +6,7 @@
 1. [About OrthoPhyl](#AboutOP)
 2. [About ReLeaf](#AboutRL)
 3. [Getting Started](#GettingStarted)
-    - [Singularity](#Singularity)
+    - [Apptainer/Singularity](#Singularity)
     - [Manual Install](#ManualInstall)
     - [Test Install](#TestInstall)
 4. [Running OrthoPhyl](#RunningOrthoPhyl)
@@ -52,16 +52,20 @@ Note: Adding samples to OP ASTRAL trees is not yet supported. However ASTRAl tre
 #### This workflow has been tested on CentOS8 and debian(mint) machines, but should be pretty portable to other linux systems. 
 
 <a name="Singularity"></a>
-### Singularity
-#### If you have Singularity you can run a prebuilt container. Grab the container which requires ~1.7gb space (at the moment):
+### Apptainer/Singularity
+#### If you have Apptainer (or Singularity -- `singularity` is a drop-in replacement for `apptainer` in every command below) you can run a prebuilt container. Grab the container which requires ~1.7gb space (at the moment):
 ```
 singularity_images=~/singularity_images/
 mkdir ${singularity_images}
 cd ${singularity_images}
-singularity pull library://earlyevol/default/orthophyl
-mv orthophyl_latest.sif OrthoPhyl.v3.1.0.sif
+apptainer pull library://earlyevol/default/orthophyl
+mv orthophyl_latest.sif OrthoPhyl.v3.3.sif
 ```
+Or build it yourself from `Singularity.OP.v3.3.recipe` (see `readmes/README_APPTAINER.md` for the build-arg required for the CheckM2 database).
+
 Congradulations! You can skip down to testing the "install"!
+
+Note: the container's default `%runscript` just drops you into an interactive shell (it does **not** forward arguments to a pipeline script), so every example below uses `apptainer exec <image> <command>` rather than `apptainer run <image> <args>`.
 
 <a name="ManualInstall"></a>
 ### Manual Install
@@ -104,7 +108,7 @@ On some Linux distros, using ```~/.bashrc``` only for interactive shells is enfo
 #### Create conda environment and install dependencies
 It is highly recomended that you create an separate environment for this install. Might take some time....
 ```
-mamba create -n orthophyl --file $Path_to_gits/OrthoPhyl/orthophyl_env.XXX.txt -c bioconda -c conda-forge
+mamba env create -n orthophyl -f $Path_to_gits/OrthoPhyl/orthophyl_env.2.2.1.yml
 ```
 ...or you can install different versions if neccessary. Compatability should be pretty good, but no promises.
 ```
@@ -162,15 +166,15 @@ cd Alignment_Assessment/
 
 <a name="TestInstall"></a>
 ## Test Install 
-### Test Singularity container
-You must specify an output directory (-s) if running through singularity, because the script will try to write directly to the container (wont work). The ```-t 4 ``` allows OP to run on 4 cores. Change if required.
+### Test Apptainer/Singularity container
+You must specify an output directory (-s) if running through the container, because the script will try to write directly to the container (wont work). The ```-t 4 ``` allows OP to run on 4 cores. Change if required. The container's default runscript just drops you into a shell, so exec `OrthoPhyl.sh` directly:
 ```
-singularity run ${singularity_images}/OrthoPhyl.v3.1.0.sif -T TESTER_fasttest -s ./tester_fasttest_output -t 4
+apptainer exec ${singularity_images}/OrthoPhyl.v3.3.sif bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -T TESTER_fasttest -s ./tester_fasttest_output -t 4
 ```
 If ```ls ./tester_fasttest_output/FINAL_SPECIES_TREES``` returns trees with prefixes [astral fasttree iqtree] with [SCO_3 SCO_strict] and [CDS PROT] suffixes (12 total trees), the pipline ran successfully!
-#### Test Releaf within the singularity container
+#### Test Releaf within the container
 ```
-singularity exec ${singularity_images}/OrthoPhyl.v3.1.0.sif -a TESTER/annots_nucls_fasttest_addasm,TESTER/annots_prots_fasttest_addasm -t 4 -s ./tester_fasttest_output
+apptainer exec ${singularity_images}/OrthoPhyl.v3.3.sif bash /opt/gits/OrthoPhyl/ReLeaf.sh -a TESTER/annots_nucls_fasttest_addasm,TESTER/annots_prots_fasttest_addasm -t 4 -s ./tester_fasttest_output
 ```
 If ```ls ./tester_fasttest_output/FINAL_SPECIES_TREES``` returns trees (iqtree.[].treefile fasttree.[].tree), then the ReLeaf pipeline ran successfully!
 
@@ -235,19 +239,29 @@ Optional:
 	nucleotide trees to identify artifacts of saturation (long branch attraction)
 -c	path to a control file with required variables and any optional ones to override defaults.
 	Will override values set on command line! [NULL]
--x  trimal paramerter string (in double \"quotes\")
--r  flag to rerun orthofinder on the ANI_shorlist (true/[false])
--n  Max number of proteomes to run through OrthoFinder.
+-x|--trimal_params  trimal paramerter string (in double \"quotes\")
+-r|--rerun  flag to rerun orthofinder on the ANI_shorlist (true/[false])
+-n|--num_OF_annots  Max number of proteomes to run through OrthoFinder.
 	If more than this many assemblies are provided, a subset of proteomes (based on genomes/transcripts ANI) will be chosen for OrthoFinder to chew on [20]
--m  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
+-m|--min_frac_orthos  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
         Expects a float from 0-1
         A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
         [0.30]
--d  Force ANI subsetting to run on transcript or genome Datasets. ([genome],transcript)
-	Using \"-a\" implies \"-d transcript\".
+-d|--ani_Data  Force ANI subsetting to run on transcript or genome Datasets. ([genome],CDS)
+	Using \"-a\" implies \"-d CDS\".
 	If \"-a\" is declared but you want to use the assemblies you have also provided, set \"-d genome\"
-	If \"-a\" not used but you want to use transcripts (annotated within OrthoPhyl by Prodigal) for ANI subsetting, set \"-d transcript\"
--T  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast)
+	If \"-a\" not used but you want to use CDS (annotated within OrthoPhyl by Prodigal) for ANI subsetting, set \"-d CDS\"
+-T|--test  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast,TESTER_fasttest)
+--hmm-assign-dir  path to a directory of precomputed <OrthogroupID>.hmm files (e.g. from a prior
+	OrthoPhyl run's OG_alignmentsToHMM/hmms_final/, or an external set like BUSCO). Skips
+	OrthoFinder/MASH-shortlisting entirely -- genes are instead assigned into these existing
+	orthogroups via hmmsearch, then aligned from scratch and fed into the normal
+	TRIM/SCO_MIN_ALIGN/TREE_BUILD steps.
+--hmm-assign-leftover-orthofinder  only meaningful with --hmm-assign-dir, ON BY DEFAULT when
+	--hmm-assign-dir is used. Genes matching none of the external HMMs are run through a real
+	OrthoFinder clustering step of their own to find additional orthogroups.
+--skip-hmm-assign-leftover  only meaningful with --hmm-assign-dir. Disables the above (genes
+	matching no external HMM are simply dropped, logged to hmm_assign_unmatched_OGs.txt).
 -h  display a description and a super useful usage message
 ###############################################################\n
 To run test datasets:
@@ -257,14 +271,18 @@ bash OrthoPhyl.sh -T TESTER -t #threads
 bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
 # reduced chloroplast dataset
 bash OrthoPhyl.sh -T TESTER_fasttest -t #threads
-# When running through Singularity an output directory is required:
-singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads
+# When running through Apptainer/Singularity, exec OrthoPhyl.sh directly
+# (the default runscript just drops you into a shell; apptainer exec is a
+# drop-in replacement for singularity exec):
+apptainer exec ${singularity_images}/OrthoPhyl.v3.3.sif \
+    bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -T TESTER -s output_dir -t #threads
 ```
 <a name="RunExamples"></a>
 ### Run Examples 
-#### Example1: Run OrthoPhyl on assemblies in ~/Projects/ASMS/ecoli/ using 12 cores within singularity and place all results and intermediate files in ~/Projects/phylogenetics/ecoli/
+#### Example1: Run OrthoPhyl on assemblies in ~/Projects/ASMS/ecoli/ using 12 cores within Apptainer/Singularity and place all results and intermediate files in ~/Projects/phylogenetics/ecoli/
 ```
-singularity run ${singularity_images}/OrthoPhyl.v3.1.0.sif -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
+apptainer exec ${singularity_images}/OrthoPhyl.v3.3.sif \
+    bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -g ~/Projects/ASMS/ecoli/ -s ~/Projects/phylogenetics/ecoli/ -t 12
 
 ```
 #### Example2: Run the same OrthoPhyl command from the manual install
@@ -317,6 +335,11 @@ Optional:
 	for divergent sequences, it is good to compare protein trees to 
 	nucleotide trees to identify artifacts of saturation (long branch attraction)
 	Default: Will be taked from trees available in storage_dir
+-m|--min_frac_orthos  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
+	Expects a float from 0-1
+	A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
+-x|--trimal_params  trimal paramerter string (in double \"quotes\")
+-T|--test  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast,TESTER_fasttest)
 -h|--help  display a description and a super useful usage message
 
 ```
@@ -409,6 +432,9 @@ Due to a python version update, ETE3 throws and error about escape characters du
 etc...
 This DOES NOT affect the results. In future python versions this warning will upgrade to an error and kill ete3.  I will see if there is an update that 
 
+#### ReLeaf inside a container silently uses the host's mafft/conda env (fixed)
+Older versions of ReLeaf.sh could leak the host's activated conda environment into an Apptainer/Singularity container, so `mafft` calls inside the container silently ran the host binary instead of the container's. On a broken host mafft, this failed thousands of backgrounded `mafft --add` alignment calls with no checked exit status, corrupting alignments for essentially every orthogroup while reporting success -- the failure only surfaced much later as a cryptic IQ-TREE "taxon not in constraint tree" error. This is fixed as of the container-env-leak patch; make sure you're running a current `ReLeaf.sh` if you see alignments mysteriously empty or missing taxa inside a container.
+
 <a name="FutureCapabilities"></a>
 ## Future Capabilities:
 + DONE: add assembly filtering, now very incomplete assemblies will be used, so the number of strict single copy orthologs could be drastically reduced (maybe to zero). Filtering done with gather_filter_asm
@@ -419,7 +445,7 @@ This DOES NOT affect the results. In future python versions this warning will up
 + Look at tree wide paralog numbers. Do GO analysis...
 + Identify HGT from Transcript alignments. HGTs specific to any group?
 + allow "protected assemblies" when filtering. Perhaps your favorite assembly is crap, but you really want it in the tree. A couple of bad assemblies shouldnt reduce the number of SCOs that much
-+ allow usage of precomputed Orthogroup HMMs, build new models from hits, then grab novel orthogroups from the remaining protiens
++ DONE: allow usage of precomputed Orthogroup HMMs (`--hmm-assign-dir`), build new models from hits, then grab novel orthogroups from the remaining protiens (`--hmm-assign-leftover-orthofinder`, default on)
 + DONE!!!: Related to above: allow adding assemblies to pre-run pipeline. i.e. use precomputed hmms to identify orthologs, and add them to alignemnts and regenerate trees
 + DONE: allow users to pick which dataset to use for tree building (currently strict and relaxed are used). This would greatly reduce pipeline run time.
 + change how the list of OGs for HMM  searching is inumerated. Currently tries with OG that have be filtered out because of paralogs, then gets mad because there is no multifasta to align (doesnt change outcome, just messy)

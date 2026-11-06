@@ -111,7 +111,7 @@ class TestMegatreeLazyEndToEnd:
 
     def test_partitioned_into_three_subclades(self, step1_result, database_dir):
         for name in ("Cymbidium_1", "Cymbidium_2", "Cymbidium_3"):
-            assert (database_dir / f"{name}_db" / "database_config.json").exists(), (
+            assert (database_dir / "Cymbidium" / f"{name}_db" / "database_config.json").exists(), (
                 f"Expected subclade DB {name}_db not created.\n"
                 f"STDOUT:\n{step1_result.stdout}")
 
@@ -121,10 +121,10 @@ class TestMegatreeLazyEndToEnd:
         --ani-shortlist forcing OrthoPhyl.sh's MASH-shortlist branch, a small
         subclade tree builds fine but never produces hmms_final/."""
         config = json.loads(
-            (database_dir / "Cymbidium_1_db" / "database_config.json").read_text())
+            (database_dir / "Cymbidium" / "Cymbidium_1_db" / "database_config.json").read_text())
         assert config["built"] is True
 
-        hmm_dir = (database_dir / "Cymbidium_1_db" / "orthophyl_run"
+        hmm_dir = (database_dir / "Cymbidium" / "Cymbidium_1_db" / "orthophyl_run"
                    / "OG_alignmentsToHMM" / "hmms_final")
         assert hmm_dir.exists(), (
             f"hmms_final/ not found for the built subclade -- ReLeaf can never "
@@ -134,7 +134,7 @@ class TestMegatreeLazyEndToEnd:
     def test_other_subclades_registered_lazily(self, step1_result, database_dir):
         for name in ("Cymbidium_2", "Cymbidium_3"):
             config = json.loads(
-                (database_dir / f"{name}_db" / "database_config.json").read_text())
+                (database_dir / "Cymbidium" / f"{name}_db" / "database_config.json").read_text())
             assert config["built"] is False, (
                 f"{name}_db should be a lazy (built=false) placeholder -- it "
                 f"held no query at partition time.")
@@ -201,7 +201,7 @@ class TestMegatreeLazyEndToEnd:
 
     def test_lazy_subclade_promoted_to_built(self, step2_result, database_dir):
         config = json.loads(
-            (database_dir / "Cymbidium_2_db" / "database_config.json").read_text())
+            (database_dir / "Cymbidium" / "Cymbidium_2_db" / "database_config.json").read_text())
         assert config["built"] is True, (
             f"Cymbidium_2_db should be promoted built=false -> true after the "
             f"on-demand build.\nSTDOUT:\n{step2_result.stdout}\n\n"
@@ -218,7 +218,7 @@ class TestMegatreeLazyEndToEnd:
         assert "No HMM files found" not in step2_result.stderr
         assert "ReLeaf complete for Cymbidium_2" in step2_result.stderr
 
-        new_trees_dir = (database_dir / "Cymbidium_2_db" / "orthophyl_run"
+        new_trees_dir = (database_dir / "Cymbidium" / "Cymbidium_2_db" / "orthophyl_run"
                          / "ReLeaf_dir" / "new_trees")
         assert new_trees_dir.exists(), (
             f"ReLeaf_dir/new_trees not produced.\nSTDOUT:\n{step2_result.stdout}")
@@ -226,7 +226,7 @@ class TestMegatreeLazyEndToEnd:
         assert treefiles, "No .addasm.treefile produced by ReLeaf"
 
     def test_held_out_query_present_in_final_tree(self, step2_result, database_dir):
-        new_trees_dir = (database_dir / "Cymbidium_2_db" / "orthophyl_run"
+        new_trees_dir = (database_dir / "Cymbidium" / "Cymbidium_2_db" / "orthophyl_run"
                          / "ReLeaf_dir" / "new_trees")
         treefiles = list(new_trees_dir.glob("*.addasm.treefile"))
         assert treefiles, "No .addasm.treefile produced by ReLeaf"

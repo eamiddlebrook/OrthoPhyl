@@ -130,30 +130,31 @@ OUTPUT: results/03_results/
 
 ### Prerequisites
 
-- Python 3.7+
-- The OrthoPhyl toolchain, either via the **Singularity image** or a **conda/mamba environment** (see [Installation](#installation) below)
+- Python 3.9+
+- The OrthoPhyl toolchain, either via the **Apptainer/Singularity image** (recommended) or a **conda/mamba environment** (see [Installation](#installation) below)
 - Access to taxonomy databases (or `orthophyl_runs.tsv` for initial setup)
 
 ### Installation
 
-The wrapper orchestrates `OrthoPhyl.sh` and `ReLeaf.sh`, so it needs the full OrthoPhyl toolchain (OrthoFinder, IQ-TREE, MAFFT, HMMER, Prodigal, trimal, etc.). You have two options. The full walkthrough — including per-tool versions, ASTRAL/catfasta2phyml/Alignment_Assessment setup, and `control_file.paths` editing — lives in the [OrthoPhyl & ReLeaf Guide](README_OrthoPhyl_ReLeaf.md#GettingStarted).
+The wrapper orchestrates `OrthoPhyl.sh` and `ReLeaf.sh`, so it needs the full OrthoPhyl toolchain (OrthoFinder, IQ-TREE, MAFFT, HMMER, Prodigal, trimal, etc.). You have two options. The full walkthrough — including per-tool versions, ASTRAL/catfasta2phyml/Alignment_Assessment setup, and `control_file.paths` editing — lives in the [OrthoPhyl & ReLeaf Guide](README_OrthoPhyl_ReLeaf.md#GettingStarted); container specifics (building the image yourself, bind-mount semantics, moving databases between host and container) live in [readmes/README_APPTAINER.md](readmes/README_APPTAINER.md).
 
-**Option A — Singularity (recommended, avoids dependency management)**
+**Option A — Apptainer/Singularity (recommended, avoids dependency management)**
 
-Grab the prebuilt container (~1.7 GB):
+Grab the prebuilt container (~2.7 GB; `apptainer` and `singularity` are drop-in replacements for each other in every command below):
 
 ```bash
 singularity_images=~/singularity_images/
 mkdir -p ${singularity_images}
 cd ${singularity_images}
-singularity pull library://earlyevol/default/orthophyl
-mv orthophyl_latest.sif OrthoPhyl.v3.1.0.sif
+apptainer pull library://earlyevol/default/orthophyl
+mv orthophyl_latest.sif OrthoPhyl.v3.3.sif
 ```
 
-Verify the image runs (writes 12 trees under `FINAL_SPECIES_TREES/`; `-s` output dir is **required** in a container):
+Verify the image runs (writes 12 trees under `FINAL_SPECIES_TREES/`; `-s` output dir is **required**). Note the default `%runscript` just drops you into a shell — `exec` the script directly, don't `run` the image with pipeline args:
 
 ```bash
-singularity run ${singularity_images}/OrthoPhyl.v3.1.0.sif -T TESTER_fasttest -s ./tester_fasttest_output -t 4
+apptainer exec ${singularity_images}/OrthoPhyl.v3.3.sif \
+    bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -T TESTER_fasttest -s ./tester_fasttest_output -t 4
 ```
 
 **Option B — conda/mamba environment**
@@ -288,11 +289,12 @@ python orthophyl_pipeline_wrapper.py \
 ```
 
 **Use case**: You have your own assemblies (unpublished isolates, a curated set) and want
-a searchable, routable OrthoPhyl database out of them, without going through NCBI. See the
-**[Local Genome-Ingest Mode Guide](readmes/LOCAL_GENOME_MODE_GUIDE.md)** for QC-skipping,
-naming clades that aren't formally assigned by NCBI, and taxonomy-routability details.
+a searchable, routable OrthoPhyl database out of them, without going through NCBI. See
+**[readmes/README_USAGE.md](readmes/README_USAGE.md)** for QC-skipping, naming clades
+that aren't formally assigned by NCBI, and taxonomy-routability details.
 
-**📝 For 8 more detailed examples, see [Usage Examples Documentation](readmes/README_USAGE_EXAMPLES.md)**
+**📝 For worked examples across all three modes (batch/taxon/local-genome), see
+[readmes/README_USAGE.md](readmes/README_USAGE.md)**
 
 ---
 
@@ -382,52 +384,24 @@ Flags are grouped below by subject, matching `--help`'s layout.
 
 Auto-generates a country-annotated tree, a world map of sample origins, and
 lines joining the top-K closest cross-country genome pairs by patristic
-distance (closer pairs drawn darker). Outputs land under
-`<results-dir>/figures/` as `<label>_geo_tree.<fmt>`, `<label>_geo_map.<fmt>`,
-`<label>_geo_pairs.tsv`, and `<label>_geo_countries.tsv`. Figure generation
-is non-fatal (a failure logs a warning and the run still succeeds); a
-missing `matplotlib` is checked fatally at startup, before any compute.
-
-**Query highlighting.** In batch mode (`--input`), every assembly that was
-routed this run (whether placed via ReLeaf, built as a new OrthoPhyl taxon,
-or triggering a subclade build) is highlighted on the figures automatically
-— no flag needed. A highlighted leaf gets a bold red, ★-prefixed label and a
-light row band on the tree, and a red ★ marker on the maps. Because several
-genomes can share one country, the ★ marker is drawn at a deliberate,
-deterministic offset from the country's true point (connected back to it by
-a thin dashed leader line) so same-country distance lines stay visible
-instead of collapsing into the normal declumping jitter.
-
-When at least one leaf is highlighted, two extra outputs are produced:
-- `<label>_geo_query_map.<fmt>`: a single combined map (all queries together)
-  drawing a line from each highlighted genome's offset ★ to its top-K
-  nearest genomes by patristic distance — any country, including its own —
-  colored by distance (closer = darker) with a colorbar.
-- `<label>_geo_query_neighbors.tsv`: one row per drawn (query, neighbor) pair
-  — `query, neighbor, query_country, neighbor_country, same_country,
-  distance, rank`.
-- `<label>_geo_query_countries.tsv`: one row per (query, country) pair found
-  anywhere in the tree (not just the top-K) — `query, country, n_genomes,
-  min_distance, median_distance, nearest_genome` — so you can see how far a
-  query is from a country even if none of that country's genomes made the
-  top-K.
-
-Queries with an unresolved/Unknown country still get tree highlighting and
-TSV rows but are skipped on the maps (logged as a warning), since there's no
-point to place them.
+distance after each published tree, landing under `<results-dir>/figures/`.
+Routed queries (batch mode) or `--geo-highlight`-listed genomes are
+highlighted on the figures with their own nearest-neighbor map and TSVs.
+Figure generation is non-fatal; a missing `matplotlib` is checked fatally at
+startup. `--genome-dir` mode has no NCBI location metadata, so `--geo-tsv
+genome_id<TAB>location` is required there.
 
 | Argument | Description | Default |
 |----------|-------------|---------|
 | `--geo` | Generate the geo tree + map figures after each published tree. | False |
-| `--geo-tsv` | `genome_id<TAB>location` TSV. **Required** with `--genome-dir` (no NCBI metadata exists to fall back on); optional elsewhere, where it's merged on top of (overrides) NCBI `geo_loc_name` metadata. Implies `--geo`. | - |
-| `--geo-top-k` | Number of closest cross-country genome pairs to draw lines for. Implies `--geo` if non-default. | 100 |
+| `--geo-tsv` | `genome_id<TAB>location` TSV, merged on top of (or substituting for) NCBI `geo_loc_name` metadata. Implies `--geo`. | - |
+| `--geo-top-k` | Number of closest cross-country genome pairs to draw lines for. | 100 |
 | `--geo-format` | Output image format (`png`/`svg`/`pdf`). | `png` |
-| `--geo-highlight` | Extra genomes to highlight, as a comma-separated ID list or a path to a file with one ID per line (same list-or-file convention as `--must-keep`). Merged with the routed queries in batch mode; this is the only way to get highlighting in `--taxon`/`--genome-dir` modes, which have no routed queries. Implies `--geo`. | - |
-| `--geo-query-top-k` | Number of nearest-neighbor lines to draw per highlighted genome on the query map. `0` disables the query map and its TSVs. Implies `--geo` if non-default. | 25 |
+| `--geo-highlight` | Extra genomes to highlight (comma list or file). Implies `--geo`. | - |
+| `--geo-query-top-k` | Nearest-neighbor lines per highlighted genome on the query map. | 25 |
 
-On the NCBI-download path, country data comes for free from each downloaded
-assembly's `geo_loc_name` metadata; `--genome-dir` mode has no such metadata,
-so `--geo-tsv` is mandatory there.
+**🔧 For the full writeup (query highlighting, all outputs, per-flag details), see
+[Advanced Features § Geographic Figures](readmes/README_ADVANCED_FEATURES.md#12-geographic-figures---geo)**
 
 ### Low importance
 
@@ -579,9 +553,8 @@ ls databases/MyDatabase_db/orthophyl_run/OG_alignmentsToHMM/hmms_final/
   - Phase 3b: OrthoPhyl Route (Novel Taxa)
   - Phase 3c: Subclade-Build Route (Lazy Subclades)
   - Phase 4: Results Aggregation
-
-- **[Routing Workflow Diagram](readmes/ROUTING_WORKFLOW_DIAGRAM.md)** - Flowchart of `--taxon` create vs.
-  `--input` query routing across taxon scale (subsample / `--megatree` / `--megatree-lazy` / `--placement`)
+  - Routing Workflow Diagram: flowchart of `--taxon` create vs. `--input` query
+    routing across taxon scale (subsample / `--megatree` / `--megatree-lazy` / `--placement`)
 
 - **[Technical Reference](readmes/README_TECHNICAL_REFERENCE.md)** - Comprehensive technical documentation
   - Architecture & Component Interaction
@@ -593,14 +566,12 @@ ls databases/MyDatabase_db/orthophyl_run/OG_alignmentsToHMM/hmms_final/
 
 ### 🚀 Running & Configuring
 
-- **[Extended Usage Examples](readmes/README_USAGE_EXAMPLES.md)** - 8 detailed usage scenarios
-  - Standard runs
-  - Initial setup
-  - Resume operations
-  - Low-memory configurations
-  - Custom tree methods
-  - Batch processing
-  - Integration with existing workflows
+- **[Usage Guide](readmes/README_USAGE.md)** - Worked examples for all three modes
+  - Batch mode: standard runs, initial setup, resume, low-memory, QC requirements
+  - Taxon mode: create/update databases directly from a taxon name
+  - Local genome-ingest mode: build a database from genomes already on disk, QC
+    by default (`--skip-qc` to opt out), naming a clade NCBI doesn't recognize
+    (`--clade-name`, `--clade-taxonomy`), taxonomy provenance and routability
 
 - **[Advanced Features](readmes/README_ADVANCED_FEATURES.md)** - Power user features
   - Custom routing logic
@@ -611,30 +582,13 @@ ls databases/MyDatabase_db/orthophyl_run/OG_alignmentsToHMM/hmms_final/
   - Performance tuning
   - Debugging modes
 
-- **[Taxon Mode Guide](readmes/TAXON_MODE_GUIDE.md)** - Direct taxon-based analysis
-  - Create databases from taxon names
-  - Update existing databases
-  - Batch taxon processing
-
-- **[Local Genome-Ingest Mode Guide](readmes/LOCAL_GENOME_MODE_GUIDE.md)** - Build a database from genomes already on disk
-  - QC by default, skippable with `--skip-qc`
-  - Naming a clade that isn't formally assigned by NCBI (`--clade-name`, `--clade-taxonomy`)
-  - Taxonomy provenance and routability
-
 ### 🐳 Containers & Testing
 
-- **[Singularity Containers](readmes/README_SINGULARITY.md)** - Container usage guide
-  - Pulling from Sylabs Cloud
-  - Building custom containers
-  - Mounting directories
-  - Running in containers
+- **[Apptainer/Singularity Containers](readmes/README_APPTAINER.md)** - Container usage guide
+  - Pulling from Sylabs Cloud, or building the image yourself
+  - Bind-mount semantics (identity binds) and moving databases between host and container
+  - Running in containers, including the test suite
   - HPC integration
-
-- **[Container Testing](tests/CONTAINER_TESTING.md)** - Testing framework
-  - Unit tests
-  - Integration tests
-  - Container-specific tests
-  - CI/CD integration
 
 ### 🔍 Reference & Recovery
 

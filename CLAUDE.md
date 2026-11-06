@@ -62,7 +62,7 @@ Integration tests assert topology correctness via Robinson-Foulds distance (RF=0
 
 Note: the target scripts (`assembly_router.py`, `orthophyl_pipeline_wrapper.py`, `OP_database_tool.py`) live at the repo root and in `assembly_router/`, which are not import packages. `tests/conftest.py` loads them by path via `importlib` and exposes them as fixtures (`router_module`, `wrapper_module`, `db_creator_module`). Import them that way in tests, not with `import`.
 
-Container-aware temp handling: set `PYTEST_TMP_DIR` or `TMPDIR` when `/tmp` is read-only (common under Singularity). See `pytest.ini` and `tests/CONTAINER_TESTING.md`.
+Container-aware temp handling: set `PYTEST_TMP_DIR` or `TMPDIR` when `/tmp` is read-only (common under Apptainer/Singularity). See `pytest.ini` and `readmes/README_APPTAINER.md`.
 
 ## Architecture notes
 
@@ -130,4 +130,8 @@ The **partition/megatree** path is opt-in via `--megatree`. Instead of subsampli
 
 ## Containers
 
-Singularity recipes: `Singularity.OP.v3.1.0.recipe` (current) and the `OP2.2.1` variants; `Dockerfile.mamba` for Docker. Both use micromamba with a base env (orthofinder, iqtree, fasttree, hmmer, mash, prodigal, trimal, raxml, ete3, pytest) and a separate `gather_genomes` env (checkm2, entrez-direct, ncbi-datasets-cli). Conda env spec: `orthophyl_env.2.2.1.yml`.
+Apptainer/Singularity is the only supported container path (the Docker recipe has been removed). `Singularity.OP.v3.3.recipe` is current; `Singularity.OP.v3.1.0.recipe`/`Singularity.OP2.2.1.recipe` are historical and not maintained. It uses micromamba with a base env (orthofinder, iqtree, fasttree, hmmer, mash, prodigal, trimal, raxml, ete3, pytest) and a separate `gather_genomes` env (checkm2, entrez-direct, ncbi-datasets-cli). Conda env spec: `orthophyl_env.2.2.1.yml`. Building requires `--build-arg checkm2_db_path=/path/to/uniref100.KO.1.dmnd` (no network fallback). The default `%runscript` just drops into a shell — use `apptainer exec <image> bash /opt/gits/OrthoPhyl/OrthoPhyl.sh ...`, not `apptainer run <image> <args>`. Full guide: `readmes/README_APPTAINER.md` (covers building, bind-mount semantics, running tests in-container, and moving databases between host and container).
+
+**Megatree database layout**: a subclade/backbone DB (`is_subclade`/`is_backbone` + `parent_taxon`) nests under its parent taxon directory — `<database-dir>/<Taxon>/<Taxon>_db` (backbone), `<database-dir>/<Taxon>/<Taxon>_N_db` (subclades). Non-megatree DBs stay flat at `<database-dir>/<name>_db`. Every path a database persists (symlinks, sketch/members files, `orthophyl_runs.tsv` entries) is stored relative to a nearby anchor so a database built under one bind mount (host or container) works unmodified under another, as long as the bind is an identity bind (host path == container path). Databases predating this, or built with a mismatched non-identity bind, can be repaired with `python assembly_router/OP_database_tool.py --migrate [--strip-prefix PREFIX] [--dry-run]` — infers the old mount prefix, nests megatree DBs, rewrites paths relative to the new location, relativizes `orthophyl_runs.tsv`, regenerates the index, and reports (without deleting) dangling symlinks. Idempotent.
+
+Other readmes live in `readmes/`: `README_APPTAINER.md` (containers), `README_USAGE.md` (worked examples for all three modes), `README_ADVANCED_FEATURES.md`, `README_PIPELINE_PHASES.md` (includes the routing workflow diagram), `README_TECHNICAL_REFERENCE.md`, `README_TROUBLESHOOTING.md`.

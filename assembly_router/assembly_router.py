@@ -42,6 +42,30 @@ MASH_K = "17"
 MASH_S = "5000"
 
 
+def _iter_database_dirs(database_dir: Path):
+    """Yield every *_db directory under database_dir, flat or one level nested.
+
+    Duplicated from OP_database_tool.py's iter_database_dirs (these scripts
+    are loaded by path and don't import each other -- same reason
+    relative_symlink is duplicated in add_releaf_version.py). Looks at
+    database_dir/*_db plus database_dir/<X>/*_db for any <X> that isn't
+    hidden and doesn't itself end in "_db", so a megatree taxon's grouping
+    dir (holding its backbone + subclade DBs) is scanned without descending
+    into a nested DB's own contents or into .pipeline_runs.
+    """
+    if not database_dir.exists():
+        return
+    for db_dir in sorted(database_dir.glob("*_db")):
+        if (db_dir / "database_config.json").exists():
+            yield db_dir
+    for sub in sorted(database_dir.iterdir()):
+        if not sub.is_dir() or sub.name.startswith('.') or sub.name.endswith('_db'):
+            continue
+        for db_dir in sorted(sub.glob("*_db")):
+            if (db_dir / "database_config.json").exists():
+                yield db_dir
+
+
 def sanitize_path_component(s: str) -> str:
     """Sanitize a string for safe use as a single filesystem path component.
 
@@ -242,12 +266,11 @@ class MultiDatabaseRouter:
                 if db_dir.exists():
                     databases.append(self._load_single_database(db_dir))
         else:
-            # Scan for *_db directories
-            for db_dir in self.database_dir.glob("*_db"):
-                config_file = db_dir / "database_config.json"
-                if config_file.exists():
-                    databases.append(self._load_single_database(db_dir))
-        
+            # Scan for *_db directories, flat or one level nested under a
+            # megatree taxon's grouping dir (see _iter_database_dirs).
+            for db_dir in _iter_database_dirs(self.database_dir):
+                databases.append(self._load_single_database(db_dir))
+
         return databases
     
     def _load_single_database(self, db_dir: Path) -> Dict:
@@ -383,6 +406,22 @@ class MultiDatabaseRouter:
             
             return self._route_to_orthophyl(assembly_path, assembly_id, taxonomy)
     
+    def _relpath_to_database_dir(self, value: Optional[str]) -> Optional[str]:
+        """Relativize a path against self.database_dir for the routing JSON.
+
+        Routing decisions are read back by the wrapper's _parse_routing_
+        results and may be --resume'd from a different host/container
+        environment than where routing ran; storing these relative (and
+        resolving on load) survives that, the same way database_config.json
+        fields do (see OP_database_tool.py's relative_symlink).
+        """
+        if not value:
+            return value
+        try:
+            return os.path.relpath(Path(value).resolve(), self.database_dir.resolve())
+        except (OSError, ValueError):
+            return value
+
     def _route_to_releaf(
         self,
         assembly_path: Path,
@@ -418,11 +457,11 @@ class MultiDatabaseRouter:
         # Build ReLeaf command with available options
         releaf_cmd = (
             f"./ReLeaf.sh \\\n"
-            f"    --store {database['db_dir'] / 'orthophyl_run'} \\\n"
-            f"    --input_genomes {releaf_input_dir} \\\n"
+            f"    -s {database['db_dir'] / 'orthophyl_run'} \\\n"
+            f"    -g {releaf_input_dir} \\\n"
             f"    -t {self.threads} \\\n"
-            f"    --tree_method {tree_method} \\\n"
-            f"    --TREE_DATA {tree_data}"
+            f"    -p {tree_method} \\\n"
+            f"    -o {tree_data}"
         )
         
         # Add note if using non-default options
@@ -438,7 +477,7 @@ class MultiDatabaseRouter:
             'query_taxonomy': taxonomy,
             'matched_database': database['clade_name'],
             'matched_rank': database['rank_name'],
-            'database_dir': str(database['db_dir']),
+            'database_dir': self._relpath_to_database_dir(str(database['db_dir'])),
             'database_genomes': database['n_genomes'],
             'command': releaf_cmd,
             'tree_method': tree_method,
@@ -542,7 +581,7 @@ class MultiDatabaseRouter:
             'query_taxonomy': taxonomy,
             'matched_database': database['clade_name'],
             'matched_rank': database['rank_name'],
-            'database_dir': str(database['db_dir']),
+            'database_dir': self._relpath_to_database_dir(str(database['db_dir'])),
             'parent_taxon': database.get('parent_taxon'),
             'subclade_id': database.get('subclade_id'),
             'subclade_name': database['clade_name'],
@@ -550,9 +589,9 @@ class MultiDatabaseRouter:
             # rebuild does not silently overwrite the subclade's taxonomy with
             # whatever a single query happened to carry.
             'subclade_taxonomy': database['clade_taxonomy'],
-            'members_file': database.get('members_file'),
-            'sketch_file': database.get('sketch_file'),
-            'source_genome_dir': database.get('source_genome_dir'),
+            'members_file': self._relpath_to_database_dir(database.get('members_file')),
+            'sketch_file': self._relpath_to_database_dir(database.get('sketch_file')),
+            'source_genome_dir': self._relpath_to_database_dir(database.get('source_genome_dir')),
             'command': (
                 f"# This subclade is registered but not yet built.\n"
                 f"# The pipeline wrapper will QC + build its tree, then run ReLeaf.\n"
@@ -645,11 +684,10 @@ class MultiDatabaseRouter:
             f"# Note: Your query genome ({Path(assembly_path).name}) should be in {orthophyl_input_actual}\n"
             f"./OrthoPhyl.sh \\\n"
             f"    -g {orthophyl_input_actual} \\\n"
-            f"    -o {self.output_dir / 'orthophyl_output'} \\\n"
+            f"    -s {self.output_dir / 'orthophyl_output'} \\\n"
             f"    -t {self.threads} \\\n"
-            f"    --tree_method iqtree \\\n"
-            f"    --TREE_DATA CDS \\\n"
-            f"    --use_partitions true"
+            f"    -p iqtree \\\n"
+            f"    -o CDS"
         )
         commands.append(orthophyl_cmd)
         
@@ -889,7 +927,9 @@ Examples:
     parser.add_argument(
         '--database-dir',
         required=True,
-        help='Directory containing multiple *_db databases'
+        help='Directory containing multiple *_db databases, flat or (for '
+             'megatree backbone/subclade DBs) one level nested under a '
+             'parent-taxon grouping dir, e.g. <database-dir>/<Taxon>/<Taxon>_1_db'
     )
     parser.add_argument(
         '--output-dir',

@@ -80,7 +80,8 @@ class TestLocalGenomeMegatreeEndToEnd:
         json.loads(conflict_report.read_text())
 
     def test_backbone_db_has_user_supplied_provenance(self, run_result, database_dir):
-        config_path = database_dir / "LocalMegatreeTestClade_db" / "database_config.json"
+        config_path = (database_dir / "LocalMegatreeTestClade"
+                       / "LocalMegatreeTestClade_db" / "database_config.json")
         assert config_path.exists(), (
             f"Backbone database not created at {config_path}.\n"
             f"STDOUT:\n{run_result.stdout}")
@@ -93,7 +94,8 @@ class TestLocalGenomeMegatreeEndToEnd:
         assert config.get("parent_taxon") == "LocalMegatreeTestClade"
 
     def test_subclade_dbs_have_user_supplied_provenance(self, run_result, database_dir):
-        subclade_dbs = sorted(database_dir.glob("LocalMegatreeTestClade_*_db"))
+        subclade_dbs = sorted(
+            (database_dir / "LocalMegatreeTestClade").glob("LocalMegatreeTestClade_*_db"))
         assert subclade_dbs, (
             f"No subclade databases found under {database_dir}.\n"
             f"STDOUT:\n{run_result.stdout}")

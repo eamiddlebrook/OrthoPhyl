@@ -34,7 +34,7 @@ Optional:
 	nucleotide trees to identify artifacts of saturation (long branch attraction)
 -c|--control_file	path to a control file with required variables and any optional ones to override defaults.
 	Will override values set on command line! [NULL]
--x|-trimal_param  trimal paramerter string (in double \"quotes\")
+-x|--trimal_params  trimal paramerter string (in double \"quotes\")
 -r|--rerun  flag to rerun orthofinder on the ANI_shorlist (true/[false])
 -n|--num_OF_annots  Max number of proteomes to run through OrthoFinder.
 	If more than this many assemblies are provided, a subset of proteomes (based on genomes/transcripts ANI) will be chosen for OrthoFinder to chew on [20]
@@ -75,8 +75,11 @@ bash OrthoPhyl.sh -T TESTER -t #threads
 bash OrthoPhyl.sh -T TESTER_chloroplast -t #threads
 # reduced chloroplast dataset
 bash OrthoPhyl.sh -T TESTER_fasttest -t #threads
-# When running through Singularity an output directory is required:
-singularity run \${singularity_images}/OrthoPhyl.XXX.sif -T TESTER -s output_dir -t #threads
+# When running through Apptainer/Singularity, exec OrthoPhyl.sh directly
+# (the default runscript just drops you into a shell; apptainer exec is a
+# drop-in replacement for singularity exec):
+apptainer exec \${singularity_images}/OrthoPhyl.vX.X.sif \\
+    bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -T TESTER -s output_dir -t #threads
 "
 }
 

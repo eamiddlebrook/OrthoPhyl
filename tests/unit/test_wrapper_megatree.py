@@ -735,6 +735,79 @@ class TestSubcladeBuildPhase:
             w._process_subclade_build("X", [query])
 
 
+class TestIsSubcladeDbBuilt:
+    """_is_subclade_db_built must find a subclade DB via find_database_dir,
+    which looks one level nested under <database_dir>/<parent_taxon>/ --
+    the real on-disk layout a megatree build produces (see Part 1 nesting)."""
+
+    def test_true_for_nested_built_subclade(self, Wrapper, tmp_path, make_db_dir):
+        w = _make_wrapper(Wrapper, tmp_path)
+        make_db_dir(
+            clade_name="Andreesenella_1",
+            clade_taxonomy="d__Bacteria;g__Andreesenella",
+            clade_rank="g", clade_rank_name="genus",
+            is_subclade=True, parent_taxon="Andreesenella", subclade_id=1,
+            built=True, parent=w.database_dir / "Andreesenella",
+        )
+        assert w._is_subclade_db_built("Andreesenella_1") is True
+
+    def test_false_for_nested_unbuilt_subclade(self, Wrapper, tmp_path, make_db_dir):
+        w = _make_wrapper(Wrapper, tmp_path)
+        make_db_dir(
+            clade_name="Andreesenella_2",
+            clade_taxonomy="d__Bacteria;g__Andreesenella",
+            clade_rank="g", clade_rank_name="genus",
+            is_subclade=True, parent_taxon="Andreesenella", subclade_id=2,
+            built=False, parent=w.database_dir / "Andreesenella",
+        )
+        assert w._is_subclade_db_built("Andreesenella_2") is False
+
+    def test_false_when_db_missing(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path)
+        assert w._is_subclade_db_built("Nonexistent") is False
+
+
+class TestCheckExistingTaxonDatabase:
+    """_check_existing_taxon_database must skip a dense megatree subclade
+    (is_subclade and not is_backbone) since it shares its parent taxon's
+    clade_name -- without that skip, "--taxon Andreesenella" could wrongly
+    match "Andreesenella_1" instead of the backbone/non-megatree DB."""
+
+    def test_skips_dense_subclade_sharing_clade_name(
+            self, Wrapper, tmp_path, make_db_dir):
+        w = _make_wrapper(Wrapper, tmp_path, input_file=None, taxon="Andreesenella")
+        make_db_dir(
+            clade_name="Andreesenella", clade_taxonomy="d__Bacteria;g__Andreesenella",
+            clade_rank="g", clade_rank_name="genus",
+            is_subclade=True, parent_taxon="Andreesenella", subclade_id=1,
+            built=True, parent=w.database_dir / "Andreesenella",
+        )
+        assert w._check_existing_taxon_database() is None
+
+    def test_matches_backbone_sharing_clade_name(
+            self, Wrapper, tmp_path, make_db_dir):
+        w = _make_wrapper(Wrapper, tmp_path, input_file=None, taxon="Andreesenella")
+        make_db_dir(
+            clade_name="Andreesenella", clade_taxonomy="d__Bacteria;g__Andreesenella",
+            clade_rank="g", clade_rank_name="genus",
+            is_backbone=True, parent_taxon="Andreesenella",
+            built=True, parent=w.database_dir / "Andreesenella",
+        )
+        found = w._check_existing_taxon_database()
+        assert found is not None
+        assert found["clade_name"] == "Andreesenella"
+
+    def test_matches_flat_non_megatree_db(self, Wrapper, tmp_path, make_db_dir):
+        w = _make_wrapper(Wrapper, tmp_path, input_file=None, taxon="Escherichia")
+        make_db_dir(
+            clade_name="Escherichia", clade_taxonomy="d__Bacteria;g__Escherichia",
+            clade_rank="g", clade_rank_name="genus", parent=w.database_dir,
+        )
+        found = w._check_existing_taxon_database()
+        assert found is not None
+        assert found["clade_name"] == "Escherichia"
+
+
 class TestRegisterLazySubclade:
     def _stub_qc_and_subsample(self, w, monkeypatch, tmp_path, n_kept=3):
         """A lazy subclade is now QC'd + rep-picked at registration time (the
@@ -767,9 +840,11 @@ class TestRegisterLazySubclade:
         monkeypatch.setattr(wrapper_module.subprocess, "run",
                             lambda *a, **k: FakeCompleted())
 
+        members_file = tmp_path / "m.txt"
+        members_file.write_text("g0.fna\n")
         entry = {"name": "Andreesenella_2", "subclade_id": 2, "n_genomes": 90,
                  "sketch_file": str(tmp_path / "s.msh"),
-                 "members_file": str(tmp_path / "m.txt")}
+                 "members_file": str(members_file)}
         backbone_dir = tmp_path / "backbone_genomes"
         backbone_dir.mkdir()
         w._register_lazy_subclade(

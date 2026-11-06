@@ -288,7 +288,14 @@ def partition(genome_dir, taxon, out_dir, max_size, min_size, threads, queries):
 
 def _build_manifest(partitioned, taxon, max_size, subclades, out_dir,
                     path_by_name, threads, queries, write_sketches):
-    """Assemble the manifest dict, writing member files (+ sketches if requested)."""
+    """Assemble the manifest dict, writing member files (+ sketches if requested).
+
+    members_file/sketch_file are recorded as bare filenames (relative to
+    out_dir) rather than the absolute out_dir-joined path used to actually
+    write them, so the manifest survives a different bind-mount mapping
+    than at creation time -- readers (orthophyl_pipeline_wrapper.py) resolve
+    them back against part_dir, with a legacy-absolute fallback.
+    """
     query_set = set(queries)
     query_assignments = {}
     subclade_entries = []
@@ -308,8 +315,8 @@ def _build_manifest(partitioned, taxon, max_size, subclades, out_dir,
             "subclade_id": i + 1,
             "name": name,
             "n_genomes": len(members),
-            "members_file": members_file,
-            "sketch_file": sketch_file,
+            "members_file": os.path.basename(members_file),
+            "sketch_file": os.path.basename(sketch_file) if sketch_file else None,
         })
     return {
         "partitioned": partitioned,

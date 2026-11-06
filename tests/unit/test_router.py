@@ -47,6 +47,34 @@ class TestLoadDatabases:
         names = sorted(db["clade_name"] for db in router.databases)
         assert names == ["Enterobacteriaceae", "Escherichia"]
 
+    def test_scan_fallback_finds_nested_megatree_db(
+        self, Router, make_db_dir, two_db_dir, tmp_path
+    ):
+        """No database_index.json: the scan fallback must look one level
+        nested under <database_dir>/<parent_taxon>/ too, not just flat --
+        this is where a megatree backbone/subclade DB lives."""
+        make_db_dir(
+            clade_name="Escherichia_1",
+            clade_taxonomy=ESCHERICHIA_TAX,
+            clade_rank="g",
+            clade_rank_name="genus",
+            is_subclade=True,
+            parent_taxon="Escherichia",
+            subclade_id=1,
+            parent=two_db_dir / "Escherichia",
+        )
+        router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
+        names = sorted(db["clade_name"] for db in router.databases)
+        assert names == ["Enterobacteriaceae", "Escherichia", "Escherichia_1"]
+
+    def test_scan_fallback_skips_hidden_dirs(self, Router, two_db_dir, tmp_path):
+        hidden = two_db_dir / ".pipeline_runs" / "run1_db"
+        hidden.mkdir(parents=True)
+        (hidden / "database_config.json").write_text("{}")
+        router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
+        names = sorted(db["clade_name"] for db in router.databases)
+        assert names == ["Enterobacteriaceae", "Escherichia"]
+
     def test_empty_dir_raises(self, Router, tmp_path):
         empty = tmp_path / "empty_db_dir"
         empty.mkdir()
@@ -197,6 +225,22 @@ class TestRouteToReLeaf:
         router = Router(database_dir=two_db_dir, output_dir=out)
         router.route_assembly(self._assembly(tmp_path), ESCHERICHIA_TAX + ";s__", "q1")
         assert (out / "releaf_input" / "q1.fna").exists()
+
+    def test_database_dir_written_relative_to_database_dir(
+        self, Router, two_db_dir, tmp_path
+    ):
+        """The routing JSON may be --resume'd from a different host/container
+        environment than where routing ran (see orthophyl_pipeline_wrapper.py's
+        _resolve_against_database_dir) -- database_dir must be written relative
+        to --database-dir, not absolute."""
+        out = tmp_path / "out"
+        router = Router(database_dir=two_db_dir, output_dir=out)
+        decision = router.route_assembly(
+            self._assembly(tmp_path), ESCHERICHIA_TAX + ";s__", "q1"
+        )
+        assert decision["database_dir"] == "Escherichia_db"
+        on_disk = json.loads((out / "routing_decision_q1.json").read_text())
+        assert on_disk["database_dir"] == "Escherichia_db"
 
 
 class TestRouteToOrthoPhyl:

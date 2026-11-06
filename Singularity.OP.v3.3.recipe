@@ -9,7 +9,7 @@ AUTHOR earlm@lanl.gov
     #   HOST copy instead of `checkm2 database --download` -- avoids a ~2.9 GB
     #   network fetch on every build. REQUIRED build-arg, no fallback: build
     #   with e.g.
-    #     singularity build --build-arg checkm2_db_path=/home/user/databases/CheckM2_database/uniref100.KO.1.dmnd OrthoPhyl.sif Singularity.OP.v3.2.recipe
+    #     singularity build --build-arg checkm2_db_path=/home/user/databases/CheckM2_database/uniref100.KO.1.dmnd OrthoPhyl.sif Singularity.OP.v3.3.recipe
     #   Staged flat to /opt/ -- NOT the final /opt/checkm2_db/CheckM2_database/
     #   layout -- since %files runs before any %post and the target directory
     #   doesn't exist yet; the %post step below moves it into place after
@@ -214,7 +214,7 @@ PYEOF
     The orchestrator routes each assembly to ReLeaf (existing DB) or OrthoPhyl
     (novel taxon), managing databases and checkpoint/resume:
 
-        singularity exec OrthoPhyl.3.1.0.sif \
+        apptainer exec OrthoPhyl.v3.3.sif \
             python /opt/gits/OrthoPhyl/orthophyl_pipeline_wrapper.py \
                 --input assemblies.tsv \
                 --database-dir databases/ \
@@ -224,19 +224,20 @@ PYEOF
     -- Core OrthoPhyl pipeline --
     Run directly on a directory of genome FASTAs:
 
-        singularity exec OrthoPhyl.3.1.0.sif \
+        apptainer exec OrthoPhyl.v3.3.sif \
             bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -g path/to/assemblies/ -s path/to/output/ -t 10
 
     Built-in test dataset:
 
-        singularity exec OrthoPhyl.3.1.0.sif \
+        apptainer exec OrthoPhyl.v3.3.sif \
             bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -T TESTER_chloroplast -s ./test_sing_chloroplast -t 10
 
     Help for the core pipeline:
 
-        singularity exec OrthoPhyl.3.1.0.sif bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -h
+        apptainer exec OrthoPhyl.v3.3.sif bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -h
 
     -- Interactive session --
-    To explore or run commands by hand:
+    To explore or run commands by hand (singularity exec/run are drop-in
+    replacements for apptainer exec/run):
 
-        singularity run OrthoPhyl.3.1.0.sif        # drops into /bin/bash
+        apptainer run OrthoPhyl.v3.3.sif        # drops into /bin/bash

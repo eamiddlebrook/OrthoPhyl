@@ -213,6 +213,40 @@ Rhizobiaceae	/data/rhizo_run	d__Bacteria;p__Pseudomonadota;...;f__Rhizobiaceae
 Escherichia	/data/ecoli_run	d__Bacteria;...;g__Escherichia
 ```
 
+**Nested megatree layout**: a database whose config carries `is_subclade` or
+`is_backbone` together with `parent_taxon=P` lives at
+`<output-dir>/<P>/<name>_db`, not flat at `<output-dir>/<name>_db`. Discovery
+(`iter_database_dirs`) looks at most one level deep and skips hidden dirs
+(`.pipeline_runs`) and anything already named `*_db`. `db_dir_for`/
+`find_database_dir` compute/locate this path; every other DB stays flat.
+
+**Full CLI flags**:
+
+| Argument | Description |
+|----------|-------------|
+| `--input FILE` | TSV: clade_name, orthophyl_dir, clade_taxonomy |
+| `--output-dir DIR` | Required. Root database directory. |
+| `--update` | Skip existing databases, add new ones only |
+| `--force` | Rebuild all databases (overwrite existing) |
+| `--single-clade NAME TAXONOMY ORTHOPHYL_DIR` | Register one clade directly instead of parsing `--input` (used for megatree subclade/backbone DBs). With `--register-only`, `ORTHOPHYL_DIR` may be a placeholder. |
+| `--is-subclade` | Mark this DB as a subclade of a larger taxon |
+| `--is-backbone` | Mark this DB as a megatree's sparse backbone/overview DB |
+| `--parent-taxon NAME` | Parent taxon name for a subclade/backbone (triggers nested layout) |
+| `--subclade-id N` | 1-based subclade index |
+| `--sketch-file PATH` | MASH `.msh` sketch for the subclade |
+| `--members-file PATH` | Text file of subclade member basenames |
+| `--source-genome-dir DIR` | Directory holding the subclade's raw member FASTAs (for lazy build re-staging) |
+| `--metadata-file PATH` | Optional assembly metadata TSV (e.g. `all_asm_acc_metadata`) copied into the DB for later use (e.g. `--geo`); not read by the router itself |
+| `--n-genomes N` | Member count to record for the subclade (also used for a lazily-registered subclade) |
+| `--taxonomy-source {ncbi,user_supplied}` | Provenance of `clade_taxonomy` (default `ncbi`) |
+| `--qc-not-applied` | Record that CheckM2 QC was NOT run on the input genomes (default: QC is assumed applied) |
+| `--register-only` | Register a subclade DB with `built=false` (no tree yet) for lazy build-on-demand. Requires `--is-subclade`. |
+| `--remove NAME [NAME ...]` | Remove one or more clade databases by name. Default is a dry run; pass `--yes` to actually delete. Not combinable with `--input`/`--single-clade`. |
+| `--yes` | Confirm `--remove` actually deletes and refreshes the master index |
+| `--migrate` | Repair an existing database directory in place: remap a legacy absolute container mount prefix, nest megatree subclade/backbone DBs, and rewrite path fields relative to each DB. Not combinable with `--input`/`--single-clade`/`--remove`. |
+| `--strip-prefix PREFIX` | Old mount prefix to strip during `--migrate` (e.g. `/databases`); inferred from `database_index.json` if omitted |
+| `--dry-run` | With `--migrate`, print every move/rewrite without changing anything on disk |
+
 ---
 
 ### 3. add_releaf_version.py
@@ -498,13 +532,21 @@ output_dir/
 ├── 02_orthophyl_novel/
 │   ├── downloads/
 │   │   └── {taxon_name}/
+│   │       ├── assemblies_all.TMP/      # raw, pre-QC (--download-only)
 │   │       ├── assemblies_datasets_uniq/
 │   │       ├── checkM_out/
 │   │       ├── assembly_stats.tsv
+│   │       ├── qc_removal_reasons.txt
 │   │       ├── genomes_to_keep/
 │   │       └── .download_complete
+│   ├── partitions/                     # --megatree only
+│   │   └── {taxon_name}/
+│   │       ├── partition_manifest.json
+│   │       ├── {taxon}_1.msh
+│   │       ├── {taxon}_1.members.txt
+│   │       └── ...
 │   └── orthophyl_runs/
-│       └── {taxon_name}/
+│       └── {taxon_name}/                # or {taxon}_1/, {taxon}_2/, ... per subclade
 │           ├── genomes/
 │           ├── annots_prots/
 │           ├── annots_nucls/
@@ -518,7 +560,18 @@ output_dir/
 │   │   ├── releaf/
 │   │   │   └── {database}_phylogeny.nwk
 │   │   └── orthophyl/
-│   │       └── {taxon}_phylogeny.nwk
+│   │       ├── {taxon}_phylogeny.nwk
+│   │       ├── {taxon}_megatree.nwk           # --megatree only
+│   │       └── {taxon}_megatree_conflicts.json  # --megatree only
+│   ├── figures/                                # --geo only
+│   │   ├── {label}_geo_tree.{fmt}
+│   │   ├── {label}_geo_map.{fmt}
+│   │   ├── {label}_geo_pairs.tsv
+│   │   ├── {label}_geo_countries.tsv
+│   │   ├── {label}_geo_query_map.{fmt}         # when any leaf is highlighted
+│   │   ├── {label}_geo_query_neighbors.tsv
+│   │   ├── {label}_geo_query_countries.tsv
+│   │   └── {label}_highlight_ids.txt
 │   └── pipeline_summary.txt
 │
 ├── logs/
@@ -541,37 +594,64 @@ output_dir/
 
 ### Database Structure
 
+A plain (non-megatree) database stays flat. A megatree subclade/backbone
+database — config has `is_subclade` or `is_backbone` plus `parent_taxon` —
+nests under its parent taxon directory instead:
+
 ```
 database_dir/
 ├── database_index.json
 ├── database_summary.txt
 ├── orthophyl_runs.tsv
 │
-└── {clade_name}_db/
-    ├── database_config.json
-    ├── phylogeny.nwk
-    ├── genome_list.txt
-    ├── README.txt
-    │
-    ├── v1_orthophyl_initial/
+├── {clade_name}_db/                 # plain database (flat)
+│   ├── database_config.json
+│   ├── phylogeny.nwk
+│   ├── genome_list.txt
+│   ├── README.txt
+│   │
+│   ├── v1_orthophyl_initial/
+│   │   ├── database_config.json
+│   │   ├── version_info.json
+│   │   ├── phylogeny.nwk
+│   │   ├── genome_list.txt
+│   │   └── orthophyl_run/
+│   │
+│   ├── v2_releaf_{date}/
+│   │   ├── database_config.json
+│   │   ├── version_info.json
+│   │   ├── phylogeny.nwk
+│   │   ├── genome_list.txt
+│   │   ├── base_version → ../v1_orthophyl_initial
+│   │   ├── releaf_output → /path/to/ReLeaf_dir
+│   │   ├── orthophyl_run_composite/
+│   │   └── orthophyl_run → orthophyl_run_composite
+│   │
+│   └── current → v2_releaf_{date}
+│
+└── {Taxon}/                          # megatree parent dir (--megatree only)
+    ├── {Taxon}_db/                   # backbone (is_backbone=true)
     │   ├── database_config.json
-    │   ├── version_info.json
     │   ├── phylogeny.nwk
     │   ├── genome_list.txt
     │   └── orthophyl_run/
-    │
-    ├── v2_releaf_{date}/
-    │   ├── database_config.json
-    │   ├── version_info.json
-    │   ├── phylogeny.nwk
-    │   ├── genome_list.txt
-    │   ├── base_version → ../v1_orthophyl_initial
-    │   ├── releaf_output → /path/to/ReLeaf_dir
-    │   ├── orthophyl_run_composite/
-    │   └── orthophyl_run → orthophyl_run_composite
-    │
-    └── current → v2_releaf_{date}
+    ├── {Taxon}_1_db/                 # subclade 1 (is_subclade=true)
+    │   ├── database_config.json      # built=true, or built=false if lazy+unbuilt
+    │   ├── phylogeny.nwk             # placeholder if built=false
+    │   ├── subclade_sketch.msh
+    │   ├── subclade_members.txt
+    │   └── orthophyl_run/            # absent if built=false
+    └── {Taxon}_2_db/
+        └── ...
 ```
+
+Every path a database persists (`orthophyl_source`, `sketch_file`,
+`members_file`, `source_genome_dir`, the `orthophyl_run` symlink target,
+`orthophyl_runs.tsv` entries) is stored relative to a nearby anchor so a
+database built under one bind mount (host or container) works unmodified
+under another, as long as the bind is an identity bind. Use
+`OP_database_tool.py --migrate [--strip-prefix PREFIX] [--dry-run]` to repair
+a database directory that predates this or was built with a mismatched bind.
 
 ---
 
@@ -664,6 +744,17 @@ Flags are grouped below by subject, matching `--help`'s layout.
 | `--megatree-hmm-reuse` | False | Give every subclade the backbone's orthogroup HMMs instead of its own OrthoFinder run. Implies `--megatree`. |
 | `--megatree-hmm-reuse-skip-leftover` | False | With `--megatree-hmm-reuse`, drop genes unmatched by the backbone's HMMs instead of clustering them. Implies `--megatree`. |
 | `--placement {subclade,backbone}` | `subclade` | Tie-break for a query matching both a subclade and the backbone |
+
+#### Geographic figures (opt-in, `--geo`)
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--geo` | False | Generate a country-annotated tree + world map after each published tree. Non-fatal if figure generation itself fails; a missing `matplotlib` is checked fatally at startup. |
+| `--geo-tsv PATH` | - | `genome_id<TAB>location` TSV. **Required** with `--genome-dir` (no NCBI metadata exists to resolve locations from). Implies `--geo`. |
+| `--geo-top-k N` | 100 | Number of closest cross-country genome pairs (by patristic distance) to draw lines for |
+| `--geo-format {png,svg,pdf,...}` | `png` | Output format for the generated figures. Implies `--geo` if non-default. |
+| `--geo-highlight LIST_OR_FILE` | - | Comma-list or file of genome IDs to highlight on the figures (batch mode highlights routed queries automatically with no flag needed). Implies `--geo`. |
+| `--geo-query-top-k N` | 25 | Number of nearest neighbors drawn on each highlighted query's own distance map. Implies `--geo` if non-default. |
 
 #### Low importance
 
@@ -795,32 +886,75 @@ rm output_dir/checkpoints/database_*.flag
 
 ### A. database_config.json
 
+Paths (`orthophyl_source`, `sketch_file`, `members_file`, `source_genome_dir`,
+`metadata_file`) are stored relative to the database's own directory so the
+same DB works unmodified under a host path or a container bind mount — see
+[Database Structure](#database-structure). Megatree-specific fields
+(`is_subclade` through `metadata_file` below) are absent on a plain,
+non-megatree DB; all fields load via `.get()` with defaults, so older configs
+stay valid.
+
 ```json
 {
   "created": "2025-01-15T10:30:00.123456",
+  "last_updated": "2025-01-15T10:30:00.123456",
   "version": "1.0",
   "database_type": "hierarchical_taxonomy",
   "clade_name": "Rhizobiaceae",
   "clade_taxonomy": "d__Bacteria;p__Pseudomonadota;c__Alphaproteobacteria;o__Hyphomicrobiales;f__Rhizobiaceae",
   "clade_rank": "f",
   "clade_rank_name": "family",
-  "orthophyl_source": "/data/orthophyl_runs/rhizobiaceae",
+  "orthophyl_source": "../../orthophyl_runs/rhizobiaceae",
   "n_genomes": 150,
   "has_hmms": true,
   "has_trees": true,
   "has_alignments": true,
   "available_tree_methods": ["iqtree", "fasttree"],
   "available_data_types": ["CDS", "protein"],
+  "available_trees": ["SCO_strict.CDS.iqtree.treefile"],
   "validation_details": [
     "Found 1234 HMM/alignment files in hmms_final",
     "Found 1234 alignment files in AlignmentsProts.trm",
     "Found tree: SCO_strict.CDS.iqtree.treefile",
     "Counted 150 genomes from genome_list"
-  ]
+  ],
+  "source_taxon_name": "Rhizobiaceae",
+  "source_taxid": "82115",
+  "source_rank": "family",
+  "taxonomy_source": "ncbi",
+  "qc_applied": true,
+  "assembly_accessions": ["GCF_000001.1", "GCF_000002.1"],
+  "n_assemblies_at_creation": 150,
+  "quality_filters": {
+    "min_completeness": 90,
+    "max_contamination": 5,
+    "min_n50": 10000
+  },
+  "is_subclade": false,
+  "is_backbone": false,
+  "parent_taxon": null,
+  "subclade_id": null,
+  "built": true,
+  "source_genome_dir": null,
+  "sketch_file": null,
+  "members_file": null,
+  "metadata_file": "../../downloads/rhizobiaceae/all_asm_acc_metadata.tsv"
 }
 ```
 
+A megatree subclade registered but not yet built (`--megatree-lazy`) instead
+has `"is_subclade": true`, `"parent_taxon": "Rhizobiaceae"`,
+`"subclade_id": 1`, `"built": false`, a placeholder `phylogeny.nwk`, and
+populated `sketch_file`/`members_file`/`source_genome_dir` so a later query
+can trigger `_build_subclade(force=True)` on demand.
+
 ### B. database_index.json
+
+`database_dir` is relative to the index's own directory (`--database-dir`),
+so a nested megatree subclade/backbone reads e.g. `"632/632_1_db"` — see
+[Database Structure](#database-structure). Legacy absolute entries (from a
+database predating this, or built with a mismatched container bind) are
+repaired with `OP_database_tool.py --migrate`.
 
 ```json
 {
@@ -833,16 +967,18 @@ rm output_dir/checkpoints/database_*.flag
       "clade_taxonomy": "d__Bacteria;p__Pseudomonadota;c__Alphaproteobacteria;o__Hyphomicrobiales;f__Rhizobiaceae",
       "clade_rank": "f",
       "clade_rank_name": "family",
-      "database_dir": "/data/databases/Rhizobiaceae_db",
+      "database_dir": "Rhizobiaceae_db",
       "n_genomes": 150
     },
     {
-      "clade_name": "Enterobacteriaceae",
-      "clade_taxonomy": "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae",
-      "clade_rank": "f",
-      "clade_rank_name": "family",
-      "database_dir": "/data/databases/Enterobacteriaceae_db",
-      "n_genomes": 200
+      "clade_name": "632_1",
+      "clade_taxonomy": "d__Bacteria;p__Pseudomonadota;...;g__632",
+      "clade_rank": "g",
+      "clade_rank_name": "genus",
+      "database_dir": "632/632_1_db",
+      "n_genomes": 142,
+      "is_subclade": true,
+      "parent_taxon": "632"
     }
   ]
 }

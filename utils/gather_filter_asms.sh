@@ -9,7 +9,7 @@
 #   would (wrongly) put the *host* checkm2 on PATH, which cannot execute inside
 #   the container ("required file not found"). So only activate the env when
 #   NOT in a container, matching the guard in OrthoPhyl.sh.
-if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]]
+if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]] && [[ -z ${APPTAINER_CONTAINER+x} ]]
 then
 	source ~/.bash_profile
 	echo "To create conda env use

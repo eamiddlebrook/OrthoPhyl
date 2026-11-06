@@ -10,6 +10,8 @@ layer (partition/find_genomes/_matches_member) is tested with the mash calls
 monkeypatched.
 """
 
+import os
+
 import numpy as np
 import pytest
 from scipy.spatial.distance import squareform
@@ -246,6 +248,12 @@ class TestPartitionOrchestration:
         assert len(sketch_args) == 2
         # Query g0 assigned to exactly one subclade.
         assert "g0.fna" in manifest["query_assignments"]
+        # members_file/sketch_file recorded as bare basenames (relative to
+        # out_dir) so the manifest survives a different bind-mount mapping
+        # than at creation time -- not an absolute path baked in.
+        for sc in manifest["subclades"]:
+            assert sc["members_file"] == os.path.basename(sc["members_file"])
+            assert sc["sketch_file"] == os.path.basename(sc["sketch_file"])
 
     def test_run_mash_triangle_args(self, sp, monkeypatch):
         captured = {}

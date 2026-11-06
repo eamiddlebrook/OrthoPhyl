@@ -1,7 +1,7 @@
 # OrthoPhyl wrapper/router test suite
 
 Unit tests for the pipeline-wrapper / assembly-router layer. See
-[`../WRAPPER_UNIT_TEST_PLAN.md`](../WRAPPER_UNIT_TEST_PLAN.md) for the full plan and the
+[`../dev_plans/WRAPPER_UNIT_TEST_PLAN.md`](../dev_plans/WRAPPER_UNIT_TEST_PLAN.md) for the full plan and the
 list of known bugs these tests target.
 
 ## Setup
@@ -11,7 +11,7 @@ conda environment (`orthophyl_env.2.2.1.yml`), so if you have that activated you
 have everything:
 
 ```bash
-conda activate OrthoPhyl
+conda activate orthophyl
 pytest tests/
 ```
 
@@ -49,10 +49,34 @@ tests/
 ├── conftest.py                 # module loader (by path) + shared fixtures
 ├── requirements-test.txt
 ├── unit/
-│   ├── test_gtdb_taxonomy.py   # §1  GTDBTaxonomy (both copies, parametrized)
-│   ├── test_router.py          # §2  MultiDatabaseRouter routing decisions
-│   ├── test_db_creator.py      # §3  OP_database_tool
-│   └── test_wrapper_batch.py   # §4  wrapper orchestration (subprocess mocked)
+│   ├── test_gtdb_taxonomy.py          # GTDBTaxonomy (both copies, parametrized)
+│   ├── test_router.py                 # MultiDatabaseRouter routing decisions
+│   ├── test_router_subclade.py        # routing ties among megatree subclade DBs
+│   ├── test_db_creator.py             # OP_database_tool: create/scan/index
+│   ├── test_db_creator_subclade.py    # OP_database_tool: nested subclade/backbone layout
+│   ├── test_db_migrate.py             # OP_database_tool.py --migrate
+│   ├── test_subclade_partition.py     # MASH partitioning / manifest
+│   ├── test_subsample_genomes.py      # diverse subsample (greedy max-min)
+│   ├── test_megatree_graft.py         # backbone/subclade tree grafting
+│   ├── test_filter_redundant_genomes.py
+│   ├── test_parse_asm_metadata.py
+│   ├── test_add_releaf_version.py
+│   ├── test_taxon_assembly_gatherer.py
+│   ├── test_geo_figures.py            # --geo map/figure generation
+│   ├── test_wrapper_batch.py          # wrapper orchestration (subprocess mocked)
+│   ├── test_wrapper_taxon.py
+│   ├── test_wrapper_local_genomes.py
+│   ├── test_wrapper_megatree.py
+│   ├── test_wrapper_megatree_implication.py
+│   ├── test_wrapper_subclade.py
+│   ├── test_wrapper_gather_flags.py
+│   └── test_wrapper_geo.py
+├── integration/
+│   ├── test_orthophyl_fasttest.py
+│   ├── test_releaf_fasttest.py
+│   ├── test_megatree_lazy.py
+│   ├── test_local_genome_megatree.py
+│   └── test_hmm_assign.py
 └── fixtures/                   # static fixture data (added as suites grow)
 ```
 
@@ -66,7 +90,7 @@ which are not import packages. `conftest.py` provides a `load_module(path)` help
 
 ## Regression tests for fixed bugs (B1–B4)
 
-Bugs B1–B4 from [`../WRAPPER_UNIT_TEST_PLAN.md`](../WRAPPER_UNIT_TEST_PLAN.md) are fixed;
+Bugs B1–B4 from [`../dev_plans/WRAPPER_UNIT_TEST_PLAN.md`](../dev_plans/WRAPPER_UNIT_TEST_PLAN.md) are fixed;
 each has a guarding regression test:
 
 | Test | Bug (fixed) |
@@ -92,7 +116,7 @@ Still open (documented in the plan, not yet fixed): the `.fna`-only genome count
 
 Integration tests run the **real** `OrthoPhyl.sh` and `ReLeaf.sh` scripts on small test
 datasets, asserting correct outputs and topology. See
-[`../INTEGRATION_TEST_PLAN.md`](../INTEGRATION_TEST_PLAN.md) for the full plan.
+[`../dev_plans/INTEGRATION_TEST_PLAN.md`](../dev_plans/INTEGRATION_TEST_PLAN.md) for the full plan.
 
 ### Why integration tests?
 
@@ -111,7 +135,7 @@ Integration tests are **opt-in** (too slow for rapid iteration):
 
 ```bash
 # Requires the full OrthoPhyl conda environment
-conda activate OrthoPhyl
+conda activate orthophyl
 
 # Run integration tests explicitly
 pytest -m integration -v
@@ -149,12 +173,12 @@ Integration tests are automatically skipped if required tools are missing:
 
 Activate the OrthoPhyl conda environment to get all tools:
 ```bash
-conda activate OrthoPhyl
+conda activate orthophyl
 ```
 
 ---
 
-## Running tests in containers (Singularity/Docker)
+## Running tests in containers (Apptainer/Singularity)
 
 The test suite is **container-aware** and handles common container issues automatically:
 - Read-only `/tmp` directories
@@ -164,23 +188,16 @@ The test suite is **container-aware** and handles common container issues automa
 
 **Quick start:**
 ```bash
-# Singularity with writable temp directory
-singularity exec \
+# Apptainer/Singularity with writable temp directory
+apptainer exec \
   --bind /scratch:/scratch \
   --env TMPDIR=/scratch/pytest_tmp \
-  OrthoPhyl.sif \
-  pytest tests/unit/
-
-# Docker with volume mount
-docker run --rm \
-  -v $(pwd):/work \
-  -e TMPDIR=/tmp/pytest_tmp \
-  -w /work \
-  orthophyl:latest \
+  --pwd /opt/gits/OrthoPhyl \
+  OrthoPhyl.v3.3.sif \
   pytest tests/unit/
 ```
 
-**For complete container testing documentation, see [`CONTAINER_TESTING.md`](CONTAINER_TESTING.md)**, which covers:
+**For complete container testing documentation, see [`readmes/README_APPTAINER.md`](../readmes/README_APPTAINER.md)**, which covers:
 - Temporary directory handling (PYTEST_TMP_DIR, TMPDIR fallbacks)
 - Container detection (automatic)
 - HPC/SLURM examples

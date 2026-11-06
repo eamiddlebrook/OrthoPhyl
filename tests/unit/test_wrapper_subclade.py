@@ -354,3 +354,128 @@ class TestParseRoutingResults:
         assert entry["assembly_id"] == "q1"
         assert entry["parent_taxon"] == "Bacillus"
         assert entry["subclade_taxonomy"] == "d__Bacteria;g__Bacillus"
+
+    def test_resolves_relative_database_dir_fields_against_database_dir(
+            self, Wrapper, tmp_path):
+        """assembly_router.py's _relpath_to_database_dir writes database_dir/
+        members_file/sketch_file/source_genome_dir relative to --database-dir
+        so a --resume from a different host/container environment than where
+        routing ran still works -- _parse_routing_results must resolve them
+        back against self.database_dir."""
+        w = _make_wrapper(Wrapper, tmp_path)
+        _write_decision(w.routing_dir, 0, {
+            "pipeline": "OrthoPhyl_subclade_build", "assembly_id": "q1",
+            "assembly": str(tmp_path / "q1.fna"),
+            "subclade_name": "Bacillus_2", "parent_taxon": "Bacillus",
+            "subclade_id": 2, "database_dir": "Bacillus/Bacillus_2_db",
+            "subclade_taxonomy": "d__Bacteria;g__Bacillus",
+            "members_file": "Bacillus/Bacillus_2_db/subclade_members.txt",
+            "sketch_file": "Bacillus/Bacillus_2_db/subclade_sketch.msh",
+            "source_genome_dir": "Bacillus/Bacillus_2_db/raw",
+            "query_taxonomy": "d__Bacteria;g__Bacillus",
+        })
+
+        results = w._parse_routing_results()
+        entry = results["subclade_build_batch"]["Bacillus_2"][0]
+        assert entry["database_dir"] == str(w.database_dir / "Bacillus" / "Bacillus_2_db")
+        assert entry["members_file"] == str(
+            w.database_dir / "Bacillus" / "Bacillus_2_db" / "subclade_members.txt")
+        assert entry["sketch_file"] == str(
+            w.database_dir / "Bacillus" / "Bacillus_2_db" / "subclade_sketch.msh")
+        assert entry["source_genome_dir"] == str(
+            w.database_dir / "Bacillus" / "Bacillus_2_db" / "raw")
+
+    def test_legacy_absolute_database_dir_fields_pass_through(
+            self, Wrapper, tmp_path):
+        """A legacy absolute value (written before the relative-path fix)
+        must keep working unchanged -- Path(base) / "/abs" passes an
+        absolute operand through unchanged."""
+        w = _make_wrapper(Wrapper, tmp_path)
+        abs_db_dir = str(tmp_path / "old_mount" / "Bacillus_2_db")
+        _write_decision(w.routing_dir, 0, {
+            "pipeline": "ReLeaf", "assembly_id": "r1",
+            "assembly": str(tmp_path / "r1.fna"),
+            "matched_database": "Foo", "database_dir": abs_db_dir,
+        })
+
+        results = w._parse_routing_results()
+        assert results["releaf_batch"][0]["database_dir"] == abs_db_dir
+
+
+class TestReadMembersFile:
+    def test_none_returns_empty(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path)
+        assert w._read_members_file(None) == []
+
+    def test_empty_string_returns_empty(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path)
+        assert w._read_members_file("") == []
+
+    def test_reads_lines_stripped(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path)
+        members_file = tmp_path / "m.txt"
+        members_file.write_text("g0.fna\ng1.fna\n\n")
+        assert w._read_members_file(str(members_file)) == ["g0.fna", "g1.fna"]
+
+    def test_missing_file_raises(self, Wrapper, tmp_path):
+        """A given-but-missing path must raise, not silently return [] --
+        the caller (_build_subclade) falls back to treating the entire raw
+        genome directory as the subclade's membership on an empty list,
+        which would silently corrupt subclade boundaries."""
+        w = _make_wrapper(Wrapper, tmp_path)
+        with pytest.raises(FileNotFoundError):
+            w._read_members_file(str(tmp_path / "does_not_exist.txt"))
+
+
+class TestResolveManifestPaths:
+    def test_relative_basename_resolved_against_part_dir(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path)
+        part_dir = tmp_path / "partitions" / "Taxon"
+        part_dir.mkdir(parents=True)
+        manifest = {"subclades": [
+            {"name": "Taxon_1", "members_file": "Taxon_1.members.txt",
+             "sketch_file": "Taxon_1.msh"},
+        ]}
+        w._resolve_manifest_paths(manifest, part_dir)
+        sc = manifest["subclades"][0]
+        assert sc["members_file"] == str(part_dir / "Taxon_1.members.txt")
+        assert sc["sketch_file"] == str(part_dir / "Taxon_1.msh")
+
+    def test_legacy_absolute_missing_falls_back_to_part_dir_basename(
+            self, Wrapper, tmp_path):
+        """A legacy manifest wrote an absolute path; if that absolute path
+        no longer exists (different host/container than at creation time),
+        fall back to part_dir/<basename> -- the file was always written
+        there, only the recorded path changed."""
+        w = _make_wrapper(Wrapper, tmp_path)
+        part_dir = tmp_path / "partitions" / "Taxon"
+        part_dir.mkdir(parents=True)
+        (part_dir / "Taxon_1.members.txt").write_text("g0.fna\n")
+        manifest = {"subclades": [
+            {"name": "Taxon_1",
+             "members_file": "/old/mount/path/Taxon_1.members.txt"},
+        ]}
+        w._resolve_manifest_paths(manifest, part_dir)
+        sc = manifest["subclades"][0]
+        assert sc["members_file"] == str(part_dir / "Taxon_1.members.txt")
+
+    def test_legacy_absolute_existing_left_unchanged(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path)
+        part_dir = tmp_path / "partitions" / "Taxon"
+        part_dir.mkdir(parents=True)
+        still_there = tmp_path / "still_there.members.txt"
+        still_there.write_text("g0.fna\n")
+        manifest = {"subclades": [
+            {"name": "Taxon_1", "members_file": str(still_there)},
+        ]}
+        w._resolve_manifest_paths(manifest, part_dir)
+        sc = manifest["subclades"][0]
+        assert sc["members_file"] == str(still_there)
+
+    def test_missing_key_skipped(self, Wrapper, tmp_path):
+        w = _make_wrapper(Wrapper, tmp_path)
+        part_dir = tmp_path / "partitions" / "Taxon"
+        part_dir.mkdir(parents=True)
+        manifest = {"subclades": [{"name": "Taxon_1"}]}
+        w._resolve_manifest_paths(manifest, part_dir)  # must not raise
+        assert "members_file" not in manifest["subclades"][0]

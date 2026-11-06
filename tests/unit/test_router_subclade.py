@@ -39,44 +39,55 @@ def _assembly(tmp_path):
 
 @pytest.fixture
 def two_subclades(make_db_dir, tmp_path):
-    """Two built subclades of the same parent genus + a distant genus DB."""
+    """Two built subclades of the same parent genus + a distant genus DB.
+
+    Nested under databases/Andreesenella/, matching the real on-disk layout
+    a megatree run produces (db_dir_for in OP_database_tool.py) -- the
+    router must find these via the scan fallback's one-level-nested walk,
+    not just a flat glob.
+    """
     parent = tmp_path / "databases"
+    nested = parent / "Andreesenella"
     make_db_dir(
         clade_name="Andreesenella_1", clade_taxonomy=GENUS_TAX,
         clade_rank="g", clade_rank_name="genus", n_genomes=120,
         is_subclade=True, parent_taxon="Andreesenella", subclade_id=1,
-        built=True, parent=parent,
+        built=True, parent=nested,
     )
     make_db_dir(
         clade_name="Andreesenella_2", clade_taxonomy=GENUS_TAX,
         clade_rank="g", clade_rank_name="genus", n_genomes=90,
         is_subclade=True, parent_taxon="Andreesenella", subclade_id=2,
-        built=True, parent=parent,
+        built=True, parent=nested,
     )
     return parent
 
 
 @pytest.fixture
 def two_subclades_and_backbone(make_db_dir, tmp_path):
-    """Two built subclades PLUS the megatree backbone, all sharing GENUS_TAX."""
+    """Two built subclades PLUS the megatree backbone, all sharing GENUS_TAX.
+
+    Nested under databases/Andreesenella/, matching the real on-disk layout.
+    """
     parent = tmp_path / "databases"
+    nested = parent / "Andreesenella"
     make_db_dir(
         clade_name="Andreesenella_1", clade_taxonomy=GENUS_TAX,
         clade_rank="g", clade_rank_name="genus", n_genomes=120,
         is_subclade=True, parent_taxon="Andreesenella", subclade_id=1,
-        built=True, parent=parent,
+        built=True, parent=nested,
     )
     make_db_dir(
         clade_name="Andreesenella_2", clade_taxonomy=GENUS_TAX,
         clade_rank="g", clade_rank_name="genus", n_genomes=90,
         is_subclade=True, parent_taxon="Andreesenella", subclade_id=2,
-        built=True, parent=parent,
+        built=True, parent=nested,
     )
     make_db_dir(
         clade_name="Andreesenella", clade_taxonomy=GENUS_TAX,
         clade_rank="g", clade_rank_name="genus", n_genomes=15,
         is_backbone=True, parent_taxon="Andreesenella", built=True,
-        parent=parent,
+        parent=nested,
     )
     return parent
 
@@ -231,7 +242,7 @@ class TestMashTieBreak:
             clade_name="Andreesenella_1", clade_taxonomy=GENUS_TAX,
             clade_rank="g", clade_rank_name="genus", n_genomes=50,
             is_subclade=True, parent_taxon="Andreesenella", subclade_id=1,
-            built=True, parent=parent,
+            built=True, parent=parent / "Andreesenella",
         )
         router = Router(database_dir=parent, output_dir=tmp_path / "out")
 
@@ -328,13 +339,14 @@ class TestBuiltVsUnbuilt:
             clade_name="Andreesenella_1", clade_taxonomy=GENUS_TAX,
             clade_rank="g", clade_rank_name="genus", n_genomes=120,
             is_subclade=True, parent_taxon="Andreesenella", subclade_id=1,
-            built=True, parent=parent,
+            built=True, parent=parent / "Andreesenella",
         )
         make_db_dir(
             clade_name="Andreesenella_2", clade_taxonomy=GENUS_TAX,
             clade_rank="g", clade_rank_name="genus", n_genomes=90,
             is_subclade=True, parent_taxon="Andreesenella", subclade_id=2,
-            built=False, source_genome_dir=str(tmp_path / "raw"), parent=parent,
+            built=False, source_genome_dir=str(tmp_path / "raw"),
+            parent=parent / "Andreesenella",
         )
         router = Router(database_dir=parent, output_dir=tmp_path / "out")
 
@@ -369,13 +381,15 @@ class TestSummaryHandlesNewPipeline:
             clade_name="Andreesenella_1", clade_taxonomy=GENUS_TAX,
             clade_rank="g", clade_rank_name="genus", n_genomes=120,
             is_subclade=True, parent_taxon="Andreesenella", subclade_id=1,
-            built=False, source_genome_dir=str(tmp_path / "raw"), parent=parent,
+            built=False, source_genome_dir=str(tmp_path / "raw"),
+            parent=parent / "Andreesenella",
         )
         make_db_dir(
             clade_name="Andreesenella_2", clade_taxonomy=GENUS_TAX,
             clade_rank="g", clade_rank_name="genus", n_genomes=90,
             is_subclade=True, parent_taxon="Andreesenella", subclade_id=2,
-            built=False, source_genome_dir=str(tmp_path / "raw"), parent=parent,
+            built=False, source_genome_dir=str(tmp_path / "raw"),
+            parent=parent / "Andreesenella",
         )
         router = Router(database_dir=parent, output_dir=tmp_path / "out")
         monkeypatch.setattr(router, "_run_mash",
@@ -398,7 +412,8 @@ class TestSummaryHandlesNewPipeline:
             clade_name="Andreesenella_1", clade_taxonomy=GENUS_TAX,
             clade_rank="g", clade_rank_name="genus", n_genomes=120,
             is_subclade=True, parent_taxon="Andreesenella", subclade_id=1,
-            built=False, source_genome_dir=str(tmp_path / "raw"), parent=parent,
+            built=False, source_genome_dir=str(tmp_path / "raw"),
+            parent=parent / "Andreesenella",
         )
         router = Router(database_dir=parent, output_dir=tmp_path / "out")
         monkeypatch.setattr(router, "_run_mash",

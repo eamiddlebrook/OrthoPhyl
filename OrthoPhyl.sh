@@ -62,7 +62,7 @@ trap control_c INT
 
 # if not in a singularity or docker container, grab the "conda init" section of .bash_profile or .bashrc 
 #    and import paths to external programs and the conda environment
-if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]]
+if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]] && [[ -z ${APPTAINER_CONTAINER+x} ]]
 then
     source $HOME/.bash_profile
     source $HOME/.bashrc

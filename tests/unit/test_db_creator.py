@@ -456,3 +456,112 @@ class TestRemoveDatabases:
         assert [r["clade_name"] for r in result["removed"]] == ["Alpha"]
         assert result["removed"][0]["clade_taxonomy"] is None
         assert result["removed"][0]["n_genomes"] is None
+
+
+class TestDbDirFor:
+    def test_flat_without_parent_taxon(self, db_creator_module, tmp_path):
+        db_dir = db_creator_module.db_dir_for(tmp_path, "Escherichia")
+        assert db_dir == tmp_path / "Escherichia_db"
+
+    def test_nested_with_parent_taxon(self, db_creator_module, tmp_path):
+        db_dir = db_creator_module.db_dir_for(tmp_path, "Escherichia_1", "Escherichia")
+        assert db_dir == tmp_path / "Escherichia" / "Escherichia_1_db"
+
+    def test_sanitizes_both_names(self, db_creator_module, tmp_path):
+        db_dir = db_creator_module.db_dir_for(tmp_path, "A/B 1", "P/Q 2")
+        assert db_dir == tmp_path / "P_Q_2" / "A_B_1_db"
+
+
+class TestIterDatabaseDirs:
+    def test_finds_flat_and_nested(self, db_creator_module, make_db_dir, tmp_path):
+        out = tmp_path / "databases"
+        make_db_dir(clade_name="Flat", clade_taxonomy="d__Bacteria;g__Flat",
+                    clade_rank="g", clade_rank_name="genus", parent=out)
+        make_db_dir(clade_name="Escherichia_1", clade_taxonomy=ESCHERICHIA_TAX,
+                    clade_rank="g", clade_rank_name="genus",
+                    parent=out / "Escherichia")
+        found = sorted(p.name for p in db_creator_module.iter_database_dirs(out))
+        assert found == ["Escherichia_1_db", "Flat_db"]
+
+    def test_skips_hidden_dirs(self, db_creator_module, tmp_path):
+        out = tmp_path / "databases"
+        hidden = out / ".pipeline_runs" / "run1_db"
+        hidden.mkdir(parents=True)
+        assert list(db_creator_module.iter_database_dirs(out)) == []
+
+    def test_does_not_descend_into_db_dirs(self, db_creator_module, make_db_dir, tmp_path):
+        out = tmp_path / "databases"
+        db_dir = make_db_dir(clade_name="Flat", clade_taxonomy="d__Bacteria;g__Flat",
+                              clade_rank="g", clade_rank_name="genus", parent=out)
+        # A spuriously-nested "_db"-suffixed dir inside another _db dir must
+        # never surface -- iter_database_dirs only looks one level under
+        # output_dir itself, never inside a dir it already yielded.
+        (db_dir / "nested_db").mkdir()
+        found = list(db_creator_module.iter_database_dirs(out))
+        assert found == [db_dir]
+
+    def test_missing_output_dir_yields_nothing(self, db_creator_module, tmp_path):
+        assert list(db_creator_module.iter_database_dirs(tmp_path / "nope")) == []
+
+    def test_does_not_require_config_present(self, db_creator_module, tmp_path):
+        out = tmp_path / "databases"
+        configless = out / "NoConfig_db"
+        configless.mkdir(parents=True)
+        assert list(db_creator_module.iter_database_dirs(out)) == [configless]
+
+
+class TestFindDatabaseDir:
+    def test_finds_flat(self, db_creator_module, make_db_dir, tmp_path):
+        out = tmp_path / "databases"
+        db_dir = make_db_dir(clade_name="Flat", clade_taxonomy="d__Bacteria;g__Flat",
+                              clade_rank="g", clade_rank_name="genus", parent=out)
+        assert db_creator_module.find_database_dir(out, "Flat") == db_dir
+
+    def test_finds_nested(self, db_creator_module, make_db_dir, tmp_path):
+        out = tmp_path / "databases"
+        db_dir = make_db_dir(clade_name="Escherichia_1", clade_taxonomy=ESCHERICHIA_TAX,
+                              clade_rank="g", clade_rank_name="genus",
+                              parent=out / "Escherichia")
+        assert db_creator_module.find_database_dir(out, "Escherichia_1") == db_dir
+
+    def test_missing_returns_none(self, db_creator_module, tmp_path):
+        out = tmp_path / "databases"
+        out.mkdir()
+        assert db_creator_module.find_database_dir(out, "Nope") is None
+
+    def test_requires_config_present(self, db_creator_module, tmp_path):
+        out = tmp_path / "databases"
+        (out / "Partial_db").mkdir(parents=True)
+        assert db_creator_module.find_database_dir(out, "Partial") is None
+
+
+class TestCreateDatabaseForRunNesting:
+    def test_subclade_created_nested_and_index_entry_relative(
+            self, db_creator_module, orthophyl_run_skeleton, tmp_path):
+        run = orthophyl_run_skeleton(n_genomes=4)
+        out = tmp_path / "databases"
+        out.mkdir()
+        db_dir = db_creator_module.create_database_for_run(
+            orthophyl_dir=run, clade_taxonomy=ESCHERICHIA_TAX,
+            clade_name="Escherichia_1", output_dir=out,
+            subclade_meta={"is_subclade": True, "parent_taxon": "Escherichia",
+                           "subclade_id": 1},
+        )
+        assert db_dir == out / "Escherichia" / "Escherichia_1_db"
+
+        all_dbs = db_creator_module._scan_all_databases_for_index(out)
+        db_creator_module.create_master_index(all_dbs, out)
+        index = json.loads((out / "database_index.json").read_text())
+        entry = next(e for e in index["databases"] if e["clade_name"] == "Escherichia_1")
+        assert entry["database_dir"] == os.path.join("Escherichia", "Escherichia_1_db")
+
+    def test_non_subclade_stays_flat(
+            self, db_creator_module, orthophyl_run_skeleton, tmp_path):
+        run = orthophyl_run_skeleton(n_genomes=4)
+        out = tmp_path / "databases"
+        out.mkdir()
+        db_dir = db_creator_module.create_database_for_run(
+            orthophyl_dir=run, clade_taxonomy=ESCHERICHIA_TAX,
+            clade_name="Escherichia", output_dir=out,
+        )
+        assert db_dir == out / "Escherichia_db"

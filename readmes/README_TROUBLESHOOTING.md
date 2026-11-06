@@ -126,11 +126,11 @@ ls -R databases/{database}_db/current/orthophyl_run/
 
 # Test ReLeaf manually
 ./ReLeaf.sh \
-    --store databases/{database}_db/current/orthophyl_run \
-    --input_genomes test_genomes/ \
+    -s databases/{database}_db/current/orthophyl_run \
+    -g test_genomes/ \
     -t 8 \
-    --tree_method iqtree \
-    --TREE_DATA CDS
+    -p iqtree \
+    -o CDS
 ```
 
 ---
@@ -206,6 +206,68 @@ grep {assembly_id} output_dir/02_orthophyl_novel/orthophyl_runs/{taxon}/annots_p
 # 1. Running separate OrthoPhyl analysis
 # 2. Using broader taxonomic group for download
 ```
+
+---
+
+#### 9. Router loads 0 databases (worked fine before, moved host/container)
+
+**Cause**: `database_index.json` and/or individual `database_config.json`
+files store absolute paths from the environment the database was built in
+(e.g. `/databases/...` from inside a container bind mount). On the host, or
+under a different bind, those absolute paths don't exist, so every entry is
+silently dropped. This affects any database built before path-portability was
+added, or built with a bind-mount path that doesn't match where you're now
+reading it from.
+
+**Solutions**:
+```bash
+# Preview what would change (no writes)
+python assembly_router/OP_database_tool.py \
+    --migrate --output-dir databases/ --dry-run
+
+# If the old mount prefix isn't inferred correctly, give it explicitly
+python assembly_router/OP_database_tool.py \
+    --migrate --output-dir databases/ --strip-prefix /databases --dry-run
+
+# Run it for real once the dry-run output looks right
+python assembly_router/OP_database_tool.py \
+    --migrate --output-dir databases/
+```
+
+`--migrate` rewrites every stored path (index entries, `sketch_file`,
+`members_file`, `source_genome_dir`, `orthophyl_source`, the `orthophyl_run`
+symlink target, `orthophyl_runs.tsv`) relative to each database's own
+directory, and moves megatree subclade/backbone databases into the nested
+`<Taxon>/<Taxon>_N_db` layout if they aren't already there. It reports (but
+does not delete) any dangling link it finds — see the next entry. It's safe
+to re-run; a second pass over an already-migrated tree is a no-op.
+
+---
+
+#### 10. Dangling `orthophyl_run` symlink inside a database
+
+**Cause**: a database's `orthophyl_run` link (or `current/orthophyl_run`)
+points into a `.pipeline_runs/<run>/` directory that has since been deleted.
+OrthoPhyl databases don't copy their HMMs/alignments/trees into the database
+directory — they're read through this symlink — so deleting an old pipeline
+run directory breaks every database that still points at it.
+
+**Debug**:
+```bash
+# Find dangling links under a database tree
+find databases/ -xtype l -name orthophyl_run
+
+# OP_database_tool.py --migrate also reports these (without deleting them)
+python assembly_router/OP_database_tool.py --migrate --output-dir databases/ --dry-run
+```
+
+**Solutions**:
+- If the original `.pipeline_runs/<run>/` directory still exists elsewhere, re-point the symlink at it.
+- Otherwise the database is unrecoverable; remove it:
+```bash
+python assembly_router/OP_database_tool.py --remove {database_name} --output-dir databases/
+```
+- Going forward, don't delete `.pipeline_runs/<run>/` directories that still have databases pointing at them.
 
 ---
 

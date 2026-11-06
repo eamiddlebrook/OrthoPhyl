@@ -127,15 +127,15 @@ CLEAN_N_COPY_GENOMES () {
 	# make symbolic links for input genomes in $genome_dir
 	if compgen -G "$input_genomes/*.fna" > /dev/null
 	then
-			ln -s $input_genomes/*.fna $genome_dir/ # make links to input genome dir (should switch to cp'n all the files of m$
+			ln -sr $input_genomes/*.fna $genome_dir/ # make links to input genome dir (should switch to cp'n all the files of m$
 	fi
 	if compgen -G "$input_genomes/*.fa" > /dev/null
 	then
-			ln -s $input_genomes/*.fa $genome_dir/
+			ln -sr $input_genomes/*.fa $genome_dir/
 	fi
 	if compgen -G "$input_genomes/*.fasta" > /dev/null
 		then
-				ln -s $input_genomes/*.fasta $genome_dir/
+				ln -sr $input_genomes/*.fasta $genome_dir/
 		fi
 	cd $genome_dir || exit
 	#remove parentheses from genomes names

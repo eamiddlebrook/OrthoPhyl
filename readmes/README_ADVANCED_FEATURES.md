@@ -228,15 +228,17 @@ python assembly_router/add_releaf_version.py \
 
 **Override for New OrthoPhyl Runs**:
 
-Edit `OrthoPhyl.sh` command in wrapper (line 695-696):
+Edit the `OrthoPhyl.sh` command-building sites in `orthophyl_pipeline_wrapper.py`
+(there are two: `~line 1008` for batch/taxon novel-taxon builds, `~line 2662` for the
+megatree backbone/subclade builds). `-o` takes `CDS`, `PROT`, or `BOTH` (uppercase):
 ```python
 cmd = [
     str(self.orthophyl_script),
     '-g', str(input_dir),
     '-s', str(output_dir),
     '-t', str(self.threads),
-    '-p', 'fasttree',  # Change to 'fasttree'
-    '-o', 'protein'    # Change to 'protein'
+    '-p', 'fasttree',  # Change tree method
+    '-o', 'PROT'       # Change omics data type (CDS, PROT, or BOTH)
 ]
 ```
 
@@ -384,7 +386,7 @@ python orthophyl_pipeline_wrapper.py \
 # Result: 50 new genomes added via ReLeaf, database updated to 550 genomes
 ```
 
-**See Also**: `TAXON_MODE_GUIDE.md` for complete documentation
+**See Also**: [`README_USAGE.md`](README_USAGE.md) for complete taxon-mode documentation
 
 ---
 
@@ -653,6 +655,59 @@ want the old behavior back.
   related `--megatree-lazy` zero-query empty-backbone fix (every subclade
   lazily registered in pure `--taxon` create mode still contributes backbone
   reps, so the backbone never builds from zero genomes).
+
+---
+
+### 12. Geographic Figures (`--geo`)
+
+Auto-generates a country-annotated tree, a world map of sample origins, and
+lines joining the top-K closest cross-country genome pairs by patristic
+distance (closer pairs drawn darker). Outputs land under
+`<results-dir>/figures/` as `<label>_geo_tree.<fmt>`, `<label>_geo_map.<fmt>`,
+`<label>_geo_pairs.tsv`, and `<label>_geo_countries.tsv`. Figure generation
+is non-fatal (a failure logs a warning and the run still succeeds); a
+missing `matplotlib` is checked fatally at startup, before any compute.
+
+**Query highlighting.** In batch mode (`--input`), every assembly that was
+routed this run (whether placed via ReLeaf, built as a new OrthoPhyl taxon,
+or triggering a subclade build) is highlighted on the figures automatically
+— no flag needed. A highlighted leaf gets a bold red, ★-prefixed label and a
+light row band on the tree, and a red ★ marker on the maps. Because several
+genomes can share one country, the ★ marker is drawn at a deliberate,
+deterministic offset from the country's true point (connected back to it by
+a thin dashed leader line) so same-country distance lines stay visible
+instead of collapsing into the normal declumping jitter.
+
+When at least one leaf is highlighted, two extra outputs are produced:
+- `<label>_geo_query_map.<fmt>`: a single combined map (all queries together)
+  drawing a line from each highlighted genome's offset ★ to its top-K
+  nearest genomes by patristic distance — any country, including its own —
+  colored by distance (closer = darker) with a colorbar.
+- `<label>_geo_query_neighbors.tsv`: one row per drawn (query, neighbor) pair
+  — `query, neighbor, query_country, neighbor_country, same_country,
+  distance, rank`.
+- `<label>_geo_query_countries.tsv`: one row per (query, country) pair found
+  anywhere in the tree (not just the top-K) — `query, country, n_genomes,
+  min_distance, median_distance, nearest_genome` — so you can see how far a
+  query is from a country even if none of that country's genomes made the
+  top-K.
+
+Queries with an unresolved/Unknown country still get tree highlighting and
+TSV rows but are skipped on the maps (logged as a warning), since there's no
+point to place them.
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--geo` | Generate the geo tree + map figures after each published tree. | False |
+| `--geo-tsv` | `genome_id<TAB>location` TSV. **Required** with `--genome-dir` (no NCBI metadata exists to fall back on); optional elsewhere, where it's merged on top of (overrides) NCBI `geo_loc_name` metadata. Implies `--geo`. | - |
+| `--geo-top-k` | Number of closest cross-country genome pairs to draw lines for. Implies `--geo` if non-default. | 100 |
+| `--geo-format` | Output image format (`png`/`svg`/`pdf`). | `png` |
+| `--geo-highlight` | Extra genomes to highlight, as a comma-separated ID list or a path to a file with one ID per line (same list-or-file convention as `--must-keep`). Merged with the routed queries in batch mode; this is the only way to get highlighting in `--taxon`/`--genome-dir` modes, which have no routed queries. Implies `--geo`. | - |
+| `--geo-query-top-k` | Number of nearest-neighbor lines to draw per highlighted genome on the query map. `0` disables the query map and its TSVs. Implies `--geo` if non-default. | 25 |
+
+On the NCBI-download path, country data comes for free from each downloaded
+assembly's `geo_loc_name` metadata; `--genome-dir` mode has no such metadata,
+so `--geo-tsv` is mandatory there.
 
 ---
 

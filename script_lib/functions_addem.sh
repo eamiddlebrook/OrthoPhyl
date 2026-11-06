@@ -421,7 +421,7 @@ RUN_ML_SUPERMATRIX_WORKFLOW () {
     
     for SCO_set in ${SCO_sets[@]}
     do
-        ln -s $store/phylo_current/$SCO_set $addasm_dir/$SCO_set
+        ln -sfr $store/phylo_current/$SCO_set $addasm_dir/$SCO_set
         if [ ! -f $store/phylo_current/$SCO_set ]
         then
             echo "WARNING: SCO_sets indicate a file at $store/phylo_current/$SCO_set that doesnt exist"

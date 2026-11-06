@@ -83,6 +83,66 @@ def relative_symlink(link: Path, target: Path) -> None:
     link.symlink_to(rel)
 
 
+def db_dir_for(output_dir: Path, clade_name: str, parent_taxon: Optional[str] = None) -> Path:
+    """Compute the on-disk directory for a database, nested or flat.
+
+    A megatree subclade/backbone DB (parent_taxon set) lives at
+    <output_dir>/<parent_taxon>/<safe_name>_db so a taxon's backbone and all
+    its subclades group together instead of sitting as unrelated-looking
+    siblings next to every other top-level taxon DB. Everything else stays
+    flat at <output_dir>/<safe_name>_db, unchanged from before nesting existed.
+    """
+    safe_name = clade_name.replace(' ', '_').replace('/', '_')
+    if parent_taxon:
+        safe_parent = parent_taxon.replace(' ', '_').replace('/', '_')
+        return output_dir / safe_parent / f"{safe_name}_db"
+    return output_dir / f"{safe_name}_db"
+
+
+def iter_database_dirs(output_dir: Path):
+    """Yield every *_db directory under output_dir, flat or one level nested.
+
+    Looks at output_dir/*_db (flat databases) plus output_dir/<X>/*_db for
+    any <X> that isn't hidden and doesn't itself end in "_db" (so a nested
+    subclade dir is never mistaken for a parent-taxon grouping dir, and
+    hidden dirs like .pipeline_runs are never descended into). Matches
+    purely on naming/location -- it does NOT require database_config.json
+    to exist, mirroring the plain output_dir.glob("*_db") this replaces
+    (some callers, e.g. the wrapper's ReLeaf-tree collection, care about a
+    DB dir's other contents even when its config is missing; callers that
+    DO need the config already tolerate a missing/unreadable one via
+    try/except around the open() call).
+    """
+    if not output_dir.exists():
+        return
+    yield from sorted(output_dir.glob("*_db"))
+    for sub in sorted(output_dir.iterdir()):
+        if not sub.is_dir() or sub.name.startswith('.') or sub.name.endswith('_db'):
+            continue
+        yield from sorted(sub.glob("*_db"))
+
+
+def find_database_dir(output_dir: Path, clade_name: str) -> Optional[Path]:
+    """Locate an existing database's directory, flat or nested.
+
+    Tries the flat path first (the common case, and where non-megatree DBs
+    always live), then falls back to a one-level scan for <parent>/<safe>_db.
+    """
+    safe_name = clade_name.replace(' ', '_').replace('/', '_')
+    flat = output_dir / f"{safe_name}_db"
+    if flat.exists() and (flat / "database_config.json").exists():
+        return flat
+    if not output_dir.exists():
+        return None
+    for sub in sorted(output_dir.iterdir()):
+        if not sub.is_dir() or sub.name.startswith('.') or sub.name.endswith('_db'):
+            continue
+        candidate = sub / f"{safe_name}_db"
+        if candidate.exists() and (candidate / "database_config.json").exists():
+            return candidate
+    return None
+
+
 class GTDBTaxonomy:
     """Parse GTDB taxonomy strings."""
     
@@ -338,16 +398,11 @@ def validate_orthophyl_run(orthophyl_dir: Path) -> Dict:
 def database_exists(clade_name: str, output_dir: Path) -> Optional[Path]:
     """
     Check if database already exists for this clade.
-    
+
     Returns:
         Path to existing database, or None
     """
-    safe_name = clade_name.replace(' ', '_').replace('/', '_')
-    db_dir = output_dir / f"{safe_name}_db"
-    
-    if db_dir.exists() and (db_dir / "database_config.json").exists():
-        return db_dir
-    return None
+    return find_database_dir(output_dir, clade_name)
 
 
 def create_database_for_run(
@@ -445,10 +500,13 @@ def create_database_for_run(
     
     logger.info(f"  ✓ Clade rank: {tax.get_rank_name(clade_rank)}")
     
-    # Create database directory
-    safe_name = clade_name.replace(' ', '_').replace('/', '_')
-    db_dir = output_dir / f"{safe_name}_db"
-    
+    # Create database directory. Megatree subclade/backbone DBs nest under
+    #   their parent taxon's dir; everything else stays flat (db_dir_for).
+    sm_for_path = subclade_meta or {}
+    nest_under = sm_for_path.get("parent_taxon") if (
+        sm_for_path.get("is_subclade") or sm_for_path.get("is_backbone")) else None
+    db_dir = db_dir_for(output_dir, clade_name, nest_under)
+
     if force and db_dir.exists():
         logger.info(f"  ↻ Removing existing database (--force)")
         shutil.rmtree(db_dir)
@@ -467,7 +525,11 @@ def create_database_for_run(
         "clade_taxonomy": clade_taxonomy,
         "clade_rank": clade_rank,
         "clade_rank_name": tax.get_rank_name(clade_rank),
-        "orthophyl_source": str(orthophyl_dir.resolve()),
+        # Relative to db_dir, same convention as source_genome_dir/sketch_file/
+        # members_file below, so it survives a different bind-mount mapping
+        # than at creation time (see relative_symlink). Resolved back to
+        # absolute on load by assembly_router.py's _load_single_database.
+        "orthophyl_source": os.path.relpath(orthophyl_dir.resolve(), db_dir.resolve()),
         "n_genomes": validation['n_genomes'],
         "has_hmms": validation['has_hmms'],
         "has_trees": validation['has_trees'],
@@ -678,17 +740,16 @@ def get_existing_databases(output_dir: Path) -> Set[str]:
         Set of clade names
     """
     existing = set()
-    
-    for db_dir in output_dir.glob("*_db"):
+
+    for db_dir in iter_database_dirs(output_dir):
         config_file = db_dir / "database_config.json"
-        if config_file.exists():
-            try:
-                with open(config_file, 'r') as f:
-                    config = json.load(f)
-                existing.add(config['clade_name'])
-            except:
-                pass
-    
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            existing.add(config['clade_name'])
+        except:
+            pass
+
     return existing
 
 
@@ -779,10 +840,8 @@ def _scan_all_databases_for_index(output_dir: Path) -> List[Dict]:
     names, for a different purpose).
     """
     all_dbs = []
-    for db_dir in output_dir.glob("*_db"):
+    for db_dir in iter_database_dirs(output_dir):
         config_file = db_dir / "database_config.json"
-        if not config_file.exists():
-            continue
         try:
             with open(config_file) as f:
                 config = json.load(f)
@@ -879,24 +938,34 @@ def create_master_index(databases: List[Dict], output_dir: Path):
 def parse_input_table(input_file: Path) -> List[Dict]:
     """
     Parse input TSV: clade_name<TAB>orthophyl_dir<TAB>clade_taxonomy
+
+    A relative orthophyl_dir is resolved against the TSV's own directory
+    (the wrapper's _create_database_entry writes orthophyl_runs.tsv this
+    way, relative to --database-dir, so the TSV survives a different
+    bind-mount mapping than at write time). An absolute path is used as-is,
+    for backward compatibility with pre-existing TSVs.
     """
     runs = []
-    
+    input_file = Path(input_file)
+    tsv_dir = input_file.resolve().parent
+
     with open(input_file, 'r') as f:
         for line_num, line in enumerate(f, 1):
             if line.startswith('#') or not line.strip():
                 continue
-            
+
             if line_num == 1 and 'clade' in line.lower():
                 continue
-            
+
             fields = line.strip().split('\t')
             if len(fields) < 3:
                 logger.warning(f"Line {line_num}: expected 3 fields, got {len(fields)}. Skipping.")
                 continue
-            
+
             clade_name = fields[0].strip()
             orthophyl_dir = Path(fields[1].strip())
+            if not orthophyl_dir.is_absolute():
+                orthophyl_dir = tsv_dir / orthophyl_dir
             clade_taxonomy = fields[2].strip()
             
             if not clade_name or not clade_taxonomy:
@@ -911,6 +980,255 @@ def parse_input_table(input_file: Path) -> List[Dict]:
     
     logger.info(f"Parsed {len(runs)} entries from {input_file}")
     return runs
+
+
+def _infer_strip_prefix(output_dir: Path) -> Optional[str]:
+    """Infer an old container mount prefix (e.g. "/databases") from
+    database_index.json, for --migrate.
+
+    database_index.json has stored database_dir relative to output_dir since
+    commit 852ddd8; a DB directory created before that commit still has an
+    absolute, container-local path baked into its index entry (and several
+    config path fields). If an entry's database_dir is absolute and does not
+    exist as given, but output_dir/<basename of that path> does exist, the
+    entry's parent directory is that old prefix.
+    """
+    index_file = output_dir / "database_index.json"
+    if not index_file.exists():
+        return None
+    try:
+        with open(index_file) as f:
+            index = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    for entry in index.get("databases", []):
+        raw = entry.get("database_dir")
+        if not raw:
+            continue
+        p = Path(raw)
+        if p.is_absolute() and not p.exists():
+            candidate = output_dir / p.name
+            if candidate.exists():
+                return str(p.parent)
+    return None
+
+
+def _migrate_remap(value: Optional[str], strip_prefix: Optional[str],
+                    output_dir: Path) -> Optional[str]:
+    """Rewrite a value living under strip_prefix to live under output_dir
+    instead; pass through unchanged otherwise (including None/no prefix)."""
+    if not value or not strip_prefix:
+        return value
+    if value == strip_prefix:
+        return str(output_dir)
+    prefix_with_sep = strip_prefix.rstrip(os.sep) + os.sep
+    if value.startswith(prefix_with_sep):
+        return str(output_dir / value[len(prefix_with_sep):])
+    return value
+
+
+def _migrate_resolve_field(value: Optional[str], db_dir: Path,
+                            strip_prefix: Optional[str],
+                            output_dir: Path) -> Optional[Path]:
+    """Resolve a config path field to a Path anchored at db_dir's CURRENT
+    (pre-move) location -- handles both the current relative-to-db_dir
+    convention and a legacy absolute/mount-prefixed value.
+
+    A value that was absolute BEFORE remapping is anchored at output_dir by
+    _migrate_remap (which may itself be relative to cwd, e.g. in tests) --
+    it must not then be re-joined with db_dir, or the result double-nests
+    under db_dir and silently fails every exists() check below.
+    """
+    if not value:
+        return None
+    was_absolute = Path(value).is_absolute()
+    remapped = _migrate_remap(value, strip_prefix, output_dir)
+    p = Path(remapped)
+    if not was_absolute:
+        p = db_dir / p
+    return p
+
+
+def _migrate_relativize_runs_tsv(output_dir: Path, strip_prefix: Optional[str]) -> None:
+    """Rewrite orthophyl_runs.tsv's orthophyl_dir column (field 2) relative
+    to output_dir, remapping any legacy mount-prefixed absolute path first."""
+    tsv_path = output_dir / "orthophyl_runs.tsv"
+    if not tsv_path.exists():
+        return
+    lines = tsv_path.read_text().splitlines()
+    new_lines = []
+    for line in lines:
+        if line.startswith('#') or not line.strip():
+            new_lines.append(line)
+            continue
+        fields = line.split('\t')
+        if len(fields) >= 2:
+            remapped = _migrate_remap(fields[1], strip_prefix, output_dir)
+            p = Path(remapped)
+            if p.is_absolute():
+                try:
+                    p = Path(os.path.relpath(p, output_dir.resolve()))
+                except ValueError:
+                    pass
+            fields[1] = str(p)
+        new_lines.append('\t'.join(fields))
+    tsv_path.write_text('\n'.join(new_lines) + ('\n' if new_lines else ''))
+
+
+def migrate_databases(output_dir: Path, strip_prefix: Optional[str] = None,
+                       dry_run: bool = True) -> Dict:
+    """One-off repair for a pre-nesting / pre-portability database directory.
+
+    Three problems fixed together (the second needs paths the first would
+    otherwise move out from under, so both are planned from each DB's
+    config before anything is touched on disk):
+      1. A legacy absolute container mount prefix (e.g. "/databases/...",
+         baked into configs/index written before commit 852ddd8) is
+         remapped back to a real path under output_dir -- inferred from
+         database_index.json unless strip_prefix is given explicitly.
+      2. Megatree subclade/backbone DBs (is_subclade/is_backbone +
+         parent_taxon) are moved from the old flat layout into the nested
+         <output_dir>/<parent_taxon>/<name>_db layout.
+      3. Every per-DB path field (sketch_file, members_file, metadata_file,
+         source_genome_dir, orthophyl_source) is rewritten relative to the
+         DB's (possibly new) db_dir, and orthophyl_run is re-created with
+         relative_symlink -- a move changes the correct relative offset
+         even when the symlink's target hasn't itself moved.
+
+    Dangling orthophyl_run targets (the source .pipeline_runs dir was
+    deleted) are reported, never deleted or skipped -- the DB's own config/
+    sketch/tree still stand alone and are still migrated; remove the DB
+    afterwards with --remove --yes if it's unusable without its run dir.
+
+    dry_run=True (the default) computes and reports every move/rewrite
+    without changing anything on disk. Idempotent: a second run against
+    already-migrated DBs reports no moves and no changes.
+
+    Returns {'strip_prefix', 'dry_run', 'moved': [...], 'rewritten': [...],
+    'dangling_links': [...]}.
+    """
+    output_dir = Path(output_dir)
+    if strip_prefix is None:
+        strip_prefix = _infer_strip_prefix(output_dir)
+    logger.info(f"  Mount prefix to strip: {strip_prefix or '(none inferred)'}")
+
+    report = {'strip_prefix': strip_prefix, 'dry_run': dry_run,
+              'moved': [], 'rewritten': [], 'dangling_links': []}
+
+    PATH_FIELDS = ('sketch_file', 'members_file', 'metadata_file',
+                   'source_genome_dir', 'orthophyl_source')
+
+    # Plan everything from each DB's CURRENT (pre-move) location first.
+    plans = []
+    for db_dir in list(iter_database_dirs(output_dir)):
+        config_file = db_dir / "database_config.json"
+        try:
+            with open(config_file) as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"  ⊙ Skipping {db_dir}: unreadable config ({e})")
+            continue
+
+        resolved = {
+            field: _migrate_resolve_field(config.get(field), db_dir,
+                                           strip_prefix, output_dir)
+            for field in PATH_FIELDS
+        }
+
+        link = db_dir / "orthophyl_run"
+        link_target = None
+        if link.is_symlink():
+            raw_target = os.readlink(link)
+            if os.path.isabs(raw_target):
+                link_target = Path(_migrate_remap(raw_target, strip_prefix, output_dir))
+            else:
+                link_target = (link.parent / raw_target).resolve()
+
+        nest_under = config.get("parent_taxon") if (
+            config.get("is_subclade") or config.get("is_backbone")) else None
+        new_db_dir = db_dir_for(output_dir, config.get('clade_name', db_dir.name),
+                                 nest_under)
+
+        plans.append({
+            'db_dir': db_dir, 'new_db_dir': new_db_dir, 'config': config,
+            'resolved': resolved, 'link_target': link_target,
+        })
+
+    for plan in plans:
+        db_dir, new_db_dir = plan['db_dir'], plan['new_db_dir']
+        clade_name = plan['config'].get('clade_name', db_dir.name)
+
+        if db_dir != new_db_dir:
+            report['moved'].append({'clade_name': clade_name,
+                                     'from': str(db_dir), 'to': str(new_db_dir)})
+            prefix = "[DRY RUN] Would move" if dry_run else "Moving"
+            logger.info(f"  {prefix} {db_dir} -> {new_db_dir}")
+            if not dry_run:
+                new_db_dir.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(db_dir), str(new_db_dir))
+
+        changes = {}
+        for field, abs_path in plan['resolved'].items():
+            if abs_path is None:
+                continue
+            # A field pointing inside db_dir (e.g. sketch_file, copied in at
+            # DB creation) moves along with it, so its CURRENT location by
+            # the time this runs (in a live pass, db_dir may already have
+            # been moved to new_db_dir above) is under new_db_dir, not
+            # abs_path. Compare un-resolved (abs_path's db_dir-relative
+            # fields were built as a literal db_dir / p join, never
+            # resolve()'d) so this stays a pure string computation and
+            # doesn't need db_dir to still exist on disk.
+            try:
+                rel_to_old = abs_path.relative_to(db_dir)
+                final_abs = new_db_dir / rel_to_old
+            except ValueError:
+                final_abs = abs_path
+            if final_abs.exists():
+                new_val = os.path.relpath(final_abs.resolve(), new_db_dir.resolve())
+            else:
+                new_val = plan['config'].get(field)
+            if new_val != plan['config'].get(field):
+                changes[field] = new_val
+
+        link_target = plan['link_target']
+        if link_target is not None and not link_target.exists():
+            report['dangling_links'].append({
+                'clade_name': clade_name, 'db_dir': str(new_db_dir),
+                'target': str(link_target),
+            })
+
+        if changes or (link_target is not None and link_target.exists()):
+            report['rewritten'].append({'clade_name': clade_name,
+                                         'db_dir': str(new_db_dir),
+                                         'changes': changes})
+
+        if dry_run:
+            continue
+
+        if changes:
+            plan['config'].update(changes)
+            with open(new_db_dir / "database_config.json", 'w') as f:
+                json.dump(plan['config'], f, indent=2)
+
+        if link_target is not None and link_target.exists():
+            new_link = new_db_dir / "orthophyl_run"
+            # Re-create unconditionally: a move changes the correct relative
+            # offset even when the target itself hasn't changed.
+            if new_link.exists() or new_link.is_symlink():
+                new_link.unlink()
+            relative_symlink(new_link, link_target)
+        elif link_target is not None:
+            logger.warning(f"  ⚠ Dangling orthophyl_run target for "
+                            f"{clade_name}: {link_target} (left as-is)")
+
+    if not dry_run:
+        _migrate_relativize_runs_tsv(output_dir, strip_prefix)
+        all_dbs = _scan_all_databases_for_index(output_dir)
+        if all_dbs:
+            create_master_index(all_dbs, output_dir)
+
+    return report
 
 
 def main():
@@ -1018,7 +1336,52 @@ Input Format (TSV):
                              'database directories and refreshes the master index. '
                              'Has no effect without --remove.')
 
+    # One-off repair for a pre-nesting / pre-portability database directory.
+    parser.add_argument('--migrate', action='store_true',
+                        help='Repair an existing database directory in place: '
+                             'remap a legacy absolute container mount prefix '
+                             'back to a real path, move megatree subclade/'
+                             'backbone DBs into the nested <parent>/<name>_db '
+                             'layout, and rewrite path fields relative to '
+                             'each DB. Cannot be combined with --input, '
+                             '--single-clade, or --remove.')
+    parser.add_argument('--strip-prefix', metavar='PREFIX',
+                        help='Old mount prefix to strip during --migrate '
+                             '(e.g. "/databases"). If omitted, inferred from '
+                             'database_index.json.')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='With --migrate, print every move/rewrite '
+                             'without changing anything on disk.')
+
     args = parser.parse_args()
+
+    if args.migrate and (args.input or args.single_clade or args.remove):
+        parser.error("--migrate cannot be combined with --input, --single-clade, or --remove")
+    if args.strip_prefix and not args.migrate:
+        parser.error("--strip-prefix only applies to --migrate")
+    if args.dry_run and not args.migrate:
+        parser.error("--dry-run only applies to --migrate")
+    if args.migrate:
+        report = migrate_databases(Path(args.output_dir),
+                                     strip_prefix=args.strip_prefix,
+                                     dry_run=args.dry_run)
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info(f"MIGRATION {'PREVIEW (dry run)' if report['dry_run'] else 'COMPLETE'}")
+        logger.info("=" * 70)
+        logger.info(f"Moved: {len(report['moved'])}")
+        for m in report['moved']:
+            logger.info(f"  - {m['clade_name']}: {m['from']} -> {m['to']}")
+        logger.info(f"Rewritten: {len(report['rewritten'])}")
+        for r in report['rewritten']:
+            if r['changes']:
+                logger.info(f"  - {r['clade_name']} ({r['db_dir']}): {r['changes']}")
+        if report['dangling_links']:
+            logger.warning(f"Dangling orthophyl_run links (left in place): "
+                            f"{len(report['dangling_links'])}")
+            for d in report['dangling_links']:
+                logger.warning(f"  - {d['clade_name']} ({d['db_dir']}) -> {d['target']}")
+        return 0
 
     if args.remove and (args.input or args.single_clade):
         parser.error("--remove cannot be combined with --input or --single-clade")

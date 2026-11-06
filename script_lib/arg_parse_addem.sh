@@ -18,9 +18,14 @@ Optional:
 	i.e. -p \"fasttree iqtree astral\"
 	Default: Will be taked from trees available in storage_dir
 -o|--omics  "omics" data to use for tree building ([CDS], PROT, BOTH)
-	for divergent sequences, it is good to compare protein trees to 
+	for divergent sequences, it is good to compare protein trees to
 	nucleotide trees to identify artifacts of saturation (long branch attraction)
 	Default: Will be taked from trees available in storage_dir
+-m|--min_frac_orthos  Minimum fraction of total taxa per orthogroup to consider it for the relaxed SCO dataset.
+	Expects a float from 0-1
+	A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
+-x|--trimal_params  trimal paramerter string (in double \"quotes\")
+-T|--test  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast,TESTER_fasttest)
 -h|--help  display a description and a super useful usage message
 "
 }

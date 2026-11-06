@@ -750,7 +750,7 @@ class PipelineWrapper:
     def _create_initial_databases(self):
         """Create initial databases from orthophyl_runs.tsv."""
         cmd = [
-            'python', str(self.database_creator),
+            sys.executable, str(self.database_creator),
             '--input', str(self.orthophyl_runs_tsv),
             '--output-dir', str(self.database_dir)
         ]
@@ -780,7 +780,7 @@ class PipelineWrapper:
         
         # Build command
         cmd = [
-            'python', str(self.assembly_router),
+            sys.executable, str(self.assembly_router),
             '--batch', str(self.input_file),
             '--database-dir', str(self.database_dir),
             '--output-dir', str(self.routing_dir),
@@ -838,6 +838,19 @@ class PipelineWrapper:
 
         return routing_results
 
+    def _resolve_against_database_dir(self, value: Optional[str]) -> Optional[str]:
+        """Resolve a routing-JSON path field against self.database_dir.
+
+        assembly_router.py's _relpath_to_database_dir writes database_dir/
+        members_file/sketch_file/source_genome_dir relative to --database-dir
+        so a --resume from a different host/container environment than where
+        routing ran still works; Path(base) / "/abs" passes an absolute
+        legacy value through unchanged.
+        """
+        if not value:
+            return value
+        return str(self.database_dir / value)
+
     def _parse_routing_results(self) -> Dict:
         """Parse routing decision JSON files."""
         releaf_batch = []
@@ -866,7 +879,7 @@ class PipelineWrapper:
                     'assembly_id': assembly_id,
                     'assembly_path': decision['assembly'],
                     'database': decision['matched_database'],
-                    'database_dir': decision['database_dir'],
+                    'database_dir': self._resolve_against_database_dir(decision['database_dir']),
                     'tree_method': decision.get('tree_method', 'iqtree'),
                     'tree_data': decision.get('tree_data', 'CDS')
                 })
@@ -884,11 +897,11 @@ class PipelineWrapper:
                     'parent_taxon': (sanitize_path_component(raw_parent_taxon)
                                      if raw_parent_taxon else raw_parent_taxon),
                     'subclade_id': decision.get('subclade_id'),
-                    'database_dir': decision['database_dir'],
+                    'database_dir': self._resolve_against_database_dir(decision['database_dir']),
                     'subclade_taxonomy': decision.get('subclade_taxonomy'),
-                    'members_file': decision.get('members_file'),
-                    'sketch_file': decision.get('sketch_file'),
-                    'source_genome_dir': decision.get('source_genome_dir'),
+                    'members_file': self._resolve_against_database_dir(decision.get('members_file')),
+                    'sketch_file': self._resolve_against_database_dir(decision.get('sketch_file')),
+                    'source_genome_dir': self._resolve_against_database_dir(decision.get('source_genome_dir')),
                     'taxonomy': decision.get('query_taxonomy'),
                     'tree_method': decision.get('tree_method', 'iqtree'),
                     'tree_data': decision.get('tree_data', 'CDS'),
@@ -1094,7 +1107,7 @@ class PipelineWrapper:
         db_dir = database_dir
 
         cmd = [
-            'python', str(self.releaf_versioner),
+            sys.executable, str(self.releaf_versioner),
             '--database-dir', str(db_dir),
             '--releaf-output', str(releaf_output_dir)
         ]
@@ -1340,7 +1353,7 @@ class PipelineWrapper:
                 logger.info(f"  [DRY RUN] Would publish backbone tree as "
                             f"megatree -> {merged_tree}")
         else:
-            cmd = ['python', str(self.megatree_grafter),
+            cmd = [sys.executable, str(self.megatree_grafter),
                    '--backbone', str(backbone_tree),
                    '--out-tree', str(merged_tree),
                    '--out-report', str(conflict_report),
@@ -1588,6 +1601,9 @@ class PipelineWrapper:
         backbone_dir; returns their stems. Shared by both megatree subclade-
         build orderings.
         """
+        sys.path.insert(0, str(self.script_dir / "assembly_router"))
+        from OP_database_tool import relative_symlink
+
         rep_stems = []
         if not self.dry_run:
             for p in (list(reps_dir.glob("*.fna")) +
@@ -1596,7 +1612,7 @@ class PipelineWrapper:
                 dst = backbone_dir / p.name
                 if not dst.exists() and not dst.is_symlink():
                     try:
-                        os.symlink(os.path.abspath(p), dst)
+                        relative_symlink(dst, p)
                     except OSError:
                         shutil.copy(p, dst)
         return rep_stems
@@ -1999,10 +2015,12 @@ class PipelineWrapper:
         treat a built=false placeholder as a finished build, so the
         checkpoint skip in _build_subclade additionally requires this.
         """
-        safe_name = sc_name.replace(" ", "_").replace("/", "_")
-        config_file = self.database_dir / f"{safe_name}_db" / "database_config.json"
-        if not config_file.exists():
+        sys.path.insert(0, str(self.script_dir / "assembly_router"))
+        from OP_database_tool import find_database_dir
+        db_dir = find_database_dir(self.database_dir, sc_name)
+        if db_dir is None:
             return False
+        config_file = db_dir / "database_config.json"
         try:
             with open(config_file) as f:
                 return bool(json.load(f).get("built", False))
@@ -2095,7 +2113,7 @@ class PipelineWrapper:
             return rep_stems
 
         cmd = [
-            'python', str(self.database_creator),
+            sys.executable, str(self.database_creator),
             '--single-clade', sc_name, taxonomy, str(raw_dir),
             '--output-dir', str(self.database_dir),
             '--is-subclade',
@@ -2328,6 +2346,9 @@ class PipelineWrapper:
         (symlinks, falling back to copies), then runs CheckM2 QC + filtering.
         Returns <subclade_dir>/genomes_to_keep.
         """
+        sys.path.insert(0, str(self.script_dir / "assembly_router"))
+        from OP_database_tool import relative_symlink
+
         raw_tmp = subclade_dir / "assemblies_all.TMP"
         raw_tmp.mkdir(parents=True, exist_ok=True)
 
@@ -2338,7 +2359,7 @@ class PipelineWrapper:
                 if dst.exists() or dst.is_symlink():
                     continue
                 try:
-                    os.symlink(os.path.abspath(src), dst)
+                    relative_symlink(dst, src)
                 except OSError:
                     shutil.copy(src, dst)
 
@@ -2369,6 +2390,9 @@ class PipelineWrapper:
         (e.g. "foo.fna" and "foo.fasta" both present) -- silently picking one
         would drop a genome without any indication to the user.
         """
+        sys.path.insert(0, str(self.script_dir / "assembly_router"))
+        from OP_database_tool import relative_symlink
+
         dest.mkdir(parents=True, exist_ok=True)
         by_stem: Dict[str, Path] = {}
         for ext in self._GENOME_EXTENSIONS:
@@ -2390,7 +2414,7 @@ class PipelineWrapper:
                     shutil.copyfileobj(fin, fout)
             else:
                 try:
-                    os.symlink(os.path.abspath(src), dst)
+                    relative_symlink(dst, src)
                 except OSError:
                     shutil.copy(src, dst)
 
@@ -2422,7 +2446,7 @@ class PipelineWrapper:
             return selected_dir
 
         cmd = [
-            'python', str(self.subsampler),
+            sys.executable, str(self.subsampler),
             '--genome-dir', str(raw_dir),
             '--out-dir', str(sub_dir),
             '--n', str(target),
@@ -2447,6 +2471,9 @@ class PipelineWrapper:
         with open(manifest_path) as f:
             manifest = json.load(f)
 
+        sys.path.insert(0, str(self.script_dir / "assembly_router"))
+        from OP_database_tool import relative_symlink
+
         # Stage the selected members into selected/ (symlink, copy fallback).
         selected_dir.mkdir(parents=True, exist_ok=True)
         for name in manifest.get('members', []):
@@ -2458,7 +2485,7 @@ class PipelineWrapper:
                 logger.warning(f"    Subsample member missing from raw dir: {name}")
                 continue
             try:
-                os.symlink(os.path.abspath(src), dst)
+                relative_symlink(dst, src)
             except OSError:
                 shutil.copy(src, dst)
 
@@ -2520,10 +2547,12 @@ class PipelineWrapper:
         if self.resume and manifest_path.exists():
             logger.info(f"  ✓ Partition manifest exists (resuming): {manifest_path}")
             with open(manifest_path) as f:
-                return json.load(f)
+                manifest = json.load(f)
+            self._resolve_manifest_paths(manifest, part_dir)
+            return manifest
 
         cmd = [
-            'python', str(self.subclade_partitioner),
+            sys.executable, str(self.subclade_partitioner),
             '--genome-dir', str(raw_genome_dir),
             '--taxon', taxon_name,
             '--out-dir', str(part_dir),
@@ -2554,6 +2583,7 @@ class PipelineWrapper:
 
         with open(manifest_path) as f:
             manifest = json.load(f)
+        self._resolve_manifest_paths(manifest, part_dir)
 
         # Invariant: every query stem lands in exactly one subclade.
         assignments = manifest.get('query_assignments', {})
@@ -2566,13 +2596,40 @@ class PipelineWrapper:
         return manifest
 
     @staticmethod
+    def _resolve_manifest_paths(manifest: Dict, part_dir: Path) -> None:
+        """Resolve each subclade's members_file/sketch_file against part_dir.
+
+        subclade_partition.py writes these as bare basenames (relative to
+        part_dir) so the manifest survives a different bind-mount mapping
+        than at creation time. A legacy manifest with an absolute path that
+        no longer exists falls back to part_dir/<basename> -- the file was
+        always written there, only the recorded path changed.
+        """
+        for sc in manifest.get('subclades', []):
+            for key in ('members_file', 'sketch_file'):
+                val = sc.get(key)
+                if not val:
+                    continue
+                p = Path(val)
+                if not p.is_absolute():
+                    sc[key] = str(part_dir / p)
+                elif not p.exists():
+                    sc[key] = str(part_dir / p.name)
+
+    @staticmethod
     def _read_members_file(members_file: Optional[str]) -> List[str]:
-        """Read a subclade .members.txt (one basename per line)."""
+        """Read a subclade .members.txt (one basename per line).
+
+        Raises FileNotFoundError if a path is given but missing -- silently
+        returning [] would make the caller treat the subclade as having zero
+        members, which (in _build_subclade) falls back to treating the
+        *entire* raw genome directory as the subclade's membership.
+        """
         if not members_file:
             return []
         p = Path(members_file)
         if not p.exists():
-            return []
+            raise FileNotFoundError(f"Subclade members file not found: {p}")
         with open(p) as f:
             return [ln.strip() for ln in f if ln.strip()]
     
@@ -2741,7 +2798,7 @@ class PipelineWrapper:
             # carrying subclade/backbone metadata.
             is_backbone = subclade_meta.get('is_backbone', False)
             cmd = [
-                'python', str(self.database_creator),
+                sys.executable, str(self.database_creator),
                 '--single-clade', taxon_name, taxonomy, str(orthophyl_output),
                 '--output-dir', str(self.database_dir),
                 '--is-backbone' if is_backbone else '--is-subclade',
@@ -2784,16 +2841,20 @@ class PipelineWrapper:
         # Update orthophyl_runs.tsv
         tsv_file = self.database_dir / "orthophyl_runs.tsv"
 
-        # Append new entry
+        # Append new entry. orthophyl_output is stored relative to the TSV's
+        # own directory (database_dir) so the TSV survives a different
+        # bind-mount mapping than at write time -- OP_database_tool.py's
+        # parse_input_table resolves it back against the TSV's directory.
+        rel_output = os.path.relpath(Path(orthophyl_output).resolve(), self.database_dir.resolve())
         with open(tsv_file, 'a') as f:
-            f.write(f"{taxon_name}\t{orthophyl_output}\t{taxonomy}\n")
+            f.write(f"{taxon_name}\t{rel_output}\t{taxonomy}\n")
 
         if self.verbose:
             logger.info(f"    Added to orthophyl_runs.tsv: {taxon_name}")
 
         # Run database creator in update mode
         cmd = [
-            'python', str(self.database_creator),
+            sys.executable, str(self.database_creator),
             '--input', str(tsv_file),
             '--output-dir', str(self.database_dir),
             '--update',
@@ -2836,8 +2897,10 @@ class PipelineWrapper:
         (trees_dir / "orthophyl").mkdir(parents=True, exist_ok=True)
         
         # Collect ReLeaf trees - look in database's ReLeaf_dir (where ReLeaf actually writes)
+        sys.path.insert(0, str(self.script_dir / "assembly_router"))
+        from OP_database_tool import iter_database_dirs
         releaf_trees = []
-        for db_dir in self.database_dir.glob("*_db"):
+        for db_dir in iter_database_dirs(self.database_dir):
             releaf_output = db_dir / 'orthophyl_run' / 'ReLeaf_dir'
             tree_file = self._locate_releaf_tree(releaf_output)
             if tree_file is not None:
@@ -3051,17 +3114,27 @@ class PipelineWrapper:
         
         if not self.database_dir or not self.database_dir.exists():
             return None
-        
-        # Search all databases for matching taxon
-        for db_dir in self.database_dir.glob("*_db"):
+
+        sys.path.insert(0, str(self.script_dir / "assembly_router"))
+        from OP_database_tool import iter_database_dirs
+
+        # Search all databases for matching taxon. Skip a megatree *dense*
+        # subclade (is_subclade and not is_backbone) -- it shares its parent
+        # taxon's clade_name/taxonomy, so without this a "--taxon 632" check
+        # could wrongly match "632_1" instead of the taxon's own backbone/
+        # non-megatree DB.
+        for db_dir in iter_database_dirs(self.database_dir):
             config_file = db_dir / "database_config.json"
             if not config_file.exists():
                 continue
-            
+
             try:
                 with open(config_file, 'r') as f:
                     config = json.load(f)
-                
+
+                if config.get('is_subclade') and not config.get('is_backbone'):
+                    continue
+
                 # Check if source_taxon_name matches
                 if config.get('source_taxon_name') == self.taxon:
                     logger.info(f"  ✓ Found matching database by taxon name")
@@ -3829,7 +3902,9 @@ Examples:
     core_group.add_argument(
         '--database-dir',
         required=True,
-        help='Directory containing *_db databases'
+        help='Directory containing *_db databases, flat or (for megatree '
+             'backbone/subclade DBs) one level nested under a parent-taxon '
+             'grouping dir, e.g. <database-dir>/<Taxon>/<Taxon>_1_db'
     )
     core_group.add_argument(
         '--output-dir',
