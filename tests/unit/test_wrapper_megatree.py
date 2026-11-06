@@ -831,6 +831,41 @@ class TestRegisterLazySubclade:
         assert list(backbone_dir.iterdir()) == []
         assert w._check_checkpoint("register_Andreesenella_4")
 
+    def test_qc_subclade_raising_contributes_no_reps_without_failing(
+            self, Wrapper, wrapper_module, tmp_path, monkeypatch):
+        """Real-world failure mode: _qc_subclade (via _download_genomes) raises
+        RuntimeError when CheckM2 drops every raw member of this subclade --
+        it never returns an empty genomes_to_keep/ dir for the caller to
+        notice. A single bad lazy subclade must still not abort the whole
+        taxon; this must behave like the zero-survivors case above (0 reps,
+        warning, registration checkpoint written)."""
+        w = _make_wrapper(Wrapper, tmp_path)
+
+        def raising_qc(*a, **k):
+            raise RuntimeError(
+                "Download completed but no genomes found in .../genomes_to_keep")
+        monkeypatch.setattr(w, "_qc_subclade", raising_qc)
+        monkeypatch.setattr(
+            w, "_subsample_genomes",
+            lambda *a, **k: pytest.fail(
+                "must not subsample when QC raised (0 genomes kept)"))
+
+        class FakeCompleted:
+            returncode = 0
+        monkeypatch.setattr(wrapper_module.subprocess, "run",
+                            lambda *a, **k: FakeCompleted())
+
+        entry = {"name": "Andreesenella_6", "subclade_id": 6, "n_genomes": 9}
+        backbone_dir = tmp_path / "backbone_genomes"
+        backbone_dir.mkdir()
+        rep_stems = w._register_lazy_subclade(
+            taxon_name="Andreesenella", entry=entry, raw_dir=tmp_path / "raw",
+            taxonomy="d__Bacteria;g__Andreesenella", backbone_dir=backbone_dir)
+
+        assert rep_stems == []
+        assert list(backbone_dir.iterdir()) == []
+        assert w._check_checkpoint("register_Andreesenella_6")
+
     def test_taxonomy_source_and_qc_applied_thread_into_db_creator_argv(
             self, Wrapper, wrapper_module, tmp_path, monkeypatch):
         """The --genome-dir local megatree path passes taxonomy_source=

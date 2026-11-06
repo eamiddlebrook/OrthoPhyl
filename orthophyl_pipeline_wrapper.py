@@ -2059,10 +2059,21 @@ class PipelineWrapper:
             logger.info(f"  ✓ QC already complete for {sc_name} (resuming)")
             genomes_to_keep = subclade_dir / "genomes_to_keep"
         else:
-            genomes_to_keep = self._qc_subclade(
-                subclade_dir, raw_members, taxon_label=sc_name,
-                query_assemblies=[])
-            self._write_checkpoint(f"qc_{sc_name}")
+            # _qc_subclade (via _download_genomes) raises RuntimeError when
+            # CheckM2 drops every raw member -- that's a hard abort for a
+            # normal full-taxon download, but here it's one lazy subclade
+            # among many, and the docstring above promises a single bad one
+            # must not abort the whole taxon. Treat it as n_kept == 0 below
+            # instead of propagating.
+            try:
+                genomes_to_keep = self._qc_subclade(
+                    subclade_dir, raw_members, taxon_label=sc_name,
+                    query_assemblies=[])
+                self._write_checkpoint(f"qc_{sc_name}")
+            except RuntimeError as e:
+                logger.warning(
+                    f"  ⚠ QC failed for lazy subclade {sc_name}: {e}")
+                genomes_to_keep = subclade_dir / "genomes_to_keep"
 
         n_kept = 0
         if not self.dry_run and genomes_to_keep.exists():
