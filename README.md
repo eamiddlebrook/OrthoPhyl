@@ -335,6 +335,43 @@ Flags are grouped below by subject, matching `--help`'s layout.
 | `--use-bbmap` | Use bbmap instead of CheckM2 for genome stats (faster, less RAM, no completeness/contamination filtering) | False |
 | `--ani-shortlist` | OrthoFinder MASH-shortlist size (`-n`); forced so small databases still get HMMs built | 20 |
 
+### Tree building
+
+Applies to OrthoPhyl builds only (`--taxon`, `--genome-dir`, megatree subclade/backbone
+builds, novel-taxon builds in batch mode) -- ReLeaf placement onto an existing tree is
+unaffected.
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--tree-method` | `iqtree`, `fasttree`, or `both`. FastTree is much faster but ReLeaf cannot yet extend a FastTree species tree -- use `both` if you need a ReLeaf-compatible tree too | `iqtree` |
+| `--iqtree-model` | Fix the substitution model (e.g. `GTR+F+G4`) instead of running ModelFinder -- the single biggest IQ-TREE speedup on large alignments. Mutually exclusive with `--iqtree-mset` | None (ModelFinder/MFP) |
+| `--iqtree-mset` | Restrict ModelFinder to this comma-separated model set (e.g. `GTR` or `HKY,GTR`) instead of testing everything | None |
+| `--iqtree-fast` | Pass IQ-TREE's `--fast` (reduced-search quick mode). IQ-TREE refuses `--fast` together with UltraFast Bootstrap (`-B`/`-bb`), and the default options always include `-B 1000` -- so this also requires `--iqtree-options` without `-B`/`-bb` | False |
+| `--iqtree-options` | Replace the default IQ-TREE species-tree argument string (`--lmap 2000 --symtest -B 1000 -t PARS --ninit 2`) outright, e.g. to drop `--symtest`/`-B 1000` | None |
+
+```bash
+# Skip ModelFinder entirely with a fixed model -- fastest IQ-TREE option
+python orthophyl_pipeline_wrapper.py --taxon Methylorubrum \
+  --database-dir databases/ --output-dir results/ --threads 32 \
+  --iqtree-model GTR+F+G4
+
+# FastTree instead of IQ-TREE -- fastest overall, but not ReLeaf-able
+python orthophyl_pipeline_wrapper.py --taxon Methylorubrum \
+  --database-dir databases/ --output-dir results/ --threads 32 \
+  --tree-method fasttree
+
+# Keep ModelFinder but restrict the search space, and drop bootstrapping
+python orthophyl_pipeline_wrapper.py --taxon Methylorubrum \
+  --database-dir databases/ --output-dir results/ --threads 32 \
+  --iqtree-mset GTR --iqtree-options "-t PARS --ninit 2"
+
+# --iqtree-fast requires dropping -B 1000 via --iqtree-options (IQ-TREE
+# rejects --fast + UltraFast Bootstrap together)
+python orthophyl_pipeline_wrapper.py --taxon Methylorubrum \
+  --database-dir databases/ --output-dir results/ --threads 32 \
+  --iqtree-fast --iqtree-options "--symtest --lmap 2000 -t PARS --ninit 2"
+```
+
 ### Gather / QC
 
 | Argument | Description | Default |

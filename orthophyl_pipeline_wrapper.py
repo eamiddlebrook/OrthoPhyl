@@ -93,6 +93,13 @@ class PipelineWrapper:
     # Valid GTDB rank letters, domain -> species.
     _GTDB_RANK_LETTERS = ('d', 'p', 'c', 'o', 'f', 'g', 's')
 
+    # Mirrors control_file.defaults' IQtree_CDS_speciestree_options. Used only
+    # to validate --iqtree-fast against the base string that will actually be
+    # in effect (this value, unless --iqtree-options replaces it) -- NOT
+    # sourced from the control file itself, so keep this in sync by hand if
+    # that default ever changes.
+    _DEFAULT_IQTREE_CDS_OPTIONS = "--lmap 2000 --symtest -B 1000 -t PARS --ninit 2"
+
     # Accepted genome FASTA extensions for --genome-dir, gzip variants included.
     # Longest/most-specific first so a "*.fna.gz" file is never mistaken for "*.gz".
     _GENOME_EXTENSIONS = ('.fna.gz', '.fa.gz', '.fasta.gz', '.fna', '.fa', '.fasta')
@@ -114,6 +121,13 @@ class PipelineWrapper:
         must_keep: Optional[str] = None,
         keep_failing_query: bool = False,
         ani_shortlist: int = 20,
+        # NEW: tree-building method/speed controls (OrthoPhyl builds only --
+        #   ReLeaf placement is untouched)
+        tree_method: str = 'iqtree',
+        iqtree_model: Optional[str] = None,
+        iqtree_mset: Optional[str] = None,
+        iqtree_fast: bool = False,
+        iqtree_options: Optional[str] = None,
         # NEW: Taxon mode parameters
         taxon: Optional[str] = None,
         taxon_rank: Optional[str] = None,
@@ -228,6 +242,59 @@ class PipelineWrapper:
         #   (a common case: default --subclade-size is 150, and plenty of ordinary
         #   single-tree builds are small too) can never be ReLeaf'd onto.
         self.ani_shortlist = ani_shortlist
+
+        # Tree-building method/speed controls, passed to every OrthoPhyl.sh
+        #   build (-p and, when any --iqtree-* flag is set, a small -c control
+        #   file overriding IQtree_CDS_speciestree_options -- see
+        #   _tree_control_file). ReLeaf placement (_run_releaf) is untouched.
+        if tree_method not in ('iqtree', 'fasttree', 'both'):
+            raise ValueError(
+                f"--tree-method must be one of iqtree/fasttree/both, got: {tree_method!r}")
+        iqtree_flags_set = any([iqtree_model, iqtree_mset, iqtree_fast, iqtree_options])
+        if tree_method == 'fasttree' and iqtree_flags_set:
+            raise ValueError(
+                "--iqtree-model/--iqtree-mset/--iqtree-fast/--iqtree-options "
+                "require --tree-method iqtree or both (not fasttree).")
+        if iqtree_model and iqtree_mset:
+            raise ValueError(
+                "--iqtree-model and --iqtree-mset are mutually exclusive -- "
+                "a fixed model skips ModelFinder, so there is nothing for "
+                "--mset to constrain.")
+        if iqtree_fast:
+            # IQ-TREE hard-errors with "Ultrafast bootstrap does not work with
+            # -fast, -te or -n option" (verified on 2.2.0.3). The base string
+            # that --iqtree-fast appends --fast to -- either the default
+            # IQtree_CDS_speciestree_options (control_file.defaults, which
+            # always includes -B 1000) or a user's own --iqtree-options --
+            # must not contain UFBoot (-B/-bb), or every such run would crash.
+            effective_base = (iqtree_options if iqtree_options is not None
+                               else self._DEFAULT_IQTREE_CDS_OPTIONS)
+            if set(effective_base.split()) & {'-B', '-bb'}:
+                raise ValueError(
+                    "--iqtree-fast is incompatible with UltraFast Bootstrap "
+                    "(-B/-bb) -- IQ-TREE refuses to run --fast together with "
+                    "-B/-bb. The default IQtree_CDS_speciestree_options "
+                    "includes \"-B 1000\", so --iqtree-fast alone always "
+                    "crashes. Pass --iqtree-options without -B/-bb, e.g. "
+                    "--iqtree-options \"--symtest --lmap 2000 -t PARS "
+                    "--ninit 2\", to use --iqtree-fast.")
+        self.tree_method = tree_method
+        self.iqtree_model = iqtree_model
+        self.iqtree_mset = iqtree_mset
+        self.iqtree_fast = iqtree_fast
+        self.iqtree_options = iqtree_options
+        if tree_method in ('fasttree', 'both'):
+            logger.warning(
+                "  --tree-method includes fasttree: ReLeaf cannot yet extend "
+                "FastTree species trees (functions_addem.sh's ADD_2_fasttree "
+                "is unfinished) -- resulting databases are ReLeaf-incompatible "
+                "unless 'both' also produced an IQ-TREE tree.")
+            if megatree:
+                logger.warning(
+                    "  --tree-method fasttree with --megatree: FastTree branch "
+                    "support is on a 0-1 scale, so --conflict-min-support "
+                    "(default 90) will never flag a conflict against a "
+                    "FastTree subclade/backbone tree.")
 
         # NEW: Taxon mode
         self.taxon = taxon
@@ -2689,6 +2756,55 @@ class PipelineWrapper:
         with open(p) as f:
             return [ln.strip() for ln in f if ln.strip()]
     
+    _TREE_METHOD_FLAG = {'iqtree': 'iqtree', 'fasttree': 'fasttree', 'both': 'fasttree iqtree'}
+
+    def _tree_control_file(self, taxon_name: str) -> Optional[Path]:
+        """Write a small OrthoPhyl.sh control file overriding
+        IQtree_CDS_speciestree_options, if any --iqtree-* flag was given.
+
+        Returns None (no control file, no -c flag) when no --iqtree-* flag
+        is set, so the OrthoPhyl.sh command is byte-identical to before.
+
+        OrthoPhyl.sh sources control_file.defaults (which sets the base
+        IQtree_CDS_speciestree_options string) BEFORE any -c control file
+        (OrthoPhyl.sh:79-116), so referencing $IQtree_CDS_speciestree_options
+        here appends to that default rather than guessing its contents.
+        --iqtree-options replaces the base outright instead of appending.
+        The wrapper always passes -o CDS, so only the CDS variable is set.
+        """
+        if not any([self.iqtree_model, self.iqtree_mset, self.iqtree_fast, self.iqtree_options]):
+            return None
+        # The assembled value is embedded in a double-quoted bash string, so
+        # user-supplied text is escaped for THAT context (\, ", $, ` are
+        # special inside double quotes) -- NOT shlex-quoted, which would wrap
+        # tokens in single quotes that bash would then treat as literal
+        # characters once nested inside the outer double quotes rather than
+        # being stripped. The literal $IQtree_CDS_speciestree_options
+        # reference is left unescaped so it still expands from the default
+        # control_file.defaults source'd earlier in OrthoPhyl.sh.
+        def _dq_escape(s: str) -> str:
+            return s.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace('`', '\\`')
+
+        base = _dq_escape(self.iqtree_options) if self.iqtree_options else '$IQtree_CDS_speciestree_options'
+        extra = []
+        if self.iqtree_model:
+            extra += ['-m', _dq_escape(self.iqtree_model)]
+        if self.iqtree_mset:
+            extra += ['--mset', _dq_escape(self.iqtree_mset)]
+        if self.iqtree_fast:
+            extra.append('--fast')
+        value = base if not extra else f"{base} {' '.join(extra)}"
+        safe_name = re.sub(r'[^A-Za-z0-9_.-]', '_', taxon_name)
+        control_path = self.logs_dir / f"tree_options_{safe_name}.control"
+        content = f'export IQtree_CDS_speciestree_options="{value}"\n'
+        if self.dry_run:
+            logger.info(f"  [DRY RUN] Would write tree-options control file {control_path}:")
+            logger.info(f"    {content.strip()}")
+            return control_path
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        control_path.write_text(content)
+        return control_path
+
     def _run_orthophyl(
         self,
         input_dir: Path,
@@ -2729,10 +2845,13 @@ class PipelineWrapper:
             '-g', str(input_dir),
             '-s', str(output_dir),
             '-t', str(self.threads),
-            '-p', 'iqtree',
+            '-p', self._TREE_METHOD_FLAG[self.tree_method],
             '-o', 'CDS',
             '-n', str(ani_n),
         ]
+        tree_control_file = self._tree_control_file(taxon_name)
+        if tree_control_file is not None:
+            cmd.extend(['-c', str(tree_control_file)])
         if hmm_assign_dir is not None:
             cmd.extend(['--hmm-assign-dir', str(hmm_assign_dir)])
             if skip_hmm_assign_leftover:
@@ -4027,6 +4146,52 @@ Examples:
              'default. Default 20.'
     )
 
+    tree_group = parser.add_argument_group(
+        'Tree building', 'Species-tree method and IQ-TREE ModelFinder speed controls '
+                          '(OrthoPhyl builds only -- ReLeaf placement is unaffected)')
+    tree_group.add_argument(
+        '--tree-method',
+        choices=['iqtree', 'fasttree', 'both'],
+        default='iqtree',
+        help='Species-tree program(s) passed to OrthoPhyl.sh -p (default: iqtree). '
+             'fasttree is much faster but ReLeaf cannot yet extend a FastTree '
+             'species tree (functions_addem.sh\'s ADD_2_fasttree is unfinished) -- '
+             'use "both" if you need a ReLeaf-compatible IQ-TREE tree alongside it.'
+    )
+    tree_group.add_argument(
+        '--iqtree-model',
+        help='Fix the IQ-TREE substitution model (e.g. GTR+F+G4) instead of running '
+             'ModelFinder, which is the single biggest IQ-TREE speedup for large '
+             'alignments. Mutually exclusive with --iqtree-mset. Requires '
+             '--tree-method iqtree or both.'
+    )
+    tree_group.add_argument(
+        '--iqtree-mset',
+        help='Restrict ModelFinder to this comma-separated model set (IQ-TREE\'s '
+             '--mset), e.g. "GTR" or "HKY,GTR", instead of testing every model. '
+             'Mutually exclusive with --iqtree-model. Requires --tree-method '
+             'iqtree or both.'
+    )
+    tree_group.add_argument(
+        '--iqtree-fast',
+        action='store_true',
+        help='Pass IQ-TREE\'s --fast (reduced-search quick mode). Requires '
+             '--tree-method iqtree or both. IQ-TREE refuses to combine --fast '
+             'with UltraFast Bootstrap (-B/-bb), and the default '
+             'IQtree_CDS_speciestree_options always includes "-B 1000" -- so '
+             'this also requires --iqtree-options without -B/-bb (e.g. '
+             '--iqtree-options "--symtest --lmap 2000 -t PARS --ninit 2").'
+    )
+    tree_group.add_argument(
+        '--iqtree-options',
+        help='Replace the default IQ-TREE species-tree argument string '
+             '(control_file.defaults\' IQtree_CDS_speciestree_options, normally '
+             '"--lmap 2000 --symtest -B 1000 -t PARS --ninit 2") outright, e.g. to '
+             'drop --symtest/-B 1000 for a faster run. --iqtree-model/--iqtree-mset/'
+             '--iqtree-fast are still appended after this string. Requires '
+             '--tree-method iqtree or both.'
+    )
+
     gather_group = parser.add_argument_group(
         'Gather / QC', 'Genome downloading and quality-control options')
     gather_group.add_argument(
@@ -4318,6 +4483,26 @@ Examples:
     if args.genome_dir and args.geo and not args.geo_tsv:
         parser.error("--genome-dir --geo requires --geo-tsv (local mode has "
                       "no NCBI geo_loc_name metadata to fall back on).")
+    iqtree_flags_given = any([args.iqtree_model, args.iqtree_mset, args.iqtree_fast,
+                               args.iqtree_options])
+    if args.tree_method == 'fasttree' and iqtree_flags_given:
+        parser.error("--iqtree-model/--iqtree-mset/--iqtree-fast/--iqtree-options "
+                      "require --tree-method iqtree or both (not fasttree).")
+    if args.iqtree_model and args.iqtree_mset:
+        parser.error("--iqtree-model and --iqtree-mset are mutually exclusive -- "
+                      "a fixed model skips ModelFinder, so there is nothing for "
+                      "--mset to constrain.")
+    if args.iqtree_fast:
+        effective_base = (args.iqtree_options if args.iqtree_options is not None
+                           else PipelineWrapper._DEFAULT_IQTREE_CDS_OPTIONS)
+        if set(effective_base.split()) & {'-B', '-bb'}:
+            parser.error(
+                "--iqtree-fast is incompatible with UltraFast Bootstrap (-B/-bb) "
+                "-- IQ-TREE refuses to run --fast together with -B/-bb. The "
+                "default IQtree_CDS_speciestree_options includes \"-B 1000\", "
+                "so --iqtree-fast alone always crashes. Pass --iqtree-options "
+                "without -B/-bb, e.g. --iqtree-options \"--symtest --lmap 2000 "
+                "-t PARS --ninit 2\", to use --iqtree-fast.")
 
     # Configure logging based on verbosity
     if args.verbose:
@@ -4341,6 +4526,11 @@ Examples:
         must_keep=args.must_keep,
         keep_failing_query=args.keep_failing_query,
         ani_shortlist=args.ani_shortlist,
+        tree_method=args.tree_method,
+        iqtree_model=args.iqtree_model,
+        iqtree_mset=args.iqtree_mset,
+        iqtree_fast=args.iqtree_fast,
+        iqtree_options=args.iqtree_options,
         taxon=args.taxon,
         taxon_rank=args.taxon_rank,
         update_existing=args.update_existing,
