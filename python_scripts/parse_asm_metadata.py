@@ -60,11 +60,20 @@ a substring match, `GCF_000123456.1` also matched `GCF_000123456.10`. Exact
 column matching is both faster and removes that false positive.
 
 Field layout of All-<taxon>.assembly.BS_to_meta (1-based). parse-assembly-xml
-guarantees EXACTLY these 10 columns per row, one line per DocumentSummary:
+guarantees EXACTLY these 11 columns per row, one line per DocumentSummary:
     1 BioSampleAccn  2 RefSeq  3 Genbank  4 SpeciesName  5 Sub_value
     6 FtpPath_GenBank  7 FtpPath_RefSeq  8 Taxid  9 taxonomy-check-status
-    10 ExclFromRefSeq
-...and after merge-geoloc appends the geolocation: 11 geo_loc_name.
+    10 ExclFromRefSeq  11 SubmitterOrganization
+...and after merge-geoloc appends the biosample fields (from
+parse-biosample-xml, see biosample_fields()): 12 geo_loc_name
+13 collected_by  14 sequenced_by  15 biosample_owner.
+
+project_metadata() (filter-by-acc) projects this 15-column merged row down to
+the stable all_asm_acc_metadata layout: columns 1-8 are the original fields
+(accession, species, species.strain, biosample, taxid, taxcheck, excl, geo),
+then 9 collected_by  10 sequenced_by  11 biosample_owner  12 asm_submitter.
+python_scripts/geo_provenance.py reads that 12-column file and appends
+13 submitter_country  14 geo_vs_submitter -- see its module docstring.
 
 Usage:
     parse_asm_metadata.py parse-assembly-xml --xml F --out F
@@ -90,7 +99,7 @@ MISSING = "NA"
 #   Checking the width catches the shift directly, and is strictly better than
 #   sniffing for taxcheck tokens in the geolocation column: "NA" is a legitimate
 #   geolocation value, so a token-based guard would false-positive.
-EXPECTED_META_COLUMNS = 10
+EXPECTED_META_COLUMNS = 11
 
 # geo_loc_name values that mean "no real location". The bash pipeline matched
 #   these with `sed 's/Missing.*$/Unknown/g'` and friends -- a prefix match on a
@@ -201,11 +210,13 @@ def sanitize_field(value):
 
 
 def assembly_row(elem):
-    """Extract the 10 BS_to_meta columns from one assembly <DocumentSummary>.
+    """Extract the 11 BS_to_meta columns from one assembly <DocumentSummary>.
 
-    Column order matches what get_asm_metadata()'s xtract emitted, so every
-    downstream consumer keeps working -- but each column is now keyed by element
-    name, so a repeated element cannot shift the row.
+    Columns 1-10 match what get_asm_metadata()'s xtract emitted, so every
+    downstream consumer keeps working -- but each column is now keyed by
+    element name, so a repeated element cannot shift the row. Column 11
+    (SubmitterOrganization) is new: it feeds geo_provenance.py's check for
+    whether a sample's geolocation is really the submitting lab's location.
     """
     fields = [
         first_text(elem, "BioSampleAccn"),
@@ -218,6 +229,7 @@ def assembly_row(elem):
         first_text(elem, "Taxid"),
         first_text(elem, "taxonomy-check-status"),
         first_text(elem, "ExclFromRefSeq"),
+        first_text(elem, "SubmitterOrganization"),
     ]
     return [sanitize_field(f) for f in fields]
 
@@ -250,20 +262,48 @@ def normalize_geoloc(value):
     return country.replace(" ", "_")
 
 
-def biosample_geoloc(elem):
-    """Return (accession, normalized_geoloc) for a biosample <DocumentSummary>.
+def biosample_fields(elem):
+    """Return (accession, geoloc, collected_by, sequenced_by, owner) for one
+    biosample <DocumentSummary>.
 
-    Finds the Attribute whose harmonized_name is geo_loc_name, mirroring the
-    xtract `-if Attribute@harmonized_name -equals geo_loc_name` selector. Returns
-    ("", ...) if the record has no accession (skipped by the caller).
+    geoloc, collected_by, sequenced_by come from the Attribute whose
+    harmonized_name matches, mirroring the xtract
+    `-if Attribute@harmonized_name -equals ...` selector biosample_geoloc()
+    used to use for geo_loc_name alone. owner comes from Owner/Name (the
+    submitting institution recorded on the BioSample itself, distinct from
+    the Assembly-level SubmitterOrganization captured in assembly_row()),
+    falling back to a top-level Organization element if Owner/Name is
+    absent. Returns accession="" if the record has no accession (skipped by
+    the caller).
     """
     accession = first_text(elem, "Accession", default="")
-    raw = None
+
+    raw_geo = raw_collected_by = raw_sequenced_by = None
     for attr in elem.iter("Attribute"):
-        if attr.get("harmonized_name") == "geo_loc_name":
-            raw = attr.text
+        harmonized = attr.get("harmonized_name")
+        if harmonized == "geo_loc_name" and raw_geo is None:
+            raw_geo = attr.text
+        elif harmonized == "collected_by" and raw_collected_by is None:
+            raw_collected_by = attr.text
+        elif harmonized == "sequenced_by" and raw_sequenced_by is None:
+            raw_sequenced_by = attr.text
+
+    owner = None
+    for owner_elem in elem.iter("Owner"):
+        name_node = owner_elem.find("Name")
+        if name_node is not None and (name_node.text or "").strip():
+            owner = name_node.text
             break
-    return sanitize_field(accession) if accession else "", normalize_geoloc(raw)
+    if owner is None:
+        owner = first_text(elem, "Organization", default=None)
+
+    return (
+        sanitize_field(accession) if accession else "",
+        normalize_geoloc(raw_geo),
+        sanitize_field(raw_collected_by),
+        sanitize_field(raw_sequenced_by),
+        sanitize_field(owner),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -301,22 +341,31 @@ def read_acc_set(path):
     return accs
 
 
-def read_geoloc_map(path):
-    """Map BioSample accession -> [geolocation, ...] preserving file order.
+# Number of trailing fields written per row by parse-biosample-xml, after the
+#   accession: geo_loc_name, collected_by, sequenced_by, owner.
+N_BIOSAMPLE_FIELDS = 4
 
-    Input is All-<taxon>.biosample.BS_to_Geoloc: ``accession<TAB>geo_loc_name``.
-    A list (not a single value) because the bash join emitted one output row per
-    matching geoloc row.
+
+def read_geoloc_map(path):
+    """Map BioSample accession -> [[geo, collected_by, sequenced_by, owner], ...]
+    preserving file order.
+
+    Input is All-<taxon>.biosample.BS_to_Geoloc, one row per biosample_fields()
+    call: ``accession<TAB>geo_loc_name<TAB>collected_by<TAB>sequenced_by<TAB>owner``.
+    Every field is already sanitize_field()-clean (no internal whitespace), so
+    unlike the old 2-column format this does not need to re-join anything --
+    each is kept as its own distinct column. A list of rows (not one row) per
+    accession because the bash join this replaces emitted one output row per
+    matching geoloc row; short/legacy rows are padded with MISSING.
     """
     geo = {}
     for _raw, fields in iter_rows(path):
         if not fields:
             continue
         key = fields[0]
-        # Everything after the accession is the location; re-join with single
-        #   spaces exactly as the unquoted `echo $BLAH1` did.
-        value = " ".join(fields[1:])
-        geo.setdefault(key, []).append(value)
+        rest = fields[1:1 + N_BIOSAMPLE_FIELDS]
+        rest = rest + [MISSING] * (N_BIOSAMPLE_FIELDS - len(rest))
+        geo.setdefault(key, []).append(rest)
     return geo
 
 
@@ -335,7 +384,7 @@ def merge_geoloc(rows, geoloc_map):
     """Hash-join metadata rows against geoloc_map on the BioSample accession.
 
     ``rows`` is an iterable of (raw_line, fields). Yields joined output lines:
-    ``BioSample<TAB>rest-of-metadata<TAB>geolocation``.
+    ``BioSample<TAB>rest-of-metadata<TAB>geo<TAB>collected_by<TAB>sequenced_by<TAB>owner``.
 
     INNER join, deliberately: rows with no geoloc match are dropped, matching the
     bash loop this replaces. Returns via generator; call merge_geoloc_stats for
@@ -346,18 +395,25 @@ def merge_geoloc(rows, geoloc_map):
             continue
         bs = fields[0]
         rest = " ".join(fields[1:])
-        for loc in geoloc_map.get(bs, ()):
-            yield "{}\t{}\t{}".format(bs, rest, loc)
+        for loc_fields in geoloc_map.get(bs, ()):
+            yield "{}\t{}\t{}".format(bs, rest, "\t".join(loc_fields))
 
 
 def project_metadata(fields, acc_index):
     """Project a merged metadata row to the all_asm_acc_metadata column order.
 
-    Mirrors the awk projection ``$N,$4,$4"."$5,$1,$8,$9,$10,$11`` where N is the
-    accession column (2 = RefSeq for GCF rows, 3 = Genbank for GCA rows):
+    ``fields`` is a merge-geoloc output row split on whitespace: the 11
+    BS_to_meta columns (see module docstring) followed by the 4 biosample
+    columns merge_geoloc() appends (geo, collected_by, sequenced_by, owner),
+    for 15 fields total. N is the accession column (2 = RefSeq for GCF rows,
+    3 = Genbank for GCA rows). Output is the stable 12-column layout:
 
         accession  species  species.strain  biosample  taxid  taxcheck
-        excl_from_refseq  geo_loc
+        excl_from_refseq  geo_loc  collected_by  sequenced_by
+        biosample_owner  asm_submitter
+
+    geo_provenance.py reads this file and appends two more columns
+    (submitter_country, geo_vs_submitter); see its module docstring.
 
     Short rows are padded with empty strings, matching awk's behaviour of
     printing an empty string for a field past NF.
@@ -374,6 +430,10 @@ def project_metadata(fields, acc_index):
         f(8),
         f(9),
         f(10),
+        f(12),
+        f(13),
+        f(14),
+        f(15),
         f(11),
     ])
 
@@ -424,7 +484,7 @@ def cmd_parse_assembly_xml(args):
             n_records += 1
 
     sys.stderr.write(
-        "parse-assembly-xml: {} records -> {} (10 columns each)\n".format(
+        "parse-assembly-xml: {} records -> {} (11 columns each)\n".format(
             n_records, args.out
         )
     )
@@ -448,10 +508,16 @@ def cmd_parse_biosample_xml(args):
     with open(args.out, "w") as out:
         for elem in iter_document_summaries(args.xml):
             n_records += 1
-            accession, geoloc = biosample_geoloc(elem)
+            accession, geoloc, collected_by, sequenced_by, owner = (
+                biosample_fields(elem)
+            )
             if not accession:
                 continue
-            out.write("{}\t{}\n".format(accession, geoloc))
+            out.write(
+                "{}\t{}\t{}\t{}\t{}\n".format(
+                    accession, geoloc, collected_by, sequenced_by, owner
+                )
+            )
             n_written += 1
 
     sys.stderr.write(
@@ -479,7 +545,7 @@ def cmd_merge_geoloc(args):
                 continue
             n_in += 1
             # Recurrence guard for the column-shift bug: BS_to_meta must be
-            #   exactly 10 columns, or the geolocation lands in the wrong place
+            #   exactly 11 columns, or the geolocation lands in the wrong place
             #   and taxonomy-check-status ("OK") gets read as a country.
             if len(fields) != EXPECTED_META_COLUMNS:
                 n_wrong_width += 1
@@ -488,8 +554,8 @@ def cmd_merge_geoloc(args):
             locs = geoloc_map.get(bs)
             if not locs:
                 continue
-            for loc in locs:
-                out.write("{}\t{}\t{}\n".format(bs, rest, loc))
+            for loc_fields in locs:
+                out.write("{}\t{}\t{}\n".format(bs, rest, "\t".join(loc_fields)))
                 n_out += 1
 
     if n_wrong_width:
@@ -587,7 +653,7 @@ def build_parser():
 
     p = sub.add_parser(
         "parse-assembly-xml",
-        help="Assembly esummary XML -> BS_to_meta (10 stable columns).",
+        help="Assembly esummary XML -> BS_to_meta (11 stable columns).",
     )
     p.add_argument("--xml", required=True,
                    help="All-<taxon>-info.assembly.xml")

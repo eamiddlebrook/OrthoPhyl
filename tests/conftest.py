@@ -181,6 +181,14 @@ def geo_figures_module():
     )
 
 
+@pytest.fixture(scope="session")
+def geo_provenance_module():
+    return load_module(
+        REPO_ROOT / "python_scripts" / "geo_provenance.py",
+        name="geo_provenance",
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Filesystem fixtures                                                         #
 # --------------------------------------------------------------------------- #

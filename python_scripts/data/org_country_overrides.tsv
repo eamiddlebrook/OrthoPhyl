@@ -1,0 +1,36 @@
+# org_country_overrides.tsv
+#
+# Curated substring -> country overrides for submitting/sequencing
+# organizations whose name does not contain a country or recognizable
+# place name (so geo_provenance.py's country_from_text() has nothing to
+# match on). Matched case-insensitively as a SUBSTRING of the submitter
+# string; first match (by substring length, longest first) wins.
+#
+# Format: substring<TAB>country
+#   country must be a name geo_provenance.canonical_country() can resolve
+#   (an ne_110m_countries.json name, or an entry in country_aliases.tsv).
+#
+# This table is intentionally small and user-editable -- add entries for
+# any submitter that shows up in geo_provenance_report.tsv as "unresolved"
+# but is in fact a known institution.
+Centers for Disease Control	USA
+PulseNet	USA
+Food and Drug Administration	USA
+US Food and Drug Administration	USA
+FDA	USA
+USDA	USA
+Wellcome Sanger	United Kingdom
+Wellcome Trust Sanger	United Kingdom
+Public Health England	United Kingdom
+UK Health Security Agency	United Kingdom
+National Institutes of Health	USA
+Broad Institute	USA
+Walter Reed	USA
+Naval Medical Research	USA
+Robert Koch Institute	Germany
+Pasteur Institute	France
+Institut Pasteur	France
+RIKEN	Japan
+BGI	China
+Chinese Center for Disease Control	China
+European Bioinformatics Institute	United Kingdom

@@ -41,6 +41,12 @@ if [ ! -f "$redundancy_filter" ]; then
 	echo "  (expected at <repo>/python_scripts/ relative to $gather_script_dir)" >&2
 	exit 1
 fi
+geo_provenance_tool="${gather_repo_root}/python_scripts/geo_provenance.py"
+if [ ! -f "$geo_provenance_tool" ]; then
+	echo "ERROR: helper not found: $geo_provenance_tool" >&2
+	echo "  (expected at <repo>/python_scripts/ relative to $gather_script_dir)" >&2
+	exit 1
+fi
 
 export taxon="$1"
 # deal with WD below
@@ -237,6 +243,7 @@ main () {
 		get_biosample_GEOdata
 		merge_metadata_geoloc
 		all_sample_metadata
+		annotate_geo_provenance
 		aggregate_assemblies "$wd"/assemblies_all.TMP
 		# Add user-supplied query genomes to the input set so they are QC'd
 		#   alongside the downloads (rather than bypassing the filter).
@@ -630,6 +637,29 @@ all_sample_metadata () {
 		--out-gcf all_asm_acc.GCF \
 		--out-gca all_asm_acc.GCA \
 		|| { echo "ERROR: all_sample_metadata failed" >&2 ; exit 1 ; }
+}
+
+annotate_geo_provenance () {
+	echo "################################################"
+	echo "##### Flag submitter-vs-sample geolocation ####"
+	echo "################################################"
+	# Appends submitter_country/geo_vs_submitter to all_asm_acc_metadata (cols
+	#   13-14) and writes a per-genome geo_provenance_report.tsv -- flags only,
+	#   never drops or relabels a row. Non-fatal: a genuinely new/mismatched
+	#   NCBI schema should not block the whole gather run over decorative
+	#   metadata, so on failure we warn and leave the 12-column file in place.
+	if python3 "$geo_provenance_tool" annotate \
+		--meta all_asm_acc_metadata \
+		--out all_asm_acc_metadata.geo_provenance.tmp \
+		--report geo_provenance_report.tsv
+	then
+		mv all_asm_acc_metadata.geo_provenance.tmp all_asm_acc_metadata
+	else
+		echo "WARNING: annotate_geo_provenance failed; continuing with the" \
+			"12-column all_asm_acc_metadata (no submitter_country/" \
+			"geo_vs_submitter columns)." >&2
+		rm -f all_asm_acc_metadata.geo_provenance.tmp
+	fi
 }
 
 aggregate_assemblies () {
