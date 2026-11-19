@@ -66,14 +66,18 @@ guarantees EXACTLY these 11 columns per row, one line per DocumentSummary:
     10 ExclFromRefSeq  11 SubmitterOrganization
 ...and after merge-geoloc appends the biosample fields (from
 parse-biosample-xml, see biosample_fields()): 12 geo_loc_name
-13 collected_by  14 sequenced_by  15 biosample_owner.
+13 collected_by  14 sequenced_by  15 biosample_owner  16 lat_lon.
 
-project_metadata() (filter-by-acc) projects this 15-column merged row down to
+project_metadata() (filter-by-acc) projects this 16-column merged row down to
 the stable all_asm_acc_metadata layout: columns 1-8 are the original fields
 (accession, species, species.strain, biosample, taxid, taxcheck, excl, geo),
-then 9 collected_by  10 sequenced_by  11 biosample_owner  12 asm_submitter.
-python_scripts/geo_provenance.py reads that 12-column file and appends
-13 submitter_country  14 geo_vs_submitter -- see its module docstring.
+then 9 collected_by  10 sequenced_by  11 biosample_owner  12 asm_submitter
+13 lat_lon (raw BioSample value, sanitized; INSDC "38.98 N 77.11 W" or decimal
+"38.98,_-77.11" form, or NA).
+python_scripts/geo_provenance.py reads that 13-column file and appends
+14 submitter_country  15 geo_vs_submitter  16 latlon_country
+17 latlon_vs_geo  18 submitter_km  19 latlon_vs_submitter -- see its module
+docstring.
 
 Usage:
     parse_asm_metadata.py parse-assembly-xml --xml F --out F
@@ -263,22 +267,24 @@ def normalize_geoloc(value):
 
 
 def biosample_fields(elem):
-    """Return (accession, geoloc, collected_by, sequenced_by, owner) for one
-    biosample <DocumentSummary>.
+    """Return (accession, geoloc, collected_by, sequenced_by, owner, lat_lon)
+    for one biosample <DocumentSummary>.
 
-    geoloc, collected_by, sequenced_by come from the Attribute whose
+    geoloc, collected_by, sequenced_by, lat_lon come from the Attribute whose
     harmonized_name matches, mirroring the xtract
     `-if Attribute@harmonized_name -equals ...` selector biosample_geoloc()
     used to use for geo_loc_name alone. owner comes from Owner/Name (the
     submitting institution recorded on the BioSample itself, distinct from
     the Assembly-level SubmitterOrganization captured in assembly_row()),
     falling back to a top-level Organization element if Owner/Name is
-    absent. Returns accession="" if the record has no accession (skipped by
-    the caller).
+    absent. lat_lon is returned raw (sanitized, not parsed/validated here --
+    python_scripts/geo_provenance.py owns interpreting its INSDC/decimal
+    formats). Returns accession="" if the record has no accession (skipped
+    by the caller).
     """
     accession = first_text(elem, "Accession", default="")
 
-    raw_geo = raw_collected_by = raw_sequenced_by = None
+    raw_geo = raw_collected_by = raw_sequenced_by = raw_lat_lon = None
     for attr in elem.iter("Attribute"):
         harmonized = attr.get("harmonized_name")
         if harmonized == "geo_loc_name" and raw_geo is None:
@@ -287,6 +293,8 @@ def biosample_fields(elem):
             raw_collected_by = attr.text
         elif harmonized == "sequenced_by" and raw_sequenced_by is None:
             raw_sequenced_by = attr.text
+        elif harmonized == "lat_lon" and raw_lat_lon is None:
+            raw_lat_lon = attr.text
 
     owner = None
     for owner_elem in elem.iter("Owner"):
@@ -303,6 +311,7 @@ def biosample_fields(elem):
         sanitize_field(raw_collected_by),
         sanitize_field(raw_sequenced_by),
         sanitize_field(owner),
+        sanitize_field(raw_lat_lon),
     )
 
 
@@ -342,16 +351,17 @@ def read_acc_set(path):
 
 
 # Number of trailing fields written per row by parse-biosample-xml, after the
-#   accession: geo_loc_name, collected_by, sequenced_by, owner.
-N_BIOSAMPLE_FIELDS = 4
+#   accession: geo_loc_name, collected_by, sequenced_by, owner, lat_lon.
+N_BIOSAMPLE_FIELDS = 5
 
 
 def read_geoloc_map(path):
-    """Map BioSample accession -> [[geo, collected_by, sequenced_by, owner], ...]
-    preserving file order.
+    """Map BioSample accession ->
+    [[geo, collected_by, sequenced_by, owner, lat_lon], ...] preserving file
+    order.
 
     Input is All-<taxon>.biosample.BS_to_Geoloc, one row per biosample_fields()
-    call: ``accession<TAB>geo_loc_name<TAB>collected_by<TAB>sequenced_by<TAB>owner``.
+    call: ``accession<TAB>geo_loc_name<TAB>collected_by<TAB>sequenced_by<TAB>owner<TAB>lat_lon``.
     Every field is already sanitize_field()-clean (no internal whitespace), so
     unlike the old 2-column format this does not need to re-join anything --
     each is kept as its own distinct column. A list of rows (not one row) per
@@ -403,17 +413,19 @@ def project_metadata(fields, acc_index):
     """Project a merged metadata row to the all_asm_acc_metadata column order.
 
     ``fields`` is a merge-geoloc output row split on whitespace: the 11
-    BS_to_meta columns (see module docstring) followed by the 4 biosample
-    columns merge_geoloc() appends (geo, collected_by, sequenced_by, owner),
-    for 15 fields total. N is the accession column (2 = RefSeq for GCF rows,
-    3 = Genbank for GCA rows). Output is the stable 12-column layout:
+    BS_to_meta columns (see module docstring) followed by the 5 biosample
+    columns merge_geoloc() appends (geo, collected_by, sequenced_by, owner,
+    lat_lon), for 16 fields total. N is the accession column (2 = RefSeq for
+    GCF rows, 3 = Genbank for GCA rows). Output is the stable 13-column
+    layout:
 
         accession  species  species.strain  biosample  taxid  taxcheck
         excl_from_refseq  geo_loc  collected_by  sequenced_by
-        biosample_owner  asm_submitter
+        biosample_owner  asm_submitter  lat_lon
 
-    geo_provenance.py reads this file and appends two more columns
-    (submitter_country, geo_vs_submitter); see its module docstring.
+    geo_provenance.py reads this file and appends six more columns
+    (submitter_country, geo_vs_submitter, latlon_country, latlon_vs_geo,
+    submitter_km, latlon_vs_submitter); see its module docstring.
 
     Short rows are padded with empty strings, matching awk's behaviour of
     printing an empty string for a field past NF.
@@ -435,6 +447,7 @@ def project_metadata(fields, acc_index):
         f(14),
         f(15),
         f(11),
+        f(16),
     ])
 
 
@@ -508,14 +521,15 @@ def cmd_parse_biosample_xml(args):
     with open(args.out, "w") as out:
         for elem in iter_document_summaries(args.xml):
             n_records += 1
-            accession, geoloc, collected_by, sequenced_by, owner = (
+            accession, geoloc, collected_by, sequenced_by, owner, lat_lon = (
                 biosample_fields(elem)
             )
             if not accession:
                 continue
             out.write(
-                "{}\t{}\t{}\t{}\t{}\n".format(
-                    accession, geoloc, collected_by, sequenced_by, owner
+                "{}\t{}\t{}\t{}\t{}\t{}\n".format(
+                    accession, geoloc, collected_by, sequenced_by, owner,
+                    lat_lon,
                 )
             )
             n_written += 1

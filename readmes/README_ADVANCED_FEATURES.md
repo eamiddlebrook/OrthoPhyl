@@ -709,6 +709,37 @@ On the NCBI-download path, country data comes for free from each downloaded
 assembly's `geo_loc_name` metadata; `--genome-dir` mode has no such metadata,
 so `--geo-tsv` is mandatory there.
 
+### 13. Geo-Provenance Checks (automatic, flag-only)
+
+During NCBI genome download for `--taxon`/`--input` novel-taxon builds,
+`all_asm_acc_metadata` is automatically annotated with extra columns that
+flag (never drop or relabel) a common data-entry mistake: a submitter typing
+their own institution's location into a sample's geolocation fields instead
+of the actual collection site.
+
+Beyond the original `geo_loc_name` country, the table now carries
+`collected_by`, `sequenced_by`, `biosample_owner`, `asm_submitter`, and
+`lat_lon` (extracted from the BioSample/Assembly XML), plus computed flags:
+`submitter_country`, `geo_vs_submitter` (does the sample's country match the
+submitting org's?), `latlon_country`/`latlon_vs_geo` (does `lat_lon` resolve
+to the same country as `geo_loc_name`?), and, when `--ror-lookup` is passed
+to `gather_filter_asms.sh` (or `--geo-ror` to the wrapper), `submitter_km`/
+`latlon_vs_submitter` — the distance from the sample's coordinates to the
+submitting organization's real-world location via the
+[ROR](https://ror.org/) API, flagging `at_submitter` when the sample
+coordinates are, within ~25 km, literally the lab.
+
+`--geo-ror` is independent of `--geo` (it affects metadata gathering, not
+figure rendering) and does not imply it. ROR network calls are cached and
+never fatal — a lookup failure just leaves that row's submitter-location
+columns `unresolved`.
+
+A `geo_provenance_report.tsv` alongside `all_asm_acc_metadata` carries the
+same fields per genome, and the annotation step logs a summary: counts per
+flag, plus submitter orgs whose samples are ≥90% `match` with their own
+country — the clearest sign of a lab that defaults every sample's location
+to its own.
+
 ---
 
 [← Back to Main README](../README.md)

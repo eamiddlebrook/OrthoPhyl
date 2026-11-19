@@ -160,6 +160,7 @@ class PipelineWrapper:
         geo_format: str = 'png',
         geo_highlight: Optional[str] = None,
         geo_query_top_k: int = 25,
+        geo_ror: bool = False,
     ):
         # Validate mutually exclusive mode flags (--input / --taxon / --genome-dir)
         modes_given = sum(bool(x) for x in (input_file, taxon, genome_dir))
@@ -420,6 +421,12 @@ class PipelineWrapper:
         self.geo_highlight = geo_highlight
         self.geo_query_top_k = geo_query_top_k
         self._geo_query_ids: set = set()
+        # --geo-ror: opt-in ROR lookup during metadata gathering (gather_filter_
+        #   asms.sh's annotate_geo_provenance step), for the submitter_km /
+        #   latlon_vs_submitter columns. Independent of --geo (figure
+        #   rendering) -- this affects all_asm_acc_metadata, not figures, so
+        #   it does NOT imply --geo and isn't part of the --geo-* fixup block.
+        self.geo_ror = geo_ror
 
         # Script paths (relative to this wrapper)
         self.script_dir = Path(__file__).parent
@@ -2310,6 +2317,13 @@ class PipelineWrapper:
             cmd.append('--download-only')
         elif qc_only:
             cmd.append('--qc-only')
+
+        # --ror-lookup only matters when the download phase runs (full or
+        #   download_only) -- annotate_geo_provenance executes there, not in
+        #   qc_only mode.
+        if self.geo_ror and not qc_only:
+            cmd.append('--ror-lookup')
+            logger.info(f"  ROR lookup enabled for geo-provenance annotation")
 
         # QC-time flags only matter when QC runs (full or qc_only). In
         # download_only mode CheckM2 never runs, so skip them.
@@ -4427,6 +4441,17 @@ Examples:
              'nearest genomes (any country, same-country included) to draw '
              'lines to on the dedicated query-centric map. Default 25.'
     )
+    geo_group.add_argument(
+        '--geo-ror',
+        action='store_true',
+        help='Does NOT imply --geo (it affects metadata gathering, not '
+             'figure rendering). During NCBI genome download, look up each '
+             'submitting organization\'s physical location via the ROR API '
+             'and flag samples whose lat_lon matches the submitter\'s own '
+             'coordinates/country (a common data-entry leak) in '
+             'all_asm_acc_metadata / geo_provenance_report.tsv. Network '
+             'calls are cached; failures are logged and non-fatal.'
+    )
 
     low_importance_group = parser.add_argument_group('Low importance')
     low_importance_group.add_argument(
@@ -4556,6 +4581,7 @@ Examples:
         geo_format=args.geo_format,
         geo_highlight=args.geo_highlight,
         geo_query_top_k=args.geo_query_top_k,
+        geo_ror=args.geo_ror,
     )
 
     return wrapper.run()

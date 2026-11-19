@@ -103,6 +103,11 @@ keep_failing_query=false
 download_only=false
 qc_only=false
 
+# Opt-in network lookup (ROR API) of the submitter org's own coordinates,
+#   used by annotate_geo_provenance to compute submitter_km/latlon_vs_submitter.
+#   Off by default: it's an extra network dependency for a flag-only check.
+ror_lookup=false
+
 # Parse optional flags. --query-genomes and --must-keep take a value, given either
 #   as the next token ("--must-keep GCF_x,GCF_y") or inline ("--must-keep=GCF_x,...").
 prev_flag=""
@@ -127,6 +132,10 @@ for arg in "$@"; do
         --qc-only)
             qc_only=true
             echo "QC-only mode: skipping download, QC-ing pre-staged assemblies_all.TMP/" ;;
+        --ror-lookup)
+            ror_lookup=true
+            echo "ROR lookup enabled: geo-provenance annotation will look up" \
+                "submitter org coordinates via the ROR API" ;;
         --query-genomes=*) query_genomes_arg="${arg#*=}" ;;
         --must-keep=*)     must_keep_arg="${arg#*=}" ;;
         --query-genomes|--must-keep) prev_flag="$arg" ;;
@@ -643,21 +652,27 @@ annotate_geo_provenance () {
 	echo "################################################"
 	echo "##### Flag submitter-vs-sample geolocation ####"
 	echo "################################################"
-	# Appends submitter_country/geo_vs_submitter to all_asm_acc_metadata (cols
-	#   13-14) and writes a per-genome geo_provenance_report.tsv -- flags only,
+	# Appends submitter_country/geo_vs_submitter/latlon_country/latlon_vs_geo/
+	#   submitter_km/latlon_vs_submitter to all_asm_acc_metadata (cols 14-19)
+	#   and writes a per-genome geo_provenance_report.tsv -- flags only,
 	#   never drops or relabels a row. Non-fatal: a genuinely new/mismatched
 	#   NCBI schema should not block the whole gather run over decorative
-	#   metadata, so on failure we warn and leave the 12-column file in place.
+	#   metadata, so on failure we warn and leave the 13-column file in place.
+	ror_args=()
+	if [ "$ror_lookup" = true ]; then
+		ror_args=(--ror --ror-cache "$wd"/ror_cache.json)
+	fi
 	if python3 "$geo_provenance_tool" annotate \
 		--meta all_asm_acc_metadata \
 		--out all_asm_acc_metadata.geo_provenance.tmp \
-		--report geo_provenance_report.tsv
+		--report geo_provenance_report.tsv \
+		"${ror_args[@]}"
 	then
 		mv all_asm_acc_metadata.geo_provenance.tmp all_asm_acc_metadata
 	else
 		echo "WARNING: annotate_geo_provenance failed; continuing with the" \
-			"12-column all_asm_acc_metadata (no submitter_country/" \
-			"geo_vs_submitter columns)." >&2
+			"13-column all_asm_acc_metadata (no submitter_country/" \
+			"geo_vs_submitter/latlon_* columns)." >&2
 		rm -f all_asm_acc_metadata.geo_provenance.tmp
 	fi
 }

@@ -506,18 +506,18 @@ class TestWriteMetadataTsv:
         gva.write_metadata_tsv(["g1"], genomes, data_report_recs, out)
         line = out.read_text().strip()
         fields = line.split(" ")
-        # Exactly 12 columns (8 original + 4 NA submitter-provenance
+        # Exactly 13 columns (8 original + 5 NA submitter-provenance/lat_lon
         # placeholders, see parse_asm_metadata.py's project_metadata) -- a
         # raw space in species/geo would silently produce more, shifting
         # every later column for a whitespace-split reader (see
         # annotate_tree_by_country.py's parse_metadata).
-        assert len(fields) == 12
+        assert len(fields) == 13
         assert fields[0] == "g1"  # accession == genome_id
         assert fields[1] == "Norovirus_GII"  # space collapsed to underscore
         assert fields[3] == "g1"  # biosample == genome_id (no real biosample)
         assert "142786" in fields
         assert fields[7] == "Japan"  # geo_loc, column 8
-        assert fields[8:12] == ["NA", "NA", "NA", "NA"]
+        assert fields[8:13] == ["NA", "NA", "NA", "NA", "NA"]
 
     def test_species_and_geo_spaces_are_sanitized(self, gva, tmp_path):
         genomes = {"g1": {"representative_accession": "ACC1"}}
@@ -529,7 +529,7 @@ class TestWriteMetadataTsv:
         out = tmp_path / "all_asm_acc_metadata"
         gva.write_metadata_tsv(["g1"], genomes, data_report_recs, out)
         fields = out.read_text().strip().split(" ")
-        assert len(fields) == 12
+        assert len(fields) == 13
         assert fields[1] == "Some_Virus_Name"
         assert fields[7] == "USA:_California"
 
@@ -539,8 +539,8 @@ class TestWriteMetadataTsv:
         gva.write_metadata_tsv(["g1"], genomes, [], out)
         line = out.read_text().rstrip("\n")
         fields = line.split(" ")
-        assert len(fields) == 12
+        assert len(fields) == 13
         assert fields[0] == "g1"
         assert fields[4] == ""  # taxid blank (no virus-package equivalent)
         assert fields[5:7] == ["NA", "NA"]  # taxcheck/excl_from_refseq
-        assert fields[8:12] == ["NA", "NA", "NA", "NA"]
+        assert fields[8:13] == ["NA", "NA", "NA", "NA", "NA"]

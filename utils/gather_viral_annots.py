@@ -408,14 +408,14 @@ def write_metadata_tsv(written_genome_ids, genomes, data_report_recs, out_path):
 
         accession species species.strain biosample taxid taxcheck
         excl_from_refseq geo_loc collected_by sequenced_by biosample_owner
-        asm_submitter
+        asm_submitter lat_lon
 
     Virus genome packages carry no BioSample accession of their own, so
     ``accession`` and ``biosample`` are both set to the sanitized genome ID
     -- the same stem used for ``<genome_id>.fna``/``.faa`` -- so a later
     ``--geo`` lookup (keyed on column 1) resolves against the same ID used
     everywhere else in this pipeline. ``taxcheck``/``excl_from_refseq`` and
-    the trailing submitter-provenance columns (9-12, see
+    the trailing submitter-provenance columns (9-13, see
     ``geo_provenance.py``) have no virus-package equivalent and are set to
     "NA" -- NOT "", which a whitespace-`.split()` reader (e.g.
     ``annotate_tree_by_country.py``'s ``parse_metadata``) collapses away,
@@ -439,7 +439,7 @@ def write_metadata_tsv(written_genome_ids, genomes, data_report_recs, out_path):
         geo = _sanitize_field((rec.get("location") or {}).get("geographicLocation", ""))
         lines.append(" ".join([
             genome_id, species, f"{species}.{genome_id}", genome_id,
-            taxid, "NA", "NA", geo, "NA", "NA", "NA", "NA",
+            taxid, "NA", "NA", geo, "NA", "NA", "NA", "NA", "NA",
         ]))
     Path(out_path).write_text("".join(f"{l}\n" for l in lines))
 

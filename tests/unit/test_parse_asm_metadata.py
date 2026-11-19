@@ -123,10 +123,11 @@ def asm_xml(*records, **kw):
 
 
 def bios_record(accession="SAMN001", geoloc="USA", other_attrs=True,
-                 collected_by=None, sequenced_by=None, owner=None):
-    """Build one biosample <DocumentSummary>. collected_by/sequenced_by/owner
-    are omitted from the XML entirely unless given, so most callers exercise
-    the "NA" default without having to say so."""
+                 collected_by=None, sequenced_by=None, owner=None,
+                 lat_lon=None):
+    """Build one biosample <DocumentSummary>. collected_by/sequenced_by/owner/
+    lat_lon are omitted from the XML entirely unless given, so most callers
+    exercise the "NA" default without having to say so."""
     parts = ["  <DocumentSummary>"]
     parts.append("    <Accession>%s</Accession>" % accession)
     parts.append("    <SampleData>")
@@ -150,6 +151,9 @@ def bios_record(accession="SAMN001", geoloc="USA", other_attrs=True,
         parts.append('          <Attribute attribute_name="sequenced_by" '
                      'harmonized_name="sequenced_by">%s</Attribute>'
                      % sequenced_by)
+    if lat_lon is not None:
+        parts.append('          <Attribute attribute_name="lat_lon" '
+                     'harmonized_name="lat_lon">%s</Attribute>' % lat_lon)
     parts.append("        </Attributes>")
     parts.append("      </BioSample>")
     parts.append("    </SampleData>")
@@ -240,29 +244,30 @@ class TestNormalizeGeoloc:
 class TestBiosampleFields:
     def test_extracts_geoloc_attribute(self, mp):
         import xml.etree.ElementTree as ET
-        acc, geo, collected_by, sequenced_by, owner = mp.biosample_fields(
+        acc, geo, collected_by, sequenced_by, owner, lat_lon = mp.biosample_fields(
             ET.fromstring(bios_record()))
         assert (acc, geo) == ("SAMN001", "USA")
         assert collected_by == "NA"
         assert sequenced_by == "NA"
         assert owner == "NA"
+        assert lat_lon == "NA"
 
     def test_picks_geoloc_not_other_attributes(self, mp):
         """Must select by harmonized_name, not by position."""
         import xml.etree.ElementTree as ET
-        _, geo, _, _, _ = mp.biosample_fields(
+        _, geo, _, _, _, _ = mp.biosample_fields(
             ET.fromstring(bios_record(geoloc="China", other_attrs=True)))
         assert geo == "China"
 
     def test_absent_geoloc_is_NA(self, mp):
         import xml.etree.ElementTree as ET
-        acc, geo, _, _, _ = mp.biosample_fields(
+        acc, geo, _, _, _, _ = mp.biosample_fields(
             ET.fromstring(bios_record(geoloc=None)))
         assert (acc, geo) == ("SAMN001", "NA")
 
     def test_collected_by_and_sequenced_by_extracted_by_harmonized_name(self, mp):
         import xml.etree.ElementTree as ET
-        _, _, collected_by, sequenced_by, _ = mp.biosample_fields(
+        _, _, collected_by, sequenced_by, _, _ = mp.biosample_fields(
             ET.fromstring(bios_record(collected_by="Jane Doe",
                                        sequenced_by="Core Facility")))
         assert collected_by == "Jane_Doe"
@@ -270,9 +275,21 @@ class TestBiosampleFields:
 
     def test_owner_from_owner_name_element(self, mp):
         import xml.etree.ElementTree as ET
-        _, _, _, _, owner = mp.biosample_fields(
+        _, _, _, _, owner, _ = mp.biosample_fields(
             ET.fromstring(bios_record(owner="National Center")))
         assert owner == "National_Center"
+
+    def test_lat_lon_extracted_by_harmonized_name(self, mp):
+        import xml.etree.ElementTree as ET
+        _, _, _, _, _, lat_lon = mp.biosample_fields(
+            ET.fromstring(bios_record(lat_lon="38.98 N 77.11 W")))
+        assert lat_lon == "38.98_N_77.11_W"
+
+    def test_absent_lat_lon_is_NA(self, mp):
+        import xml.etree.ElementTree as ET
+        _, _, _, _, _, lat_lon = mp.biosample_fields(
+            ET.fromstring(bios_record(lat_lon=None)))
+        assert lat_lon == "NA"
 
 
 class TestIterDocumentSummaries:
@@ -355,7 +372,7 @@ class TestXMLCLI:
         assert r.returncode == 0, r.stderr
 
         fields = merged.read_text().strip().split()
-        assert len(fields) == 15
+        assert len(fields) == 16
         assert fields[8] == "OK"       # taxcheck stayed in column 9
         assert fields[11] == "Sweden"  # geolocation is a country, not "OK"
         assert "WARNING" not in r.stderr
@@ -394,10 +411,10 @@ class TestXMLCLI:
         assert parsed["SAMN002"][1] == "India"
         assert parsed["SAMN003"][1] == "Unknown"
         assert parsed["SAMN004"][1] == "NA"
-        # collected_by/sequenced_by/owner default to NA when absent from the XML.
+        # collected_by/sequenced_by/owner/lat_lon default to NA when absent.
         for fields in parsed.values():
-            assert len(fields) == 5
-            assert fields[2:] == ["NA", "NA", "NA"]
+            assert len(fields) == 6
+            assert fields[2:] == ["NA", "NA", "NA", "NA"]
 
     def test_empty_xml_warns_and_succeeds(self, tmp_path):
         xml = tmp_path / "empty.xml"
@@ -478,10 +495,11 @@ class TestMergeGeoloc:
 class TestReadGeolocMap:
     def test_reads_tab_table(self, mp, tmp_path):
         f = tmp_path / "geo"
-        f.write_text("SAMN001\tUSA\tNA\tNA\tNA\nSAMN002\tJapan\tNA\tNA\tNA\n")
+        f.write_text(
+            "SAMN001\tUSA\tNA\tNA\tNA\tNA\nSAMN002\tJapan\tNA\tNA\tNA\tNA\n")
         assert mp.read_geoloc_map(str(f)) == {
-            "SAMN001": [["USA", "NA", "NA", "NA"]],
-            "SAMN002": [["Japan", "NA", "NA", "NA"]],
+            "SAMN001": [["USA", "NA", "NA", "NA", "NA"]],
+            "SAMN002": [["Japan", "NA", "NA", "NA", "NA"]],
         }
 
     def test_missing_file_is_empty(self, mp, tmp_path):
@@ -489,14 +507,18 @@ class TestReadGeolocMap:
 
     def test_duplicate_accession_accumulates(self, mp, tmp_path):
         f = tmp_path / "geo"
-        f.write_text("SAMN001\tUSA\tNA\tNA\tNA\nSAMN001\tCanada\tNA\tNA\tNA\n")
+        f.write_text(
+            "SAMN001\tUSA\tNA\tNA\tNA\tNA\nSAMN001\tCanada\tNA\tNA\tNA\tNA\n")
         assert mp.read_geoloc_map(str(f)) == {
-            "SAMN001": [["USA", "NA", "NA", "NA"], ["Canada", "NA", "NA", "NA"]],
+            "SAMN001": [["USA", "NA", "NA", "NA", "NA"],
+                        ["Canada", "NA", "NA", "NA", "NA"]],
         }
 
     def test_blank_lines_skipped(self, mp, tmp_path):
         f = tmp_path / "geo"
-        f.write_text("SAMN001\tUSA\tNA\tNA\tNA\n\n   \nSAMN002\tJapan\tNA\tNA\tNA\n")
+        f.write_text(
+            "SAMN001\tUSA\tNA\tNA\tNA\tNA\n\n   \n"
+            "SAMN002\tJapan\tNA\tNA\tNA\tNA\n")
         assert len(mp.read_geoloc_map(str(f))) == 2
 
     def test_accession_with_no_location(self, mp, tmp_path):
@@ -504,15 +526,15 @@ class TestReadGeolocMap:
         f = tmp_path / "geo"
         f.write_text("SAMN001\n")
         assert mp.read_geoloc_map(str(f)) == {
-            "SAMN001": [["NA", "NA", "NA", "NA"]],
+            "SAMN001": [["NA", "NA", "NA", "NA", "NA"]],
         }
 
     def test_short_row_is_padded_with_NA(self, mp, tmp_path):
-        """Legacy/malformed rows shorter than 4 trailing fields are padded."""
+        """Legacy/malformed rows shorter than 5 trailing fields are padded."""
         f = tmp_path / "geo"
         f.write_text("SAMN001\tUSA\n")
         assert mp.read_geoloc_map(str(f)) == {
-            "SAMN001": [["USA", "NA", "NA", "NA"]],
+            "SAMN001": [["USA", "NA", "NA", "NA", "NA"]],
         }
 
 
@@ -520,20 +542,20 @@ class TestReadGeolocMap:
 # filter_by_acc / project_metadata -- replacing `grep -f` + awk                #
 # --------------------------------------------------------------------------- #
 
-# Merged rows (15 columns) as they appear in BS_to_all_meta.
-MERGED_A = META_A.replace("\t", " ") + " USA CollectorA SeqA OwnerA"
-MERGED_B = META_B.replace("\t", " ") + " Japan CollectorB SeqB OwnerB"
-MERGED_C = META_C.replace("\t", " ") + " Egypt CollectorC SeqC OwnerC"
+# Merged rows (16 columns) as they appear in BS_to_all_meta.
+MERGED_A = META_A.replace("\t", " ") + " USA CollectorA SeqA OwnerA 38.98,-77.11"
+MERGED_B = META_B.replace("\t", " ") + " Japan CollectorB SeqB OwnerB NA"
+MERGED_C = META_C.replace("\t", " ") + " Egypt CollectorC SeqC OwnerC NA"
 
 
 class TestProjectMetadata:
     def test_refseq_projection_matches_awk(self, mp):
-        """Projects $2,$4,$4"."$5,$1,$8,$9,$10,$12,$13,$14,$15,$11 for GCF rows."""
+        """Projects $2,$4,$4"."$5,$1,$8,$9,$10,$12,$13,$14,$15,$11,$16 for GCF rows."""
         fields = MERGED_A.split()
         assert mp.project_metadata(fields, acc_index=2) == " ".join([
             "GCF_000000001.1", "Escherichia_coli", "Escherichia_coli.K12",
             "SAMN001", "562", "OK", "na", "USA",
-            "CollectorA", "SeqA", "OwnerA", "Univ_A",
+            "CollectorA", "SeqA", "OwnerA", "Univ_A", "38.98,-77.11",
         ])
 
     def test_genbank_projection_uses_column_3(self, mp):
@@ -557,12 +579,13 @@ class TestProjectMetadata:
         assert out.split()[7] == "USA"
 
     def test_collected_by_sequenced_by_owner_submitter_columns(self, mp):
-        """geo_provenance.py reads columns 9-12 of all_asm_acc_metadata."""
+        """geo_provenance.py reads columns 9-13 of all_asm_acc_metadata."""
         out = mp.project_metadata(MERGED_A.split(), acc_index=2).split()
         assert out[8] == "CollectorA"
         assert out[9] == "SeqA"
         assert out[10] == "OwnerA"
         assert out[11] == "Univ_A"
+        assert out[12] == "38.98,-77.11"
 
 
 class TestFilterByAcc:
@@ -661,7 +684,7 @@ class TestCLI:
         assert r.returncode == 0, r.stderr
         lines = out.read_text().strip().split("\n")
         assert len(lines) == 2
-        assert all(len(ln.split()) == 15 for ln in lines)
+        assert all(len(ln.split()) == 16 for ln in lines)
 
     def test_merge_geoloc_empty_geoloc_warns_and_succeeds(self, tmp_path):
         """Geolocation is decorative; a missing table must not fail the run."""
