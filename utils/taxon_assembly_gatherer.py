@@ -67,20 +67,40 @@ GTDB_PREFIX = {
 }
 GTDB_ORDER = ['d', 'p', 'c', 'o', 'f', 'g', 's']
 
+# NCBI TaxID for "Viruses". Viral-taxon detection must walk the TaxID parent
+# chain (see NCBITaxonomy.get_taxid_chain / is_viral_taxid) rather than match
+# a rank *name* -- NCBI's root rank label for Viruses has changed over time
+# (and realm/kingdom-level ranks used under Viruses aren't in GTDB_PREFIX at
+# all), so rank-name matching alone can't reliably identify a viral lineage.
+VIRUS_TAXID = '10239'
 
-def render_gtdb_lineage(lineage: Dict[str, str]) -> str:
+
+def is_viral_taxid(taxid_chain: List[str]) -> bool:
+    """True if ``taxid_chain`` (as returned by NCBITaxonomy.get_taxid_chain)
+    includes the Viruses TaxID anywhere in its ancestry."""
+    return VIRUS_TAXID in taxid_chain
+
+
+def render_gtdb_lineage(lineage: Dict[str, str], is_viral: bool = False) -> str:
     """Render an NCBI-rank-named lineage dict as a GTDB-format taxonomy string.
 
     ``lineage`` maps NCBI rank names (e.g. ``"genus"``) to taxon names, as returned
     by :meth:`NCBITaxonomy.get_lineage`. Ranks with no GTDB slot (e.g. NCBI's
     "kingdom", "no rank") are ignored. Emits ranks from domain down to the deepest
     one actually present; returns "" if nothing maps to a GTDB rank.
+
+    ``is_viral`` forces the domain slot to ``Viruses`` regardless of what (if
+    anything) the rank-name mapping produced there -- see VIRUS_TAXID/
+    is_viral_taxid for why rank names alone can't be trusted for this.
     """
     by_prefix = {}
     for ncbi_rank, name in lineage.items():
         prefix = GTDB_PREFIX.get(ncbi_rank)
         if prefix:
             by_prefix[prefix] = name
+
+    if is_viral:
+        by_prefix['d'] = 'Viruses'
 
     deepest = None
     for prefix in GTDB_ORDER:
@@ -183,23 +203,44 @@ class NCBITaxonomy:
         """Get full taxonomic lineage for a taxid."""
         lineage = {}
         current_taxid = str(taxid)
-        
+
         visited = set()
         while current_taxid in self.nodes and current_taxid not in visited:
             visited.add(current_taxid)
-            
+
             node = self.nodes[current_taxid]
             rank = node['rank']
             name = self.names.get(current_taxid, 'Unknown')
-            
+
             lineage[rank] = name
-            
+
             parent = node['parent']
             if parent == current_taxid:  # Root node
                 break
             current_taxid = parent
-        
+
         return lineage
+
+    def get_taxid_chain(self, taxid: str) -> List[str]:
+        """Return the ordered list of TaxIDs from ``taxid`` up to the root.
+
+        Unlike :meth:`get_lineage` (keyed by rank *name*), this is the right
+        tool for viral-lineage detection: NCBI's root rank label for Viruses
+        has changed over time (see ``VIRUS_TAXID``/``is_viral_taxid``), so
+        matching a rank name is not reliable, but the TaxID 10239 itself
+        is stable.
+        """
+        chain = []
+        current_taxid = str(taxid)
+        visited = set()
+        while current_taxid in self.nodes and current_taxid not in visited:
+            visited.add(current_taxid)
+            chain.append(current_taxid)
+            parent = self.nodes[current_taxid]['parent']
+            if parent == current_taxid:  # Root node
+                break
+            current_taxid = parent
+        return chain
 
 
 class TaxonAssemblyGatherer:
@@ -241,9 +282,10 @@ class TaxonAssemblyGatherer:
         
         self.taxon_name = self.taxonomy.get_name(self.taxid)
         self.taxon_rank = self.taxonomy.get_rank(self.taxid)
-        
+        self.is_viral = is_viral_taxid(self.taxonomy.get_taxid_chain(self.taxid))
+
         logger.info(f"Resolved taxon: {self.taxon_name} (TaxID: {self.taxid}, Rank: {self.taxon_rank})")
-        
+
         # Storage
         self.assemblies = []
     
@@ -624,10 +666,11 @@ class TaxonAssemblyGatherer:
 
         Walks the NCBI lineage of ``self.taxid`` and renders it as
         ``d__Bacteria;p__...;...`` up to the most specific defined rank. Ranks with no
-        NCBI name are rendered as empty (e.g. ``s__``).
+        NCBI name are rendered as empty (e.g. ``s__``). For a viral taxon
+        (``self.is_viral``), the domain slot is forced to ``Viruses``.
         """
         lineage = self.taxonomy.get_lineage(self.taxid)
-        return render_gtdb_lineage(lineage)
+        return render_gtdb_lineage(lineage, is_viral=self.is_viral)
 
     def download_assemblies(self, assemblies: List[Dict], download_dir: Path):
         """Download genome FASTAs for the given assemblies from the NCBI FTP site.

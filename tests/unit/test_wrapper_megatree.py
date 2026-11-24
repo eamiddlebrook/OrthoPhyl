@@ -121,6 +121,7 @@ class TestCreateModeMegatreeDispatch:
         class FakeGatherer:
             taxid = "123"
             taxon_rank = "genus"
+            is_viral = False
             def __init__(self, **k): pass
             def get_taxonomy_string(self): return "d__Bacteria;g__Andreesenella"
         fake_mod = types.ModuleType("taxon_assembly_gatherer")

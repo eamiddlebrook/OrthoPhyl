@@ -240,6 +240,7 @@ def make_db_dir(tmp_path):
         source_genome_dir=None,
         taxonomy_source=None,
         qc_applied=None,
+        annotator=None,
     ):
         base = Path(parent) if parent else (tmp_path / "databases")
         base.mkdir(parents=True, exist_ok=True)
@@ -265,6 +266,8 @@ def make_db_dir(tmp_path):
             config["taxonomy_source"] = taxonomy_source
         if qc_applied is not None:
             config["qc_applied"] = qc_applied
+        if annotator is not None:
+            config["annotator"] = annotator
         if is_subclade or is_backbone:
             # Write a dummy sketch + members file so router MASH tie-break has
             # concrete paths to work with (contents don't matter when mash is mocked).

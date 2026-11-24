@@ -118,6 +118,7 @@ class PipelineWrapper:
         verbose: int = 0,
         low_ram: bool = False,
         use_bbmap: bool = False,
+        checkm_threads: Optional[int] = None,
         must_keep: Optional[str] = None,
         keep_failing_query: bool = False,
         ani_shortlist: int = 20,
@@ -152,6 +153,14 @@ class PipelineWrapper:
         clade_rank: str = 'g',
         clade_taxonomy: Optional[str] = None,
         skip_qc: bool = False,
+        # NEW: viral annotation (VADR -> VIGOR4 fallback) instead of Prodigal,
+        #   for raw eukaryotic viral genome assemblies. Only --genome-dir is
+        #   supported for now (see validation below) -- NCBI viral annotation
+        #   download is Task 2, not yet implemented.
+        annotator: str = 'prodigal',
+        vadr_model_libs: Optional[str] = None,
+        vigor_db: str = 'auto',
+        vigor_db_dir: Optional[Path] = None,
         # NEW: geographic-origin figures (tree + world map with patristic
         #   pair lines between sample countries)
         geo: bool = False,
@@ -224,6 +233,7 @@ class PipelineWrapper:
         self.verbose = verbose
         self.low_ram = low_ram
         self.use_bbmap = use_bbmap
+        self.checkm_threads = checkm_threads
         # Genome-retention controls, passed through to gather_filter_asms.sh.
         #   must_keep : comma-sep accession list OR path to a file (one per line);
         #               these must survive QC or the download aborts.
@@ -324,6 +334,56 @@ class PipelineWrapper:
         self.clade_rank = clade_rank
         self.clade_taxonomy = clade_taxonomy
         self.skip_qc = skip_qc
+
+        # NEW: viral annotation (VADR -> VIGOR4 fallback), passed through to
+        #   every OrthoPhyl.sh build (_run_orthophyl) as --annotator/
+        #   --vadr-models/--vigor-db/--vigor-db-dir. ReLeaf placement
+        #   (_run_releaf) does NOT use this CLI value -- it reads the TARGET
+        #   DATABASE's own `annotator` field (via the routing-decision JSON
+        #   chain: OP_database_tool.py writes it, assembly_router.py reads it
+        #   back), so a query routed to a viral DB is always re-annotated
+        #   viral-style regardless of this run's own --annotator default.
+        #   Only --genome-dir is supported here: --taxon/--input novel-taxon
+        #   builds detect viral taxa on their own (gatherer.is_viral, via the
+        #   NCBI taxid chain) and download NCBI's existing CDS+protein
+        #   annotations directly (_download_viral_genomes) -- there is no
+        #   raw assembly to run VADR/VIGOR4 over on that path, so
+        #   --annotator viral (which forces VADR/VIGOR4 over genomes already
+        #   on disk) would be a mismatched combination, not a missing
+        #   feature.
+        if annotator not in ('prodigal', 'viral'):
+            raise ValueError(f"--annotator must be one of prodigal/viral, got: {annotator!r}")
+        if annotator == 'viral':
+            if taxon is not None or input_file is not None:
+                raise ValueError(
+                    "--annotator viral is only supported with --genome-dir "
+                    "-- --taxon/--input novel-taxon builds detect viral "
+                    "taxa automatically and download NCBI's existing "
+                    "annotations directly (no VADR/VIGOR4 needed there). "
+                    "Use --genome-dir with raw genomes already on disk "
+                    "instead.")
+            if megatree:
+                raise ValueError(
+                    "--annotator viral is not yet supported with --megatree.")
+            if not vadr_model_libs:
+                raise ValueError("--vadr-models is required with --annotator viral.")
+            if not vigor_db_dir:
+                raise ValueError("--vigor-db-dir is required with --annotator viral.")
+        self.annotator = annotator
+        self.vadr_model_libs = vadr_model_libs
+        self.vigor_db = vigor_db
+        self.vigor_db_dir = Path(vigor_db_dir) if vigor_db_dir else None
+
+        # CheckM2 QC is bacteria-only and does not apply to viral genomes --
+        #   skip it automatically instead of requiring the user to also
+        #   remember --skip-qc (mirrors --megatree-lazy's auto-registration
+        #   fix: don't make the caller discover a silent gap by hand).
+        if self.local_mode and annotator == 'viral' and not self.skip_qc:
+            logger.warning(
+                "  --annotator viral: CheckM2 QC is bacteria-only -- "
+                "skipping QC automatically (qc_applied will be recorded "
+                "as False).")
+            self.skip_qc = True
 
         # NEW: large-taxon handling. When a taxon's RAW downloaded genome set
         #   exceeds max_tree_genomes, the DEFAULT behavior is to build ONE tree from
@@ -439,6 +499,10 @@ class PipelineWrapper:
         self.geo_figures_script = self.script_dir / "python_scripts" / "annotate_tree_by_country.py"
         self.orthophyl_script = self.script_dir / "OrthoPhyl.sh"
         self.releaf_script = self.script_dir / "ReLeaf.sh"
+        # NCBI viral annotation downloader (Task 2) -- a fixed internal script,
+        #   not user-configurable like --gather-script, since it's only ever
+        #   invoked for a taxon the wrapper itself detected as viral.
+        self.viral_gather_script = self.script_dir / "utils" / "gather_viral_annots.py"
         
         # Output subdirectories
         self.routing_dir = self.output_dir / "00_routing"
@@ -636,6 +700,7 @@ class PipelineWrapper:
                 logger.info(f"  Skip download: {self.skip_download}")
                 logger.info(f"  Low RAM mode: {self.low_ram}")
                 logger.info(f"  Use bbmap stats: {self.use_bbmap}")
+                logger.info(f"  CheckM2 threads override: {self.checkm_threads or 'auto'}")
             
             # Phase 1: Initialization
             self._phase_initialization()
@@ -1011,7 +1076,8 @@ class PipelineWrapper:
                     'database': decision['matched_database'],
                     'database_dir': self._resolve_against_database_dir(decision['database_dir']),
                     'tree_method': decision.get('tree_method', 'iqtree'),
-                    'tree_data': decision.get('tree_data', 'CDS')
+                    'tree_data': decision.get('tree_data', 'CDS'),
+                    'annotator': decision.get('annotator', 'prodigal'),
                 })
             elif pipeline == 'OrthoPhyl_subclade_build':
                 # Lazy subclade: registered (built=false) at partition time but
@@ -1090,7 +1156,8 @@ class PipelineWrapper:
             db_dir = Path(assemblies[0]['database_dir'])
             tree_method = assemblies[0]['tree_method']
             tree_data = assemblies[0]['tree_data']
-            
+            annotator = assemblies[0].get('annotator', 'prodigal')
+
             # Run ReLeaf
             output_dir = self.releaf_dir / database_name
             try:
@@ -1101,7 +1168,8 @@ class PipelineWrapper:
                     tree_method=tree_method,
                     tree_data=tree_data,
                     database_name=database_name,
-                    n_assemblies=len(assemblies)
+                    n_assemblies=len(assemblies),
+                    annotator=annotator,
                 )
                 self._write_checkpoint(checkpoint_name)
             except Exception as e:
@@ -1117,31 +1185,75 @@ class PipelineWrapper:
     def _run_releaf(
         self,
         database_dir: Path,
-        input_genomes: Path,
+        input_genomes: Optional[Path],
         output_dir: Path,
         tree_method: str,
         tree_data: str,
         database_name: str,
-        n_assemblies: int = 0
+        n_assemblies: int = 0,
+        annotator: str = 'prodigal',
+        annotation_dirs: Optional[Tuple[Path, Path]] = None,
     ):
-        """Execute ReLeaf for a single database."""
+        """Execute ReLeaf for a single database.
+
+        annotator: the TARGET DATABASE's own annotator (from its
+        database_config.json, via the routing-decision chain), NOT this
+        run's --annotator CLI default -- a query routed to a viral DB must
+        always be annotated viral-style, regardless of how this run was
+        invoked. When it's 'viral', this run still needs --vadr-models/
+        --vigor-db-dir on the command line (CLI-level tool/DB paths, not
+        per-database) to annotate the new query the same way the DB's
+        existing genomes were.
+
+        annotation_dirs (nucl_dir, prot_dir), mutually exclusive with
+        input_genomes: skips ReLeaf's raw-genome annotation step entirely
+        (ReLeaf.sh's -a, same as _run_orthophyl's -a for OrthoPhyl.sh) --
+        used by the viral update-mode path, where the new genomes are
+        NCBI's own pre-annotated CDS+protein, not raw FASTAs needing
+        VADR/VIGOR4. When set, the annotator=='viral' VADR/VIGOR flags
+        below are skipped (there is nothing left to annotate).
+        """
+        if (input_genomes is None) == (annotation_dirs is None):
+            raise ValueError(
+                "_run_releaf requires exactly one of input_genomes or "
+                "annotation_dirs")
+
         # Handle stale ReLeaf_dir from previous run
         releaf_dir = database_dir / 'orthophyl_run' / 'ReLeaf_dir'
         if releaf_dir.exists() and not self.resume:
             logger.warning(f"  ⚠ Removing stale ReLeaf output: {releaf_dir}")
             shutil.rmtree(releaf_dir)
-        
+
         # Fix: Use correct ReLeaf.sh flags (see script_lib/arg_parse_addem.sh)
-        # -s/--storage_dir, -g/--genome_dir, -t/--threads, -p/--phylo_tool, -o/--omics
+        # -s/--storage_dir, -g/--genome_dir or -a/--annotations, -t/--threads,
+        # -p/--phylo_tool, -o/--omics
         cmd = [
             str(self.releaf_script),
             '-s', str(database_dir / 'orthophyl_run'),  # --storage_dir (not --store)
-            '-g', str(input_genomes),                    # --genome_dir (not --input_genomes)
+        ]
+        if annotation_dirs is not None:
+            nucl_dir, prot_dir = annotation_dirs
+            cmd += ['-a', f"{nucl_dir},{prot_dir}"]
+        else:
+            cmd += ['-g', str(input_genomes)]              # --genome_dir (not --input_genomes)
+        cmd += [
             '-t', str(self.threads),                     # --threads
             '-p', tree_method,                           # --phylo_tool (not --tree_method)
             '-o', tree_data                              # --omics (not --TREE_DATA, expects CDS|PROT|BOTH)
         ]
-        
+        if annotation_dirs is None and annotator == 'viral':
+            if not self.vadr_model_libs or not self.vigor_db_dir:
+                raise RuntimeError(
+                    f"Database {database_name} was built with --annotator "
+                    f"viral, but this run has no --vadr-models/"
+                    f"--vigor-db-dir to annotate the new query genome(s) "
+                    f"the same way. Re-run with --vadr-models/--vigor-db/"
+                    f"--vigor-db-dir matching the original build.")
+            cmd.extend(['--annotator', 'viral',
+                        '--vadr-models', self.vadr_model_libs,
+                        '--vigor-db', self.vigor_db,
+                        '--vigor-db-dir', str(self.vigor_db_dir)])
+
         logger.info(f"  Running ReLeaf...")
         self._log_command(cmd)
         logger.info(f"    Database: {database_dir}")
@@ -2332,9 +2444,19 @@ class PipelineWrapper:
             if self.use_bbmap:
                 cmd.append('--use-bbmap')
                 logger.info(f"  Using bbmap statswrapper instead of CheckM2")
-            elif self.low_ram:
-                cmd.append('--lowmem')
-                logger.info(f"  Using CheckM2 --lowmem option (low RAM mode)")
+            else:
+                if self.low_ram:
+                    cmd.append('--lowmem')
+                    logger.info(f"  Using CheckM2 --lowmem option (low RAM mode)")
+                # CheckM2's internal DIAMOND call needs its own thread budget --
+                #   DIAMOND's memory scales heavily with thread count, separately
+                #   from --lowmem's block-size reduction, so the general pipeline
+                #   --threads value (tuned for Prodigal/OrthoFinder/etc.) can
+                #   overcommit RAM here even with --lowmem on. Default: let
+                #   gather_filter_asms.sh auto-size it from available RAM.
+                if self.checkm_threads:
+                    cmd.extend(['--checkm-threads', str(self.checkm_threads)])
+                    logger.info(f"  CheckM2/DIAMOND threads: {self.checkm_threads} (override)")
 
             # Genome-retention controls. Pass the raw --must-keep value straight
             #   through -- the gather script resolves list-vs-file itself.
@@ -2473,6 +2595,104 @@ class PipelineWrapper:
         self._download_genomes(taxon_name, output_dir,
                                query_assemblies=query_assemblies, download_only=True)
         return output_dir / "assemblies_all.TMP"
+
+    def _download_viral_genomes(self, taxon_name: str, output_dir: Path) -> Tuple[Path, Path]:
+        """Download NCBI's existing CDS+protein annotations for a viral taxon.
+
+        Unlike _download_raw/_download_genomes (built around gather_filter_asms.sh's
+        GC[AF] assembly accessions + CheckM2), viral taxa have no raw-assembly
+        QC path at all -- utils/gather_viral_annots.py pulls NCBI's own
+        annotations via `datasets ... virus genome taxon` and splits the
+        pooled package into per-genome <id>.fna/<id>.faa pairs. Returns
+        (nucl_dir, prot_dir), fed straight into _run_orthophyl's
+        annotation_dirs (OrthoPhyl.sh's -a), bypassing Prodigal/VADR/VIGOR4.
+
+        max_tree_genomes (not max_total_genomes) is passed as the pre-download
+        genome-count guardrail, consistent with the ceiling _run_taxon_create_
+        mode_viral checks after download to decide whether to diverse-subsample
+        (see _stage_selected_viral_prots); checking it before downloading avoids
+        pulling a grossly oversized package only to subsample it afterward.
+        """
+        if not self.viral_gather_script.exists():
+            raise RuntimeError(
+                f"Viral annotation download script not found: "
+                f"{self.viral_gather_script}")
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            sys.executable, str(self.viral_gather_script), taxon_name,
+            '--out-dir', str(output_dir),
+            '--max-total-genomes', str(self.max_tree_genomes),
+        ]
+        self._log_command(cmd)
+
+        nucl_dir = output_dir / "annots_nucls"
+        prot_dir = output_dir / "annots_prots"
+
+        if self.dry_run:
+            logger.info(f"  [DRY RUN] Would download viral annotations for {taxon_name}")
+            return nucl_dir, prot_dir
+
+        log_file = self.logs_dir / f"viral_download_{taxon_name}.log"
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        with open(log_file, 'w') as f:
+            f.write(result.stdout)
+            f.write(result.stderr)
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Viral annotation download failed for {taxon_name}. "
+                f"Check log: {log_file}")
+
+        if not nucl_dir.exists() or not any(nucl_dir.glob("*.fna")):
+            raise RuntimeError(
+                f"Viral annotation download completed but no genomes found "
+                f"in {nucl_dir}\nCheck log: {log_file}")
+
+        n_genomes = len(list(nucl_dir.glob("*.fna")))
+        logger.info(f"  ✓ Downloaded viral annotations for {n_genomes} genomes")
+        return nucl_dir, prot_dir
+
+    def _stage_selected_viral_prots(self, selected_nucl_dir: Path, prot_dir: Path) -> Path:
+        """Symlink each subsampled genome's matching .faa into a sibling dir.
+
+        _subsample_genomes (MASH greedy max-min) only sketches/selects from
+        the CDS .fna set; a viral annotation_dirs pair also carries a
+        parallel per-genome .faa dir that must track the SAME selection by
+        stem, or OrthoPhyl.sh's -a nucl,prot pairing (matched by filename
+        stem) would see a nucl/prot mismatch.
+
+        Writes into selected_nucl_dir's sibling "selected_prots/" (mirroring
+        _subsample_genomes' own "selected/" naming under the same subsample
+        dir), so both live under the one _subsample_genomes call's output.
+        """
+        selected_prots_dir = selected_nucl_dir.parent / "selected_prots"
+        selected_prots_dir.mkdir(parents=True, exist_ok=True)
+
+        sys.path.insert(0, str(self.script_dir / "assembly_router"))
+        from OP_database_tool import relative_symlink
+
+        missing = []
+        for fna in (list(selected_nucl_dir.glob("*.fna")) +
+                    list(selected_nucl_dir.glob("*.fasta"))):
+            faa = prot_dir / f"{fna.stem}.faa"
+            dst = selected_prots_dir / faa.name
+            if dst.exists() or dst.is_symlink():
+                continue
+            if not faa.exists():
+                missing.append(faa.name)
+                continue
+            try:
+                relative_symlink(dst, faa)
+            except OSError:
+                shutil.copy(faa, dst)
+
+        if missing:
+            logger.warning(f"    Subsample selection missing {len(missing)} "
+                           f"protein file(s): {', '.join(missing[:5])}"
+                           f"{'...' if len(missing) > 5 else ''}")
+
+        return selected_prots_dir
 
     def _qc_subclade(self, subclade_dir: Path, raw_member_paths: List[Path],
                      taxon_label: str,
@@ -2821,12 +3041,13 @@ class PipelineWrapper:
 
     def _run_orthophyl(
         self,
-        input_dir: Path,
+        input_dir: Optional[Path],
         output_dir: Path,
         taxon_name: str,
         assemblies: List[Dict],
         hmm_assign_dir: Optional[Path] = None,
         skip_hmm_assign_leftover: bool = False,
+        annotation_dirs: Optional[Tuple[Path, Path]] = None,
     ):
         """Run OrthoPhyl on combined genome set.
 
@@ -2845,24 +3066,44 @@ class PipelineWrapper:
         OrthoPhyl.sh now routes HMM-unmatched genes through a real
         OrthoFinder run by default; set this to pass --skip-hmm-assign-leftover
         and restore the old log-and-drop behavior for this run.
+
+        annotation_dirs (optional): (nucl_dir, prot_dir) of pre-annotated
+        CDS+protein FASTAs (e.g. from _download_viral_genomes), passed as
+        OrthoPhyl.sh's -a nucl_dir,prot_dir instead of -g input_dir -- this
+        bypasses Prodigal/VADR/VIGOR4 entirely since the genomes are already
+        annotated. Mutually exclusive with input_dir; exactly one must be
+        given. The self.annotator == 'viral' raw-assembly annotation flags
+        below never apply here, since there's nothing left to annotate.
         """
+        if (input_dir is None) == (annotation_dirs is None):
+            raise ValueError(
+                "_run_orthophyl requires exactly one of input_dir or "
+                "annotation_dirs")
+
         # Force the MASH-shortlist/HMM-building branch of OrthoPhyl.sh's MAIN_PIPE
         # (ANI_ORTHOFINDER_TO_ALL_SEQS) regardless of input size -- see ani_shortlist's
         # docstring in __init__. n_genomes - 1 guarantees OrthoPhyl.sh's own
         # `$(ls $ANI_dataset | wc -l) -gt $ANI_shortlist` check fires even for a run of
         # exactly n_genomes; min(self.ani_shortlist, ...) keeps behavior byte-identical
         # to before for any input already larger than the configured ceiling.
-        n_genomes = len(list(input_dir.glob("*.fna")) + list(input_dir.glob("*.fasta")))
+        if annotation_dirs is not None:
+            nucl_dir, prot_dir = annotation_dirs
+            n_genomes = len(list(nucl_dir.glob("*.fna")) + list(nucl_dir.glob("*.fasta")))
+        else:
+            n_genomes = len(list(input_dir.glob("*.fna")) + list(input_dir.glob("*.fasta")))
         ani_n = min(self.ani_shortlist, max(1, n_genomes - 1))
-        cmd = [
-            str(self.orthophyl_script),
-            '-g', str(input_dir),
+        cmd = [str(self.orthophyl_script)]
+        if annotation_dirs is not None:
+            cmd.extend(['-a', f"{nucl_dir},{prot_dir}"])
+        else:
+            cmd.extend(['-g', str(input_dir)])
+        cmd.extend([
             '-s', str(output_dir),
             '-t', str(self.threads),
             '-p', self._TREE_METHOD_FLAG[self.tree_method],
             '-o', 'CDS',
             '-n', str(ani_n),
-        ]
+        ])
         tree_control_file = self._tree_control_file(taxon_name)
         if tree_control_file is not None:
             cmd.extend(['-c', str(tree_control_file)])
@@ -2870,10 +3111,15 @@ class PipelineWrapper:
             cmd.extend(['--hmm-assign-dir', str(hmm_assign_dir)])
             if skip_hmm_assign_leftover:
                 cmd.append('--skip-hmm-assign-leftover')
+        if annotation_dirs is None and self.annotator == 'viral':
+            cmd.extend(['--annotator', 'viral',
+                        '--vadr-models', self.vadr_model_libs,
+                        '--vigor-db', self.vigor_db,
+                        '--vigor-db-dir', str(self.vigor_db_dir)])
 
         logger.info(f"\n  Running OrthoPhyl for {taxon_name}...")
         self._log_command(cmd)
-        logger.info(f"    Input: {input_dir}")
+        logger.info(f"    Input: {input_dir if annotation_dirs is None else annotation_dirs}")
         logger.info(f"    Output: {output_dir}")
         logger.info(f"    INCLUDES {len(assemblies)} query genomes!")
 
@@ -2956,6 +3202,8 @@ class PipelineWrapper:
         taxonomy_source: str = 'ncbi',
         qc_applied: bool = True,
         metadata_file: Optional[Path] = None,
+        annotator: str = 'prodigal',
+        input_type: str = 'genomes',
     ):
         """Create new database entry from OrthoPhyl run.
 
@@ -2973,6 +3221,14 @@ class PipelineWrapper:
         metadata_file (optional): an assembly metadata TSV (e.g.
         all_asm_acc_metadata) to copy into the DB, for later --geo figure use.
         Omitted by default so every existing caller stays byte-identical.
+
+        annotator ('prodigal' default, or 'viral'): which annotator built
+        this DB's genomes, recorded so a later query ReLeaf'd onto it is
+        always annotated the same way (see _run_releaf).
+
+        input_type ('genomes' default, or 'annotations'): whether this run
+        was built from raw assemblies or pre-annotated CDS+protein
+        directories (the viral NCBI-annotation download path).
         """
         logger.info(f"\n  Creating database entry for {taxon_name}...")
         # taxon_name can carry a batch TSV's free-text taxonomy value verbatim;
@@ -2993,6 +3249,8 @@ class PipelineWrapper:
                 '--is-backbone' if is_backbone else '--is-subclade',
                 '--parent-taxon', str(subclade_meta.get('parent_taxon')),
                 '--taxonomy-source', taxonomy_source,
+                '--annotator', annotator,
+                '--input-type', input_type,
             ]
             if not qc_applied:
                 cmd.append('--qc-not-applied')
@@ -3048,6 +3306,8 @@ class PipelineWrapper:
             '--output-dir', str(self.database_dir),
             '--update',
             '--taxonomy-source', taxonomy_source,
+            '--annotator', annotator,
+            '--input-type', input_type,
         ]
         if not qc_applied:
             cmd.append('--qc-not-applied')
@@ -3381,6 +3641,17 @@ class PipelineWrapper:
             output_dir=self.output_dir / "taxon_query"
         )
 
+        # Checked immediately after gatherer construction (before the dry-run
+        # short-circuit below) so a dry run surfaces this conflict right away
+        # rather than only on a real run. Viral taxa have no megatree/partition
+        # support yet (CLAUDE.md: "--megatree for viral taxa ... out of scope").
+        if gatherer.is_viral and self.megatree:
+            logger.error(
+                f"\n❌ ERROR: {self.taxon} resolved to a viral taxon "
+                f"(NCBI Viruses lineage); --megatree is not yet supported "
+                f"for viral taxa.")
+            return 1
+
         if self.dry_run:
             logger.info("  [DRY RUN] Would download and QC-filter assemblies")
             logger.info("=" * 70)
@@ -3388,7 +3659,10 @@ class PipelineWrapper:
             logger.info("=" * 70)
             self._save_final_status()
             return 0
-        
+
+        if gatherer.is_viral:
+            return self._run_taxon_create_mode_viral(gatherer, safe_taxon)
+
         # NOTE: We intentionally do NOT call gatherer.query_ncbi() here. In create
         # mode the genomes are downloaded and QC-filtered entirely by
         # gather_filter_asms.sh (below); query_ncbi() would re-download the full
@@ -3501,9 +3775,100 @@ class PipelineWrapper:
         logger.info(f"  Assemblies: {len(kept)}")
         self._save_final_status()
         return 0
-    
+
+    def _run_taxon_create_mode_viral(self, gatherer, safe_taxon: str) -> int:
+        """Create-mode taxon build for a taxon gatherer detected as viral.
+
+        Mirrors the raw-assembly path in _run_taxon_create_mode (download ->
+        QC -> _run_orthophyl -> _create_taxon_database -> publish tree), but
+        downloads NCBI's existing CDS+protein annotations instead of raw
+        assemblies (no CheckM2 QC step exists for viral genomes yet -- see
+        CLAUDE.md), and passes annotation_dirs through to _run_orthophyl
+        instead of input_dir. Deliberately not merged with the bacterial
+        path: the two diverge at nearly every step (download mechanism, no
+        QC, -a vs -g, annotator='viral'), so a shared helper would mostly be
+        branching rather than shared logic.
+        """
+        logger.info(f"\n{self.taxon} detected as a viral taxon "
+                    f"(NCBI Viruses lineage) -- downloading NCBI annotations")
+
+        download_dir = self.output_dir / "downloaded_assemblies"
+        nucl_dir = download_dir / "annots_nucls"
+        prot_dir = download_dir / "annots_prots"
+
+        if (self.skip_download or
+                (self._check_checkpoint(f"download_{safe_taxon}") and self.resume
+                 and nucl_dir.exists())):
+            logger.info(f"  ✓ Viral annotation download already complete, skipping")
+        else:
+            nucl_dir, prot_dir = self._download_viral_genomes(self.taxon, download_dir)
+            self._write_checkpoint(f"download_{safe_taxon}")
+
+        genome_count = len(list(nucl_dir.glob("*.fna"))) if nucl_dir.exists() else 0
+        if genome_count < 4:
+            logger.error(
+                f"\n❌ ERROR: only {genome_count} viral genomes downloaded for "
+                f"{self.taxon} (<4)")
+            return 1
+
+        # Oversized viral taxa: no megatree support yet (rejected earlier in
+        # _run_taxon_create_mode), so the only large-taxon strategy here is
+        # the same diverse-subsample path bacterial create mode uses -- MASH
+        # greedy max-min on the CDS set, then stage the matching .faa files
+        # into the same selection via _stage_selected_viral_prots.
+        if genome_count > self.max_tree_genomes:
+            logger.info(f"  Genome count {genome_count} > max_tree_genomes "
+                        f"{self.max_tree_genomes}: diverse-subsampling to "
+                        f"{self.subsample_size} genomes")
+            selected_nucl = self._subsample_genomes(
+                safe_taxon, nucl_dir, self.subsample_size,
+                must_keep_stems=self._must_keep_stems())
+            prot_dir = self._stage_selected_viral_prots(selected_nucl, prot_dir)
+            nucl_dir = selected_nucl
+            genome_count = len(list(nucl_dir.glob("*.fna")))
+
+        orthophyl_output = self.output_dir / "orthophyl_run"
+        self._run_orthophyl(
+            input_dir=None, output_dir=orthophyl_output,
+            taxon_name=safe_taxon, assemblies=[],
+            annotation_dirs=(nucl_dir, prot_dir))
+
+        logger.info(f"\nCreating database for {self.taxon}...")
+        metadata_file = download_dir / "all_asm_acc_metadata"
+        if not metadata_file.exists():
+            metadata_file = None
+        self._create_taxon_database(
+            taxon_name=self.taxon, orthophyl_output=orthophyl_output,
+            gatherer=gatherer, genomes_to_keep=nucl_dir,
+            metadata_file=metadata_file, annotator='viral',
+            qc_applied=False, input_type='annotations')
+
+        # ---- Publish the tree into 03_results ----
+        tree_dir = self.results_dir / "trees" / "orthophyl"
+        tree_dir.mkdir(parents=True, exist_ok=True)
+        tree_file = self._locate_species_tree(orthophyl_output)
+        if tree_file.exists():
+            published_tree = tree_dir / f"{safe_taxon}_phylogeny.nwk"
+            shutil.copy(tree_file, published_tree)
+            logger.info(f"  ✓ Published tree: {published_tree}")
+            self._generate_geo_figures(published_tree, safe_taxon,
+                                       metadata_file=metadata_file)
+        else:
+            logger.warning(f"  ⚠ Species tree not found at expected location: {tree_file}")
+
+        logger.info("=" * 70)
+        logger.info("TAXON MODE COMPLETE (viral)!")
+        logger.info("=" * 70)
+        logger.info(f"  Database created: {self.taxon}_db")
+        logger.info(f"  Assemblies: {genome_count}")
+        self._save_final_status()
+        return 0
+
     def _run_taxon_update_mode(self, existing_db: Dict) -> int:
         """Update existing database with new assemblies."""
+        if existing_db['config'].get('annotator') == 'viral':
+            return self._run_taxon_update_mode_viral(existing_db)
+
         logger.info("\n" + "=" * 70)
         logger.info("TAXON MODE: UPDATE EXISTING DATABASE")
         logger.info("=" * 70)
@@ -3620,7 +3985,8 @@ class PipelineWrapper:
             output_dir=releaf_output,
             tree_method=tree_method,
             tree_data=tree_data,
-            database_name=existing_db['clade_name']
+            database_name=existing_db['clade_name'],
+            annotator=config.get('annotator', 'prodigal'),
         )
         
         # Update database metadata. Record only the accessions that actually
@@ -3642,6 +4008,114 @@ class PipelineWrapper:
         logger.info(f"  Database: {existing_db['clade_name']}")
         logger.info(f"  Added assemblies: {len(added_accessions)}")
         logger.info(f"  Total assemblies: {len(existing_accessions) + len(added_accessions)}")
+
+        self._save_final_status()
+        return 0
+
+    def _run_taxon_update_mode_viral(self, existing_db: Dict) -> int:
+        """Update an existing viral database with newly-released NCBI genomes.
+
+        There is no bacteria-style assembly_summary.txt for viruses, so this
+        does not reuse TaxonAssemblyGatherer.query_ncbi() at all. Instead it
+        re-runs the same NCBI Virus download _run_taxon_create_mode_viral used
+        to build the DB (_download_viral_genomes), and diffs the resulting
+        genome IDs (annots_nucls/<id>.fna filenames) against the database's
+        stored assembly_accessions -- those IDs ARE the diff key here (not raw
+        NCBI nucleotide accessions): gather_viral_annots.py groups segments/
+        reassortants by isolate name when present, so a genome's filename stem
+        can be an isolate name rather than its accession (see build_genomes'
+        docstring). Diffing by the same genome-ID scheme the DB was created
+        with avoids a false "new" result on every update.
+
+        New genomes are already NCBI-annotated CDS+protein, so they're added
+        via ReLeaf's -a (annotation_dirs), not -g -- no VADR/VIGOR4 involved,
+        matching how the DB's own genomes were built.
+        """
+        logger.info("\n" + "=" * 70)
+        logger.info("TAXON MODE: UPDATE EXISTING DATABASE (viral)")
+        logger.info("=" * 70)
+
+        if self.dry_run:
+            logger.info("  [DRY RUN] Would check for new NCBI Virus genomes and update database")
+            logger.info("=" * 70)
+            logger.info("PIPELINE COMPLETE (DRY RUN)!")
+            logger.info("=" * 70)
+            self._save_final_status()
+            return 0
+
+        logger.info(f"\nQuerying NCBI Virus for {self.taxon} annotations...")
+        download_dir = self.output_dir / "new_assemblies"
+        nucl_dir, prot_dir = self._download_viral_genomes(self.taxon, download_dir)
+
+        all_genome_ids = {p.stem for p in nucl_dir.glob("*.fna")} if nucl_dir.exists() else set()
+        if not all_genome_ids:
+            logger.error(f"✗ No viral genomes found for taxon '{self.taxon}'")
+            return 1
+
+        logger.info(f"  ✓ Found {len(all_genome_ids)} total genomes in NCBI Virus")
+
+        existing_accessions = set(existing_db['config'].get('assembly_accessions', []))
+        new_ids = all_genome_ids - existing_accessions
+
+        if not new_ids:
+            logger.info(f"\n✓ Database is up to date! No new genomes found.")
+            logger.info(f"  Current genomes: {len(existing_accessions)}")
+            logger.info(f"  NCBI Virus genomes: {len(all_genome_ids)}")
+            self._save_final_status()
+            return 0
+
+        logger.info(f"\n→ Found {len(new_ids)} new genomes to add")
+        logger.info(f"  Existing: {len(existing_accessions)}")
+        logger.info(f"  New: {len(new_ids)}")
+
+        # Stage just the new genomes' .fna/.faa into their own dirs -- ReLeaf
+        # should only add what's new, not re-add every genome already in the DB.
+        new_nucl_dir = download_dir / "new_selected_nucls"
+        new_nucl_dir.mkdir(parents=True, exist_ok=True)
+        sys.path.insert(0, str(self.script_dir / "assembly_router"))
+        from OP_database_tool import relative_symlink
+        for gid in sorted(new_ids):
+            src = nucl_dir / f"{gid}.fna"
+            dst = new_nucl_dir / f"{gid}.fna"
+            if not dst.exists():
+                relative_symlink(dst, src)
+        new_prot_dir = self._stage_selected_viral_prots(new_nucl_dir, prot_dir)
+
+        logger.info(f"\nRunning ReLeaf to add {len(new_ids)} new viral genomes to database...")
+
+        db_dir = existing_db['db_dir']
+        config = existing_db['config']
+
+        tree_methods = config.get('available_tree_methods', ['iqtree'])
+        tree_data_types = config.get('available_data_types', ['CDS'])
+        tree_method = tree_methods[0] if tree_methods else 'iqtree'
+        tree_data = tree_data_types[0] if tree_data_types else 'CDS'
+
+        releaf_output = self.output_dir / "releaf_update"
+
+        self._run_releaf(
+            database_dir=db_dir,
+            input_genomes=None,
+            output_dir=releaf_output,
+            tree_method=tree_method,
+            tree_data=tree_data,
+            database_name=existing_db['clade_name'],
+            annotator=config.get('annotator', 'prodigal'),
+            annotation_dirs=(new_nucl_dir, new_prot_dir),
+        )
+
+        logger.info(f"\nUpdating database metadata...")
+        self._update_taxon_database_metadata(
+            db_dir=db_dir,
+            added_accessions=sorted(new_ids)
+        )
+
+        logger.info("=" * 70)
+        logger.info("TAXON UPDATE COMPLETE (viral)!")
+        logger.info("=" * 70)
+        logger.info(f"  Database: {existing_db['clade_name']}")
+        logger.info(f"  Added genomes: {len(new_ids)}")
+        logger.info(f"  Total genomes: {len(existing_accessions) + len(new_ids)}")
 
         self._save_final_status()
         return 0
@@ -3864,6 +4338,9 @@ class PipelineWrapper:
         gatherer,
         genomes_to_keep: Path,
         metadata_file: Optional[Path] = None,
+        annotator: str = 'prodigal',
+        qc_applied: bool = True,
+        input_type: str = 'genomes',
     ):
         """Create database with taxon metadata.
 
@@ -3874,6 +4351,13 @@ class PipelineWrapper:
 
         metadata_file (optional): all_asm_acc_metadata from the raw download,
         copied into the DB for later --geo figure use.
+
+        qc_applied defaults True (the NCBI bacterial download path always runs
+        CheckM2 via gather_filter_asms.sh); the viral download path has no QC
+        step yet and passes False.
+
+        input_type defaults 'genomes' (raw assemblies); the viral download
+        path passes 'annotations' (pre-annotated CDS+protein directories).
         """
         # Get taxonomy from gatherer
         taxonomy = gatherer.get_taxonomy_string()
@@ -3884,6 +4368,9 @@ class PipelineWrapper:
             orthophyl_output=orthophyl_output,
             taxonomy=taxonomy,
             metadata_file=metadata_file,
+            annotator=annotator,
+            qc_applied=qc_applied,
+            input_type=input_type,
         )
 
         # Update database config with taxon metadata. Must match
@@ -3941,6 +4428,7 @@ class PipelineWrapper:
             taxonomy=taxonomy,
             taxonomy_source=taxonomy_source,
             qc_applied=qc_applied,
+            annotator=self.annotator,
         )
 
         # Must match OP_database_tool.py's clade_name.replace(' ', '_').replace(
@@ -4144,6 +4632,14 @@ Examples:
         help='Use reduced memory mode for CheckM2 (passes --lowmem to gather_filter_asms.sh)'
     )
     performance_group.add_argument(
+        '--checkm-threads',
+        type=int,
+        default=None,
+        help="Threads for CheckM2's internal DIAMOND call (overrides auto-sizing "
+             "from available RAM; independent of --threads, since DIAMOND's memory "
+             "scales heavily with thread count separately from --low-ram)"
+    )
+    performance_group.add_argument(
         '--use-bbmap',
         action='store_true',
         help='Use bbmap statswrapper instead of CheckM2 for genome statistics (faster, less RAM, but no completeness/contamination filtering)'
@@ -4204,6 +4700,38 @@ Examples:
              'drop --symtest/-B 1000 for a faster run. --iqtree-model/--iqtree-mset/'
              '--iqtree-fast are still appended after this string. Requires '
              '--tree-method iqtree or both.'
+    )
+
+    viral_group = parser.add_argument_group(
+        'Viral annotation', 'VADR -> VIGOR4 annotation for raw eukaryotic viral '
+                             'genome assemblies, instead of Prodigal. Only '
+                             '--genome-dir is supported right now -- NCBI viral '
+                             'annotation download is not yet implemented.')
+    viral_group.add_argument(
+        '--annotator',
+        choices=['prodigal', 'viral'],
+        default='prodigal',
+        help='Annotator to run on raw genomes (default: prodigal). "viral" runs '
+             'VADR, falling back to VIGOR4 when no VADR model library classifies '
+             'the genome. Only supported with --genome-dir.'
+    )
+    viral_group.add_argument(
+        '--vadr-models',
+        help='Ordered, space-separated "DIR[:MKEY] DIR[:MKEY] ..." list of VADR '
+             'model library directories to try. Required with --annotator viral.'
+    )
+    viral_group.add_argument(
+        '--vigor-db',
+        default='auto',
+        help='VIGOR_DB reference database name, or "auto" to pick one '
+             'automatically via diamond blastx against pooled reference '
+             'proteins (default: auto).'
+    )
+    viral_group.add_argument(
+        '--vigor-db-dir',
+        type=Path,
+        help='Path to VIGOR_DB\'s Reference_DBs directory. Required with '
+             '--annotator viral.'
     )
 
     gather_group = parser.add_argument_group(
@@ -4548,6 +5076,7 @@ Examples:
         verbose=args.verbose,
         low_ram=args.low_ram,
         use_bbmap=args.use_bbmap,
+        checkm_threads=args.checkm_threads,
         must_keep=args.must_keep,
         keep_failing_query=args.keep_failing_query,
         ani_shortlist=args.ani_shortlist,
@@ -4575,6 +5104,10 @@ Examples:
         clade_rank=args.clade_rank,
         clade_taxonomy=args.clade_taxonomy,
         skip_qc=args.skip_qc,
+        annotator=args.annotator,
+        vadr_model_libs=args.vadr_models,
+        vigor_db=args.vigor_db,
+        vigor_db_dir=args.vigor_db_dir,
         geo=args.geo,
         geo_tsv=args.geo_tsv,
         geo_top_k=args.geo_top_k,

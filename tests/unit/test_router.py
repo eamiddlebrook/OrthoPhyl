@@ -172,6 +172,28 @@ class TestTaxonomySourceProvenance:
         assert matches[0]["database"]["taxonomy_source"] == "ncbi"
 
 
+class TestAnnotatorProvenance:
+    def test_defaults_to_prodigal_when_absent(self, Router, two_db_dir, tmp_path):
+        router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
+        by_name = {db["clade_name"]: db for db in router.databases}
+        assert by_name["Escherichia"]["annotator"] == "prodigal"
+
+    def test_viral_is_loaded(self, Router, make_db_dir, tmp_path):
+        parent = tmp_path / "databases"
+        make_db_dir(
+            clade_name="Noroviralia",
+            clade_taxonomy="g__Noroviralia",
+            clade_rank="g",
+            clade_rank_name="genus",
+            n_genomes=6,
+            parent=parent,
+            annotator="viral",
+        )
+        router = Router(database_dir=parent, output_dir=tmp_path / "out")
+        db = router.databases[0]
+        assert db["annotator"] == "viral"
+
+
 class TestFindMatching:
     def test_most_specific_first(self, Router, two_db_dir, tmp_path):
         router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
@@ -209,6 +231,31 @@ class TestRouteToReLeaf:
         )
         assert decision["tree_method"] == "iqtree"
         assert decision["tree_data"] == "CDS"
+
+    def test_annotator_defaults_to_prodigal(self, Router, two_db_dir, tmp_path):
+        router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
+        decision = router.route_assembly(
+            self._assembly(tmp_path), ESCHERICHIA_TAX + ";s__", "q1"
+        )
+        assert decision["annotator"] == "prodigal"
+
+    def test_annotator_viral_surfaced_on_decision(self, Router, make_db_dir, tmp_path):
+        parent = tmp_path / "databases"
+        make_db_dir(
+            clade_name="Noroviralia",
+            clade_taxonomy="g__Noroviralia",
+            clade_rank="g",
+            clade_rank_name="genus",
+            n_genomes=6,
+            parent=parent,
+            annotator="viral",
+        )
+        router = Router(database_dir=parent, output_dir=tmp_path / "out")
+        decision = router.route_assembly(
+            self._assembly(tmp_path), "g__Noroviralia;s__", "q1"
+        )
+        assert decision["pipeline"] == "ReLeaf"
+        assert decision["annotator"] == "viral"
 
     def test_writes_decision_and_summary(self, Router, two_db_dir, tmp_path):
         out = tmp_path / "out"
@@ -279,6 +326,35 @@ class TestRouteToOrthoPhyl:
         )
         assert decision["download_rank"] == "family"
         assert decision["download_value"] == "Gaiellaceae"
+
+    def test_viral_query_flagged_and_advised_differently(
+        self, Router, two_db_dir, tmp_path
+    ):
+        router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
+        decision = router.route_assembly(
+            self._assembly(tmp_path),
+            "d__Viruses;p__Pisuviricota;c__Pisoniviricetes;o__Picornavirales;"
+            "f__Caliciviridae;g__Norovirus;s__",
+            "novel_virus",
+        )
+        assert decision["pipeline"] == "OrthoPhyl"
+        assert decision["is_viral"] is True
+        # Advisory text must use the viral downloader, not the bacteria-only
+        # CheckM2 gatherer, and must use -a (pre-annotated) rather than -g
+        # on OrthoPhyl.sh.
+        assert "gather_viral_annots.py" in decision["command"]
+        assert "-a " in decision["command"]
+        assert " -g " not in decision["command"]
+
+    def test_bacterial_query_not_flagged_viral(self, Router, two_db_dir, tmp_path):
+        router = Router(database_dir=two_db_dir, output_dir=tmp_path / "out")
+        decision = router.route_assembly(
+            self._assembly(tmp_path),
+            GAIELLALES_TAX + ";f__Gaiellaceae;g__Gaiella;s__",
+            "novel1",
+        )
+        assert decision["is_viral"] is False
+        assert "gather_viral_annots.py" not in decision["command"]
 
 
 class TestBatchRoute:

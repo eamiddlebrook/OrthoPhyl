@@ -66,6 +66,18 @@ Optional:
 --skip-hmm-assign-leftover  only meaningful with --hmm-assign-dir. Disables the above (restores
 	the old behavior: genes matching no external HMM are simply dropped, logged to
 	hmm_assign_unmatched_OGs.txt).
+--annotator  Annotation program to run on raw genomes/assemblies (prodigal, viral). [prodigal]
+	"viral" tries NCBI VADR against each library in --vadr-models (in order), falling back to
+	VIGOR4 (reference DB from --vigor-db/--vigor-db-dir) when no library classifies the genome.
+	Intended for eukaryotic viral pathogens, not bacteriophages. VADR fatal alerts are logged
+	(annots_details/annotation_sources.tsv) but do not trigger the VIGOR4 fallback -- fallback is
+	reserved for genomes no VADR library can classify at all.
+--vadr-models  ordered, space-separated "DIR[:MKEY] DIR[:MKEY] ..." list of VADR model library
+	directories to try (only meaningful with --annotator viral). Required for that mode.
+--vigor-db  VIGOR_DB reference database name (e.g. dengue_txid12637_db) to use with the VIGOR4
+	fallback, or "auto" to pick one automatically via diamond blastx against a pooled
+	reference-protein DB built from --vigor-db-dir. [auto]
+--vigor-db-dir  path to VIGOR_DB's Reference_DBs directory. Required for --annotator viral.
 -h|--help  display a description and a super useful usage message
 ###############################################################\n
 To run test datasets:
@@ -375,6 +387,47 @@ ARG_PARSE () {
 
 			--skip-hmm-assign-leftover)
 				hmm_assign_leftover_orthofinder=false
+				shift ;;
+
+			--annotator) if [[ ! -n ${2} ]]; then
+					USAGE
+					exit 1
+				fi
+				if [[ ${2} != "prodigal" && ${2} != "viral" ]]; then
+					echo "--annotator must be 'prodigal' or 'viral', got '${2}'"
+					exit 1
+				fi
+				annotator=${2}
+				shift
+				shift ;;
+
+			--vadr-models) if [[ ! -n ${2} ]]; then
+					USAGE
+					exit 1
+				fi
+				vadr_model_libs=${2}
+				shift
+				shift ;;
+
+			--vigor-db) if [[ ! -n ${2} ]]; then
+					USAGE
+					exit 1
+				fi
+				vigor_db=${2}
+				shift
+				shift ;;
+
+			--vigor-db-dir) if [[ ! -n ${2} ]]; then
+					echo "looks like the argument for --vigor-db-dir is messed up"
+					USAGE
+					exit 1
+				fi
+				vigor_db_dir=$(relative_absolute ${2})
+				if [[ ! -d "${vigor_db_dir}" ]]; then
+					echo "WARNING: --vigor-db-dir path does not exist: ${vigor_db_dir}"
+					exit 1
+				fi
+				shift
 				shift ;;
 
 			\?) # Invalid option

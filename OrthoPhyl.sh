@@ -173,7 +173,7 @@ MAIN_PIPE () {
 	SET_UP_DIR_STRUCTURE
 	if [[ ${genomes_provided+x} ]]
 	then
-		PRODIGAL_PREDICT $genome_dir
+		ANNOTATE_GENOMES $genome_dir
 	fi
 	# handle user inputting their own annotations
 	if [[ ${annots_provided+x} ]]

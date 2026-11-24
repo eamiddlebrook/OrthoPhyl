@@ -152,11 +152,11 @@ GET_OLD_TREE_INFO () {
 }
 
 ANNOTATIONS (){
-    # runs PRODIGAL_PREDICT from main functions.sh 
+    # runs ANNOTATE_GENOMES (PRODIGAL_PREDICT or VIRAL_PREDICT) from main functions.sh
     if [[ ${genomes_provided+x} ]]
     then
         # defined in functions.sh
-        PRODIGAL_PREDICT $genome_dir
+        ANNOTATE_GENOMES $genome_dir
     fi
     # handle user inputting their own annotations
     if [[ ${annots_provided+x} ]]

@@ -230,6 +230,7 @@ class TestCreateModeSubsamples:
         class FakeGatherer:
             taxid = "123"
             taxon_rank = "genus"
+            is_viral = False
             def __init__(self, **k): pass
             def get_taxonomy_string(self): return "d__Bacteria;g__Andreesenella"
         import types

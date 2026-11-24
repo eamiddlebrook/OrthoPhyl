@@ -307,6 +307,7 @@ class MultiDatabaseRouter:
             'is_backbone': config.get('is_backbone', False),
             'taxonomy_source': config.get('taxonomy_source', 'ncbi'),
             'qc_applied': config.get('qc_applied', True),
+            'annotator': config.get('annotator', 'prodigal'),
         }
     
     def find_matching_databases(self, query_taxonomy: str) -> List[Dict]:
@@ -483,9 +484,10 @@ class MultiDatabaseRouter:
             'tree_method': tree_method,
             'tree_data': tree_data,
             'available_methods': available_methods,
-            'available_data_types': available_data_types
+            'available_data_types': available_data_types,
+            'annotator': database.get('annotator', 'prodigal'),
         }
-        
+
         self._save_decision(decision)
         return decision
 
@@ -610,6 +612,7 @@ class MultiDatabaseRouter:
     ) -> Dict:
         """Generate OrthoPhyl routing decision with gather_filter_asms.sh."""
         query_tax = GTDBTaxonomy(taxonomy)
+        is_viral = query_tax.get_rank('d') == 'Viruses'
         specific_rank = query_tax.get_most_specific_rank()
         
         # Determine what taxonomic level to download
@@ -643,8 +646,28 @@ class MultiDatabaseRouter:
         # Build commands
         commands = []
         
-        # Step 1: Download and filter related genomes using gather_filter_asms.sh
-        if self.gather_filter_script and self.gather_filter_script.exists():
+        # Step 1: Download related genomes. gather_filter_asms.sh (CheckM2 QC)
+        # only understands bacterial GC[AF] assemblies, so a viral query is
+        # steered toward utils/gather_viral_annots.py / the Python wrapper's
+        # --taxon path (NCBI `datasets ... virus genome taxon`) instead.
+        if is_viral:
+            gather_cmd = (
+                f"# Step 1: Download NCBI's existing CDS+protein annotations for a viral taxon\n"
+                f"# gather_filter_asms.sh is bacteria-only (CheckM2 + GC[AF] assemblies);\n"
+                f"# this query resolved to a viral taxonomy (d__Viruses), so use the viral\n"
+                f"# downloader instead -- or, simpler, let the Python wrapper do all of this:\n"
+                f"#   python orthophyl_pipeline_wrapper.py --taxon \"{download_value}\" \\\n"
+                f"#       --database-dir <database_dir> --output-dir {orthophyl_input_dir}\n"
+                f"python utils/gather_viral_annots.py \\\n"
+                f"    {download_value} \\\n"
+                f"    --out-dir {orthophyl_input_dir}\n"
+                f"\n"
+                f"# Note: writes {orthophyl_input_dir}/annots_nucls/ and annots_prots/\n"
+                f"# (pre-annotated CDS/protein, one <id>.fna/<id>.faa pair per genome)."
+            )
+            commands.append(gather_cmd)
+            orthophyl_input_actual = None  # set below, after Step 2 is built viral-aware
+        elif self.gather_filter_script and self.gather_filter_script.exists():
             # gather_filter_asms.sh usage: script taxon output_dir threads
             # The taxon can be a taxonomy string or taxon name
             gather_cmd = (
@@ -665,7 +688,7 @@ class MultiDatabaseRouter:
                 f"#   - Filters by assembly stats (N50, GC content, length)"
             )
             commands.append(gather_cmd)
-            
+
             # Update orthophyl input directory to the filtered genomes
             orthophyl_input_actual = f"{orthophyl_input_dir}/genomes_to_keep"
         else:
@@ -677,18 +700,36 @@ class MultiDatabaseRouter:
             )
             commands.append(gather_cmd)
             orthophyl_input_actual = str(orthophyl_input_dir)
-        
-        # Step 2: Run OrthoPhyl
-        orthophyl_cmd = (
-            f"# Step 2: Run OrthoPhyl on expanded genome set\n"
-            f"# Note: Your query genome ({Path(assembly_path).name}) should be in {orthophyl_input_actual}\n"
-            f"./OrthoPhyl.sh \\\n"
-            f"    -g {orthophyl_input_actual} \\\n"
-            f"    -s {self.output_dir / 'orthophyl_output'} \\\n"
-            f"    -t {self.threads} \\\n"
-            f"    -p iqtree \\\n"
-            f"    -o CDS"
-        )
+
+        # Step 2: Run OrthoPhyl. A viral query needs -a (pre-annotated
+        # CDS+protein from Step 1) plus --annotator viral instead of -g, so
+        # ReLeaf can later annotate new queries against this DB the same way
+        # (see orthophyl_pipeline_wrapper.py's _run_releaf).
+        if is_viral:
+            orthophyl_cmd = (
+                f"# Step 2: Run OrthoPhyl on the downloaded annotations\n"
+                f"# Note: Your query genome ({Path(assembly_path).name}) will need its own\n"
+                f"# VADR/VIGOR4 annotation added alongside these before building the tree --\n"
+                f"# see --annotator viral in OrthoPhyl.sh's usage.\n"
+                f"./OrthoPhyl.sh \\\n"
+                f"    -a {orthophyl_input_dir}/annots_nucls,{orthophyl_input_dir}/annots_prots \\\n"
+                f"    -s {self.output_dir / 'orthophyl_output'} \\\n"
+                f"    -t {self.threads} \\\n"
+                f"    -p iqtree \\\n"
+                f"    -o CDS"
+            )
+            orthophyl_input_actual = f"{orthophyl_input_dir}/annots_nucls"
+        else:
+            orthophyl_cmd = (
+                f"# Step 2: Run OrthoPhyl on expanded genome set\n"
+                f"# Note: Your query genome ({Path(assembly_path).name}) should be in {orthophyl_input_actual}\n"
+                f"./OrthoPhyl.sh \\\n"
+                f"    -g {orthophyl_input_actual} \\\n"
+                f"    -s {self.output_dir / 'orthophyl_output'} \\\n"
+                f"    -t {self.threads} \\\n"
+                f"    -p iqtree \\\n"
+                f"    -o CDS"
+            )
         commands.append(orthophyl_cmd)
         
         # Step 3: Create database
@@ -729,6 +770,7 @@ class MultiDatabaseRouter:
             'download_rank': rank_name,
             'download_value': safe_download_value,
             'raw_download_value': download_value,
+            'is_viral': is_viral,
             'suggestion': f"Create new database for {rank_name} '{download_value}'",
             'command': full_command
         }

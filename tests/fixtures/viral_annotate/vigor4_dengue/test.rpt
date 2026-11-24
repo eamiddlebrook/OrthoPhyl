@@ -1,0 +1,123 @@
+Command line arguments: -i /tmp/vadr_combined_models/dengue.fa -o /tmp/vigor_out/test -d dengue_txid12637_db --config-file /tmp/vigor_test.ini --overwrite-output
+Current working directory: /home/earlm/gits/OrthoPhyl
+Using Dengue Virus database version 20220208
+alignment_module                                  exonerate (defaults)
+alignment_score_factor                            1.0 (/tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db.ini)
+circular_genome                                   false (commandline)
+exonerate_path                                    /home/earlm/mambaforge/envs/vigor_test/bin/exonerate (/tmp/vigor_test.ini)
+frameshift_sensitivity                            1 (commandline)
+leakystop_notFound_score                          80.0 (defaults)
+leakystop_score_factor                            1.0 (/tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db.ini)
+locus_tag                                         vigor_ (commandline)
+mature_pep_mincoverage                            50.0 (defaults)
+mature_pep_minidentity                            25.0 (defaults)
+mature_pep_minsimilarity                          40.0 (defaults)
+max_aa_overlap                                    10 (defaults)
+max_align_merge_aa_gap                            10 (defaults)
+max_gene_overlap                                  50 (/tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db.ini)
+max_intron_size                                   2500 (defaults)
+max_nt_overlap                                    30 (defaults)
+min_missing_AA_size                               10 (defaults)
+min_pseudogene_coverage                           80.0 (defaults)
+min_pseudogene_identity                           75.0 (/tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db.ini)
+min_pseudogene_similarity                         80.0 (/tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db.ini)
+min_seq_gap_length                                20 (defaults)
+output_directory                                  /tmp/vigor_out (commandline)
+output_formats                                    [ALN, CDS, PEP, GFF3, TBL] (defaults)
+output_prefix                                     test (commandline)
+overwrite_output_files                            true (commandline)
+reference_database_file                           /tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db (commandline)
+reference_database_path                           /tmp/VIGOR_DB/Reference_DBs (/tmp/vigor_test.ini)
+splicing_score_factor                             1.0 (/tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db.ini)
+start_codon_search_window                         50 (defaults)
+start_codons                                      [ATG] (defaults)
+start_score_factor                                1.0 (/tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db.ini)
+stop_codon_search_window                          50 (defaults)
+stop_score_factor                                 1.0 (/tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db.ini)
+temporary_directory                               /tmp/vigor_tmp (/tmp/vigor_test.ini)
+verbose                                           false (commandline)
+Getting alignments for NC_001477
+3 alignment(s) found for sequence NC_001477
+3 candidate model(s) found for sequence NC_001477
+1 gene model(s) found for sequence NC_001477
+finding alignments in /tmp/VIGOR_DB/Reference_DBs/dengue_GP_mp for seq NP_059433.1
+Best matches:
+id                       len     sub           qry         %id      %sim     %cov     comment
+NP_722457.2              0114    0000-0113     0000-0113   1.0000   1.0000   1.0000   symbol="anchC" product="anchored capsid protein" organism="Dengue virus 1"
+YP_009164956.1           0091    0114-0204     0000-0090   1.0000   1.0000   1.0000   symbol="pr" product="protein pr" organism="Dengue virus 1"
+NP_722459.2              0075    0205-0279     0000-0074   1.0000   1.0000   1.0000   symbol="M" product="membrane glycoprotein" organism="Dengue virus 1"
+NP_722460.2              0495    0280-0774     0000-0494   1.0000   1.0000   1.0000   symbol="E" product="envelope protein" organism="Dengue virus 1"
+NP_722461.1              0352    0775-1126     0000-0351   1.0000   1.0000   1.0000   symbol="NS1" product="nonstructural protein 1" organism="Dengue virus 1"
+NP_733808.1              0218    1127-1344     0000-0217   1.0000   1.0000   1.0000   symbol="NS2A" product="nonstructural protein 2A" organism="Dengue virus 1"
+NP_733809.1              0130    1345-1474     0000-0129   1.0000   1.0000   1.0000   symbol="NS2B" product="nonstructural protein 2B" organism="Dengue virus 1"
+NP_722463.1              0619    1475-2093     0000-0618   1.0000   1.0000   1.0000   symbol="NS3" product="nonstructural protein 3" organism="Dengue virus 1"
+NP_733810.1              0127    2094-2220     0000-0126   1.0000   1.0000   1.0000   symbol="NS4A" product="nonstructural protein 4A" organism="Dengue virus 1"
+YP_001531174.2           0023    2221-2243     0000-0022   0.7391   0.8696   1.0000   symbol="2K" product="2K peptide" organism="Dengue virus 3"
+NP_733811.1              0249    2244-2492     0000-0248   1.0000   1.0000   1.0000   symbol="NS4B" product="nonstructural protein 4B" organism="Dengue virus 1"
+NP_722465.1              0899    2493-3391     0000-0898   1.0000   1.0000   1.0000   symbol="NS5" product="nonstructural protein 5" organism="Dengue virus 1"
+
+
+Sequence                        Length    Genes     Pseudogenes    CDS_Bases      Peptide_Bases  %Ref_Identity  %Ref_Similarity  %Ref_Coverage  Ref_DB              
+NC_001477                       10735     1         0              10176          3392           100.00         100.00           100.00         /tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db
+
+
+
+gene_id             %id       %sim      %cov      %t5       %gap      %t3       start..stop         pep_size  ref_size  ref_id              definition          
+NC_001477.1         100.00    100.00    100.00    0.0       0.0       0.0       95..10273           3392      3392      NP_059433.1         GP | genome polyprotein
+NC_001477.1.1       100.00    100.00    100.00    0.0       0.0       0.0       95..436             114       114       NP_722457.2         GP|anchored capsid protein
+NC_001477.1.2       100.00    100.00    100.00    0.0       0.0       0.0       437..709            91        91        YP_009164956.1      GP|protein pr       
+NC_001477.1.3       100.00    100.00    100.00    0.0       0.0       0.0       710..934            75        75        NP_722459.2         GP|membrane glycoprotein
+NC_001477.1.4       100.00    100.00    100.00    0.0       0.0       0.0       935..2419           495       495       NP_722460.2         GP|envelope protein 
+NC_001477.1.5       100.00    100.00    100.00    0.0       0.0       0.0       2420..3475          352       352       NP_722461.1         GP|nonstructural protein 1
+NC_001477.1.6       100.00    100.00    100.00    0.0       0.0       0.0       3476..4129          218       218       NP_733808.1         GP|nonstructural protein 2A
+NC_001477.1.7       100.00    100.00    100.00    0.0       0.0       0.0       4130..4519          130       130       NP_733809.1         GP|nonstructural protein 2B
+NC_001477.1.8       100.00    100.00    100.00    0.0       0.0       0.0       4520..6376          619       619       NP_722463.1         GP|nonstructural protein 3
+NC_001477.1.9       100.00    100.00    100.00    0.0       0.0       0.0       6377..6757          127       127       NP_733810.1         GP|nonstructural protein 4A
+NC_001477.1.10      73.91     86.96     100.00    0.0       0.0       0.0       6758..6826          23        23        YP_001531174.2      GP|2K peptide       
+NC_001477.1.11      100.00    100.00    100.00    0.0       0.0       0.0       6827..7573          249       249       NP_733811.1         GP|nonstructural protein 4B
+NC_001477.1.12      100.00    100.00    100.00    0.0       0.0       0.0       7574..10270         899       899       NP_722465.1         GP|nonstructural protein 5
+
+Getting alignments for NC_001474
+3 alignment(s) found for sequence NC_001474
+3 candidate model(s) found for sequence NC_001474
+1 gene model(s) found for sequence NC_001474
+finding alignments in /tmp/VIGOR_DB/Reference_DBs/dengue_GP_mp for seq NP_056776.2
+Best matches:
+id                       len     sub           qry         %id      %sim     %cov     comment
+NP_739581.2              0114    0000-0113     0000-0113   1.0000   1.0000   1.0000   symbol="anchC" product="anchored capsid protein" organism="Dengue virus 2"
+YP_009164954.1           0091    0114-0204     0000-0090   1.0000   1.0000   1.0000   symbol="pr" product="protein pr" organism="Dengue virus 2"
+NP_739592.2              0075    0205-0279     0000-0074   1.0000   1.0000   1.0000   symbol="M" product="membrane glycoprotein" organism="Dengue virus 2"
+NP_739583.2              0495    0280-0774     0000-0494   1.0000   1.0000   1.0000   symbol="E" product="envelope protein" organism="Dengue virus 2"
+NP_739584.2              0352    0775-1126     0000-0351   1.0000   1.0000   1.0000   symbol="NS1" product="nonstructural protein 1" organism="Dengue virus 2"
+NP_739585.2              0218    1127-1344     0000-0217   1.0000   1.0000   1.0000   symbol="NS2A" product="nonstructural protein 2A" organism="Dengue virus 2"
+NP_739586.2              0130    1345-1474     0000-0129   1.0000   1.0000   1.0000   symbol="NS2B" product="nonstructural protein 2B" organism="Dengue virus 2"
+NP_739587.2              0618    1475-2092     0000-0617   1.0000   1.0000   1.0000   symbol="NS3" product="nonstructural protein 3" organism="Dengue virus 2"
+NP_739588.2              0127    2093-2219     0000-0126   1.0000   1.0000   1.0000   symbol="NS4A" product="nonstructural protein 4A" organism="Dengue virus 2"
+NP_739593.2              0023    2220-2242     0000-0022   1.0000   1.0000   1.0000   symbol="2K" product="2K peptide" organism="Dengue virus 2"
+NP_739589.2              0248    2243-2490     0000-0247   1.0000   1.0000   1.0000   symbol="NS4B" product="nonstructural protein 4B" organism="Dengue virus 2"
+NP_739590.2              0900    2491-3390     0000-0899   1.0000   1.0000   1.0000   symbol="NS5" product="nonstructural protein 5" organism="Dengue virus 2"
+
+
+Sequence                        Length    Genes     Pseudogenes    CDS_Bases      Peptide_Bases  %Ref_Identity  %Ref_Similarity  %Ref_Coverage  Ref_DB              
+NC_001474                       10723     1         0              10173          3391           100.00         100.00           100.00         /tmp/VIGOR_DB/Reference_DBs/dengue_txid12637_db
+
+
+
+gene_id             %id       %sim      %cov      %t5       %gap      %t3       start..stop         pep_size  ref_size  ref_id              definition          
+NC_001474.1         100.00    100.00    100.00    0.0       0.0       0.0       97..10272           3391      3391      NP_056776.2         GP | genome polyprotein
+NC_001474.1.1       100.00    100.00    100.00    0.0       0.0       0.0       97..438             114       114       NP_739581.2         GP|anchored capsid protein
+NC_001474.1.2       100.00    100.00    100.00    0.0       0.0       0.0       439..711            91        91        YP_009164954.1      GP|protein pr       
+NC_001474.1.3       100.00    100.00    100.00    0.0       0.0       0.0       712..936            75        75        NP_739592.2         GP|membrane glycoprotein
+NC_001474.1.4       100.00    100.00    100.00    0.0       0.0       0.0       937..2421           495       495       NP_739583.2         GP|envelope protein 
+NC_001474.1.5       100.00    100.00    100.00    0.0       0.0       0.0       2422..3477          352       352       NP_739584.2         GP|nonstructural protein 1
+NC_001474.1.6       100.00    100.00    100.00    0.0       0.0       0.0       3478..4131          218       218       NP_739585.2         GP|nonstructural protein 2A
+NC_001474.1.7       100.00    100.00    100.00    0.0       0.0       0.0       4132..4521          130       130       NP_739586.2         GP|nonstructural protein 2B
+NC_001474.1.8       100.00    100.00    100.00    0.0       0.0       0.0       4522..6375          618       618       NP_739587.2         GP|nonstructural protein 3
+NC_001474.1.9       100.00    100.00    100.00    0.0       0.0       0.0       6376..6756          127       127       NP_739588.2         GP|nonstructural protein 4A
+NC_001474.1.10      100.00    100.00    100.00    0.0       0.0       0.0       6757..6825          23        23        NP_739593.2         GP|2K peptide       
+NC_001474.1.11      100.00    100.00    100.00    0.0       0.0       0.0       6826..7569          248       248       NP_739589.2         GP|nonstructural protein 4B
+NC_001474.1.12      100.00    100.00    100.00    0.0       0.0       0.0       7570..10269         900       900       NP_739590.2         GP|nonstructural protein 5
+
+Getting alignments for NC_001475
+3 alignment(s) found for sequence NC_001475
+3 candidate model(s) found for sequence NC_001475

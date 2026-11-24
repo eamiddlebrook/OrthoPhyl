@@ -11,3 +11,13 @@ export Alignment_Assessment="$Path_to_gits/Alignment_Assessment/Alignment_Assess
 export conda_env=orthophyl
 conda activate $conda_env
 
+# command prefix used to run viral annotation tools (v-annotate.pl, vigor4,
+# diamond) when --annotator viral is used -- these are pinned in a separate
+# env (VADR bundles its own infernal/hmmer/blast, different versions than
+# $conda_env above) and are never put on PATH alongside it. See
+# orthophyl_viral_env.yml for how to build this env (conda/mamba env name
+# "viral_annot" below -- rename to match your system). Empty string = use
+# PATH as-is (only correct if vadr/vigor4/diamond are already on PATH
+# unprefixed, which most setups won't have).
+export viral_env_run="conda run -n viral_annot"
+

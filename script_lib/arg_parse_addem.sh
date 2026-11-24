@@ -26,6 +26,12 @@ Optional:
 	A value of 0 or 1 will lead to only estimating trees for the SCO_stict dataset.
 -x|--trimal_params  trimal paramerter string (in double \"quotes\")
 -T|--test  run test dataset, incompatable with -g|s|a (TESTER,TESTER_chloroplast,TESTER_fasttest)
+--annotator  Annotation program to run on raw genomes (prodigal, viral). [prodigal]
+	Should match the annotator used to build the original OrthoPhyl run being added to.
+--vadr-models  ordered, space-separated \"DIR[:MKEY] DIR[:MKEY] ...\" list of VADR model library
+	directories to try (only meaningful with --annotator viral).
+--vigor-db  VIGOR_DB reference database name, or \"auto\" to pick one automatically. [auto]
+--vigor-db-dir  path to VIGOR_DB's Reference_DBs directory. Required for --annotator viral.
 -h|--help  display a description and a super useful usage message
 "
 }
@@ -215,6 +221,47 @@ ARG_PARSE_addem () {
 				tester
 				shift 
 				shift;;
+
+			--annotator) if [[ ! -n ${2} ]]; then
+					USAGE
+					exit 1
+				fi
+				if [[ ${2} != "prodigal" && ${2} != "viral" ]]; then
+					echo "--annotator must be 'prodigal' or 'viral', got '${2}'"
+					exit 1
+				fi
+				annotator=${2}
+				shift
+				shift ;;
+
+			--vadr-models) if [[ ! -n ${2} ]]; then
+					USAGE
+					exit 1
+				fi
+				vadr_model_libs=${2}
+				shift
+				shift ;;
+
+			--vigor-db) if [[ ! -n ${2} ]]; then
+					USAGE
+					exit 1
+				fi
+				vigor_db=${2}
+				shift
+				shift ;;
+
+			--vigor-db-dir) if [[ ! -n ${2} ]]; then
+					echo "looks like the argument for --vigor-db-dir is messed up"
+					USAGE
+					exit 1
+				fi
+				vigor_db_dir=$(relative_absolute ${2})
+				if [[ ! -d "${vigor_db_dir}" ]]; then
+					echo "WARNING: --vigor-db-dir path does not exist: ${vigor_db_dir}"
+					exit 1
+				fi
+				shift
+				shift ;;
 
 			\?) # Invalid option
 				echo "Error: Invalid option"

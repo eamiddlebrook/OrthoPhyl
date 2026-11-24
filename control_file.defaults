@@ -17,6 +17,25 @@ export TREE_DATA=CDS
 export use_partitions=false # allow users to turn off (with "false") the use of partitions for RAxML and IQTree (speeds stuff up a lot)
 # structural gene annotation options
 export prodigal_options="-m -q"
+# which annotator to run on raw genomes/assemblies (prodigal, viral)
+#   "viral" tries NCBI VADR against each library in $vadr_model_libs (in order),
+#   falling back to VIGOR4 when no library classifies the genome.
+export annotator=prodigal
+# ordered "DIR[:MKEY] DIR[:MKEY] ..." list of VADR model library directories to try
+export vadr_model_libs=""
+# extra options passed through to v-annotate.pl
+export vadr_options=""
+# VIGOR_DB reference database name to use with VIGOR4, or "auto" to pick one
+#   automatically via diamond blastx against a pooled reference-protein DB
+export vigor_db=auto
+# path to VIGOR_DB's Reference_DBs directory (required for --annotator viral)
+export vigor_db_dir=""
+# path to a VIGOR4 config file (sets temporary_directory/exonerate_path; see
+#   readmes -- these are not reliably settable via VIGOR4 CLI flags)
+export vigor_config=""
+# minimum number of successfully annotated genomes required to continue a
+#   --annotator viral run
+export viral_min_genomes=4
 # prefix for OrthoFinder output (legacy)
 export ortho_trial=ortho
 export orthofinder_rerun=false

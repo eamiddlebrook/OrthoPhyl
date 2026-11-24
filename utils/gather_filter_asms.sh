@@ -78,6 +78,43 @@ export taxon_safe="${taxon// /_}"
 lowmem_flag=""
 use_bbmap=false
 
+# Explicit override for the thread count passed to CheckM2's internal DIAMOND
+#   call (see calc_checkm_threads below). Empty means auto-size from RAM.
+checkm_threads_override=""
+
+# Pick the thread count to pass to CheckM2's internal DIAMOND call.
+#   DIAMOND's memory scales heavily with thread count, separately from
+#   --lowmem's block-size reduction -- confirmed empirically: --threads 10
+#   drove DIAMOND's RSS past 10.5GB and still climbing toward OOM against the
+#   ~3GB uniref100 DB even with --lowmem, while --threads 2 plateaued stable
+#   at ~4.3GB. The general pipeline $threads value is tuned for
+#   Prodigal/OrthoFinder/etc., which don't share this profile, so size this
+#   independently: --checkm-threads overrides outright; otherwise budget from
+#   /proc/meminfo's MemAvailable using a ~3GB base (DB + --lowmem block-size
+#   index) + ~1GB per thread, at 80% of available RAM to leave headroom for
+#   the rest of the pipeline and any other processes on the host. Never
+#   exceeds the general pipeline thread count.
+calc_checkm_threads () {
+	if [ -n "$checkm_threads_override" ]; then
+		echo "$checkm_threads_override"
+		return
+	fi
+	local mem_avail_kb
+	mem_avail_kb=$(awk '/MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)
+	if [ -z "$mem_avail_kb" ]; then
+		# /proc/meminfo unavailable (e.g. some container/VM setups) -- fall
+		#   back to the general pipeline thread count rather than guessing.
+		echo "$threads"
+		return
+	fi
+	local mem_avail_gb=$(( mem_avail_kb / 1024 / 1024 ))
+	local budget_gb=$(( mem_avail_gb * 80 / 100 ))
+	local auto_threads=$(( (budget_gb - 3) / 1 ))
+	[ "$auto_threads" -lt 1 ] && auto_threads=1
+	[ "$auto_threads" -gt "$threads" ] && auto_threads=$threads
+	echo "$auto_threads"
+}
+
 # Genome-retention controls (see stage_query_genomes / enforce_must_keep below).
 #   query_genomes_arg : comma-separated local FASTA paths supplied by the wrapper
 #                       that are QC'd alongside the downloads.
@@ -113,8 +150,9 @@ ror_lookup=false
 prev_flag=""
 for arg in "$@"; do
     case "$prev_flag" in
-        --query-genomes) query_genomes_arg="$arg"; prev_flag=""; continue ;;
-        --must-keep)     must_keep_arg="$arg";     prev_flag=""; continue ;;
+        --query-genomes)   query_genomes_arg="$arg";      prev_flag=""; continue ;;
+        --must-keep)       must_keep_arg="$arg";          prev_flag=""; continue ;;
+        --checkm-threads)  checkm_threads_override="$arg"; prev_flag=""; continue ;;
     esac
     case "$arg" in
         --lowmem|--reduced_tree)
@@ -136,11 +174,16 @@ for arg in "$@"; do
             ror_lookup=true
             echo "ROR lookup enabled: geo-provenance annotation will look up" \
                 "submitter org coordinates via the ROR API" ;;
-        --query-genomes=*) query_genomes_arg="${arg#*=}" ;;
-        --must-keep=*)     must_keep_arg="${arg#*=}" ;;
-        --query-genomes|--must-keep) prev_flag="$arg" ;;
+        --query-genomes=*)   query_genomes_arg="${arg#*=}" ;;
+        --must-keep=*)       must_keep_arg="${arg#*=}" ;;
+        --checkm-threads=*)  checkm_threads_override="${arg#*=}" ;;
+        --query-genomes|--must-keep|--checkm-threads) prev_flag="$arg" ;;
     esac
 done
+
+if [ -n "$checkm_threads_override" ]; then
+    echo "CheckM2 thread override: using $checkm_threads_override thread(s) for CheckM2/DIAMOND"
+fi
 
 if [ "$download_only" = true ] && [ "$qc_only" = true ]; then
     echo "ERROR: --download-only and --qc-only are mutually exclusive" >&2
@@ -218,16 +261,27 @@ echo "Output will be in $wd"
 #       any multiprocessing.Manager) hit a hard 108-char kernel path limit. A
 #       temp dir deep under $wd overflows it ("OSError: AF_UNIX path too long")
 #       -> needs short.
-#   /dev/shm is writable (tmpfs) and short in a container; fall back through
-#   /tmp, $HOME, and finally $wd for non-container / unusual setups.
+#   /dev/shm is tmpfs (RAM-backed) -- needed first in a container, where /tmp
+#   is read-only. On a bare host it's writable too, so trying it first would
+#   silently route CheckM2/DIAMOND's large spill+sort temp files through RAM
+#   instead of disk, which can exhaust memory even with CheckM2 --lowmem on a
+#   memory-constrained host. Prefer real disk (/tmp, $HOME, $wd) first outside
+#   a container; keep /dev/shm first only when actually containerized, matching
+#   the guard above.
+if [[ -z ${SINGULARITY_CONTAINER+x} ]] && [[ -z ${DOCKER+x} ]] && [[ -z ${APPTAINER_CONTAINER+x} ]]
+then
+	tmp_bases=(/tmp "$HOME" "$wd" /dev/shm)
+else
+	tmp_bases=(/dev/shm /tmp "$HOME" "$wd")
+fi
 op_tmp=""
-for base in /dev/shm /tmp "$HOME" "$wd"; do
+for base in "${tmp_bases[@]}"; do
 	if [ -d "$base" ] && [ -w "$base" ]; then
 		op_tmp=$(mktemp -d "$base/op_tmp.XXXXXX" 2>/dev/null) && break
 	fi
 done
 if [ -z "$op_tmp" ]; then
-	echo "ERROR: could not create a writable temp dir (tried /dev/shm /tmp \$HOME \$wd)" >&2
+	echo "ERROR: could not create a writable temp dir (tried ${tmp_bases[*]})" >&2
 	exit 1
 fi
 export TMPDIR="$op_tmp"
@@ -728,11 +782,21 @@ get_stats_with_checkM () {
 	#   --reduced_tree. There is no per-genome memory blow-up, so we run the
 	#   whole assembly folder in a single `checkm2 predict` call instead of
 	#   splitting into 200-genome pplacer batches.
-	threads=$threads
 	checkM_input=$1
     checkM_dir=$2
 	checkM_type=$3
 	suffix=$4
+
+	# DIAMOND's memory scales heavily with thread count, independent of
+	#   --lowmem's block-size reduction (confirmed empirically: --threads 10
+	#   drove DIAMOND's RSS past 10.5GB and still climbing toward OOM against
+	#   the ~3GB uniref100 DB even with --lowmem, while --threads 2 plateaued
+	#   stable at ~4.3GB). The general pipeline $threads value is tuned for
+	#   Prodigal/OrthoFinder/etc., not for this, so pick a CheckM2-specific
+	#   thread count: use --checkm-threads if the caller gave one, otherwise
+	#   auto-size it from available RAM.
+	checkm_threads=$(calc_checkm_threads)
+	echo "  Using $checkm_threads thread(s) for CheckM2/DIAMOND (pipeline threads: $threads)"
 
 	# CheckM2 takes a folder + extension. Predicted-protein input uses --genes
 	#   (the gather scripts only ever pass "genome", but keep the branch).
@@ -740,10 +804,10 @@ get_stats_with_checkM () {
 	#   otherwise); the dir is recreated fresh each QC run anyway.
 	if [[ $checkM_type == "protien" ]]
 	then
-		checkM_args="--threads $threads --genes -x $suffix --force $lowmem_flag"
+		checkM_args="--threads $checkm_threads --genes -x $suffix --force $lowmem_flag"
 	elif [[ $checkM_type == "genome" ]]
 	then
-		checkM_args="--threads $threads -x $suffix --force $lowmem_flag"
+		checkM_args="--threads $checkm_threads -x $suffix --force $lowmem_flag"
 	else
 		echo "Unknown checkM input type" && exit
 	fi

@@ -29,6 +29,12 @@ AUTHOR earlm@lanl.gov
     apt-get install -y python3 pip libgl1
     apt-get install -y wget zip bc procps
     apt-get install -y patchelf
+    # maven + default-jdk: build-time only, used below to `mvn package` VIGOR4
+    #   from source (not a conda/bioconda package -- confirmed no bioconda/
+    #   conda-forge "vigor*" package exists). Runtime execution instead uses
+    #   the viral_annot env's own openjdk (see control_file.paths'
+    #   viral_env_run), so this apt JDK is not referenced after the build.
+    apt-get install -y maven default-jdk
     apt-get clean
 
 %post
@@ -47,9 +53,50 @@ AUTHOR earlm@lanl.gov
     #   pin ("checkm2 =* * does not exist" is libmamba's way of saying no
     #   version of checkm2 satisfies both constraints at once).
     micromamba create --yes -n gather_genomes -c bioconda -c conda-forge checkm2 bbmap entrez-direct ncbi-datasets-cli pytest
+    # Separate env for --annotator viral (VADR + VIGOR4 fallback). Kept apart
+    #   from both base and gather_genomes on purpose: VADR pins its own
+    #   infernal/hmmer/blast versions, different from base's -- installing it
+    #   into a shared env is conda-resolvable but touches those shared package
+    #   versions (same leak class as the earlier ReLeaf/mafft container
+    #   env-leak incident). Tools here are reached only via control_file.paths'
+    #   viral_env_run command prefix, never put on PATH alongside base. See
+    #   orthophyl_viral_env.yml for the full pinned host-env equivalent.
+    micromamba create --yes -n viral_annot -c bioconda -c conda-forge vadr exonerate openjdk diamond
     micromamba clean --all --yes
     chmod --recursive a+rw /opt/conda/bin/*
     chmod --recursive a+rw /opt/conda/envs/gather_genomes/bin
+    chmod --recursive a+rw /opt/conda/envs/viral_annot/bin
+
+%post
+    # VIGOR4 (--annotator viral's fallback when no VADR model library
+    #   classifies a genome): not a conda/bioconda package, so build it from
+    #   source and unpack the resulting release layout (bin/vigor4 launcher,
+    #   lib/*.jar, config/vigor.ini) into the viral_annot env, mirroring
+    #   exactly what a host install does (see orthophyl_viral_env.yml).
+    #   bin/vigor4 is self-locating (finds its own lib/*.jar and
+    #   config/vigor.ini relative to its own resolved path), so it works
+    #   unmodified from this install location.
+    cd /opt
+    git clone https://github.com/JCVenterInstitute/VIGOR4.git
+    cd VIGOR4
+    mvn package -DskipTests
+    release_dir=$(find target -maxdepth 1 -type d -name "vigor-*" | head -1)
+    mkdir -p /opt/conda/envs/viral_annot/opt/vigor4
+    cp -r "$release_dir"/* /opt/conda/envs/viral_annot/opt/vigor4/
+    ln -s /opt/conda/envs/viral_annot/opt/vigor4/bin/vigor4 /opt/conda/envs/viral_annot/bin/vigor4
+    chmod --recursive a+rw /opt/conda/envs/viral_annot/opt/vigor4
+    cd /opt
+    rm -rf VIGOR4
+    # VADR models (--vadr-models) and VIGOR_DB reference proteins
+    #   (--vigor-db-dir) are deliberately NOT baked into the image here --
+    #   both are supplied at runtime via bind-mounted host paths pointed at
+    #   by those flags (viral_annotate.py's build_vigor_config() generates a
+    #   correct VIGOR4 config from --vigor-db-dir on every run, so no default
+    #   in-image DB location is needed). This differs from CheckM2's DB
+    #   above, which is mandatory for every run and so is baked in via a
+    #   required build-arg; VADR models/VIGOR_DB are optional/pluggable by
+    #   virus family and a user is expected to bind-mount whichever ones
+    #   their taxa need.
 
 %post
     # TensorFlow's libtensorflow_cc.so.2 (pulled in by checkm2 -> keras) ships
@@ -190,6 +237,14 @@ PYEOF
     export ASTRAL_cmd="$Path_to_gits/ASTRAL/Astral/astral.5.7.8.jar"
     export catfasta2phyml_cmd="$Path_to_gits/catfasta2phyml/catfasta2phyml.pl"
     export Alignment_Assessment="$Path_to_gits/Alignment_Assessment/Alignment_Assessment_v2.py"
+    # --annotator viral's tools (v-annotate.pl, vigor4, diamond) live in the
+    #   separate viral_annot env built above and are deliberately NOT added to
+    #   PATH (see that %post block's comment) -- control_file.paths' host
+    #   equivalent uses "conda run -n viral_annot"; this container uses
+    #   micromamba instead. control_file.paths itself is NOT sourced in a
+    #   container (guarded by $SINGULARITY_CONTAINER), so this export is the
+    #   in-container source of truth for viral_env_run.
+    export viral_env_run="micromamba run -n viral_annot"
     #stupid stuff for perl
     export LC_ALL=C.UTF-8 # Sets locale to UTF-8
     export LANG=C.UTF-8 # Sets locale to UTF-8
@@ -235,6 +290,16 @@ PYEOF
     Help for the core pipeline:
 
         apptainer exec OrthoPhyl.v3.3.sif bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -h
+
+    -- Viral genome annotation (--annotator viral) --
+    VADR (classification) and VIGOR4 (fallback) ship in this image, but VADR
+    model libraries and the VIGOR_DB reference proteins do not -- bind-mount
+    them from the host and point the flags at the mounted paths:
+
+        apptainer exec --bind /host/vadr_models:/vadr_models,/host/VIGOR_DB:/vigor_db \
+            OrthoPhyl.v3.3.sif \
+            bash /opt/gits/OrthoPhyl/OrthoPhyl.sh -g path/to/viral_assemblies/ -s path/to/output/ \
+                --annotator viral --vadr-models /vadr_models --vigor-db-dir /vigor_db -t 10
 
     -- Interactive session --
     To explore or run commands by hand (singularity exec/run are drop-in

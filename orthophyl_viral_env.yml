@@ -1,0 +1,238 @@
+# Pinned export (`conda env export -n viral_annot`) of the env used by
+# --annotator viral (NCBI VADR + VIGOR4 fallback). Kept SEPARATE from
+# orthophyl_env.2.2.1.yml on purpose: VADR pins its own infernal/hmmer/blast
+# versions, different from the main env's -- installing vadr directly into
+# the shared orthophyl env is conda-resolvable but touches those shared
+# package versions (same leak class as the earlier ReLeaf/mafft container
+# env-leak incident). Tools from this env are reached only via
+# control_file.paths' viral_env_run command prefix, never put on PATH
+# alongside the main env.
+#
+# Recreate with: mamba env create -n viral_annot -f orthophyl_viral_env.yml
+#
+# VIGOR4 itself is NOT a conda package (confirmed: no bioconda/conda-forge
+# "vigor*" package exists) and is therefore NOT listed below. After creating
+# this env, build/install it manually from the public JCVenterInstitute repos
+# and expose it on this env's PATH:
+#   git clone https://github.com/JCVenterInstitute/VIGOR4.git && cd VIGOR4 && mvn package
+#   -> unpack the resulting target/vigor-<version>/ release layout
+#      (bin/vigor4 launcher, lib/*.jar, config/vigor.ini) to
+#      $CONDA_PREFIX/opt/vigor4, then:
+#        ln -s $CONDA_PREFIX/opt/vigor4/bin/vigor4 $CONDA_PREFIX/bin/vigor4
+#   git clone https://github.com/JCVenterInstitute/VIGOR_DB.git
+#      -> a reference-database clone (Reference_DBs/*_db + *_db.ini per virus
+#         family); point --vigor-db-dir at its Reference_DBs/ at runtime, or
+#         persist a copy under $CONDA_PREFIX/opt/VIGOR_DB for convenience.
+# vigor4's bin/vigor4 launcher is self-locating (finds its own lib/*.jar and
+# config/vigor.ini relative to its own path) and only needs `java` +
+# `exonerate_path` resolvable -- both already in this env.
+name: viral_annot
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - _openmp_mutex=4.5=20_gnu
+  - alsa-lib=1.2.16.1=h7cc23a3_1
+  - binutils_impl_linux-64=2.46.1=default_hfdba357_103
+  - binutils_linux-64=2.46.1=default_h4852527_103
+  - blast=2.17.0=hb02a186_1
+  - bzip2=1.0.8=hda65f42_10
+  - c-ares=1.34.9=hebe6cf0_0
+  - ca-certificates=2026.10.23=hbd8a1cb_0
+  - cairo=1.18.6=h9f5ca07_2
+  - curl=8.23.0=ha042cf0_0
+  - diamond=2.2.9=he361c42_0
+  - easel=0.49=hb6cb901_3
+  - entrez-direct=26.0=h1079eea_0
+  - exonerate=2.4.0=hf34a1b8_9
+  - font-ttf-dejavu-sans-mono=2.37=hab24e00_0
+  - font-ttf-inconsolata=3.000=h77eed37_0
+  - font-ttf-source-code-pro=2.038=h77eed37_0
+  - font-ttf-ubuntu=0.83=h77eed37_4
+  - fontconfig=2.18.3=h4db4eae_3
+  - fonts-conda-ecosystem=1=0
+  - fonts-conda-forge=1=hc364b38_1
+  - gcc_impl_linux-64=13.4.0=h649a46b_20
+  - gcc_linux-64=13.4.0=h5174b15_28
+  - giflib=6.1.3=hebe6cf0_2
+  - glib=2.90.1=h5da5b1f_3
+  - glib-tools=2.90.1=h876c321_3
+  - graphite2=1.3.15=h54a6638_1
+  - gsl=2.7=he838d99_0
+  - hmmer=3.4=h7d74f8d_5
+  - icu=79.1=py314hb486520_0
+  - infernal=1.1.5=pl5321h7b50bb2_4
+  - k8=1.2=he8db53b_6
+  - kernel-headers_linux-64=4.18.0=he073ed8_9
+  - keyutils=1.6.3=h7cc23a3_1
+  - krb5=1.22.2=hbc21106_2
+  - lcms2=2.20=h9073bf1_0
+  - ld_impl_linux-64=2.46.1=default_hbd61a6d_103
+  - lerc=4.3.0=he78707d_0
+  - libblas=3.11.0=12_h4a7cf45_openblas
+  - libcblas=3.11.0=12_h0358290_openblas
+  - libcups=2.3.3=h7a8fb5f_6
+  - libcurl=8.23.0=ha042cf0_0
+  - libdeflate=1.26=h351257e_0
+  - libedit=3.1.20260512=pl5321h373387f_0
+  - libev=4.33=h280c20c_3
+  - libexpat=2.9.0=hd2095e1_0
+  - libffi=3.7.0=h81df57d_1
+  - libfreetype=2.14.3=ha770c72_2
+  - libfreetype6=2.14.3=h5e6c136_2
+  - libgcc=16.2.0=ha9f2e26_7
+  - libgcc-devel_linux-64=13.4.0=hd1d28cc_120
+  - libgcc-ng=16.2.0=h69a702a_7
+  - libgfortran=16.2.0=h69a702a_7
+  - libgfortran-ng=16.2.0=h69a702a_7
+  - libgfortran5=16.2.0=h6b99dfc_7
+  - libglib=2.90.1=hb382ddc_3
+  - libgomp=16.2.0=he0feb66_7
+  - libharfbuzz=15.1.0=h3ca84f1_0
+  - libiconv=1.18=h0cb94f2_3
+  - libidn2=2.3.8=h9866765_3
+  - libjpeg-turbo=3.2.1=h7cc23a3_0
+  - liblzma=5.8.3=hb03c661_1
+  - libmpdec=4.0.0=hb03c661_2
+  - libnghttp2=1.71.0=hc5e5977_0
+  - libopenblas=0.3.34=pthreads_hf13c14d_2
+  - libpng=1.6.59=h922cc85_0
+  - libpsl=0.23.1=h7fe8442_2
+  - libsanitizer=13.4.0=hf18ac3d_20
+  - libsqlite=3.54.1=hf739112_1
+  - libssh2=1.11.1=h6154650_1
+  - libstdcxx=16.2.0=h934c35e_7
+  - libstdcxx-devel_linux-64=13.4.0=h6963c3b_120
+  - libstdcxx-ng=16.2.0=hdf11a46_7
+  - libtiff=4.7.2=h6d37cbf_2
+  - libunistring=0.9.10=h7f98852_0
+  - libuuid=2.42.4=hcfc3c73_1
+  - libwebp-base=1.6.0=hd42ef1d_1
+  - libxcb=1.17.0=hb83e432_3
+  - libxcrypt=4.4.38=h280c20c_0
+  - libzlib=1.3.2=h25fd6f3_3
+  - make=4.4.1=h1114479_4
+  - minimap2=2.31=h118bc1c_0
+  - mpi=1.0=openmpi
+  - ncbi-vdb=3.4.1=hd63eeec_0
+  - ncurses=6.6=hdb14827_1
+  - openjdk=25.0.2=h1602c4f_26
+  - openmpi=4.1.6=hc5af2df_101
+  - openssl=3.6.5=h781a0a9_0
+  - packaging=26.3=pyhc364b38_0
+  - pcre=8.45=h9c3ff4c_0
+  - pcre2=10.49=h8b3dc9c_0
+  - perl=5.32.1=10_h7cc23a3_perl5
+  - perl-archive-tar=3.14=pl5321hcbfc158_0
+  - perl-autodie=2.37=pl5321hdfd78af_0
+  - perl-b=1.48=pl5321hdfd78af_2
+  - perl-b-cow=0.007=pl5321hb9d3cd8_1
+  - perl-base=2.23=pl5321hdfd78af_2
+  - perl-bio-easel=0.17=pl5321h7b50bb2_0
+  - perl-business-isbn=3.007=pl5321hdfd78af_0
+  - perl-business-isbn-data=20210112.006=pl5321hdfd78af_0
+  - perl-carp=1.38=pl5321hdfd78af_4
+  - perl-clone=0.46=pl5321hec16e2b_0
+  - perl-common-sense=3.75=pl5321hdfd78af_0
+  - perl-compress-raw-bzip2=2.214=pl5321hda65f42_0
+  - perl-compress-raw-zlib=2.214=pl5321h4dac143_0
+  - perl-constant=1.33=pl5321hdfd78af_2
+  - perl-data-dumper=2.183=pl5321hec16e2b_1
+  - perl-digest-hmac=1.05=pl5321hdfd78af_0
+  - perl-digest-md5=2.58=pl5321hec16e2b_1
+  - perl-encode=3.19=pl5321hec16e2b_1
+  - perl-encode-locale=1.05=pl5321hdfd78af_7
+  - perl-exporter=5.72=pl5321hdfd78af_2
+  - perl-exporter-tiny=1.002002=pl5321hdfd78af_0
+  - perl-extutils-cbuilder=0.280236=pl5321hdfd78af_0
+  - perl-extutils-makemaker=7.70=pl5321hd8ed1ab_0
+  - perl-file-copy-recursive=0.45=pl5321h7b50bb2_5
+  - perl-file-listing=6.16=pl5321hdfd78af_0
+  - perl-file-path=2.18=pl5321hd8ed1ab_0
+  - perl-file-sharedir-install=0.14=pl5321hdfd78af_0
+  - perl-file-spec=3.48_01=pl5321hdfd78af_2
+  - perl-file-temp=0.2304=pl5321hd8ed1ab_0
+  - perl-html-parser=3.85=pl5321hc52dbad_0
+  - perl-html-tagset=3.24=pl5321hdfd78af_0
+  - perl-http-cookies=6.12=pl5321hdfd78af_0
+  - perl-http-daemon=6.17=pl5321hdfd78af_0
+  - perl-http-date=6.08=pl5321hdfd78af_0
+  - perl-http-message=7.04=pl5321hdfd78af_0
+  - perl-http-negotiate=6.01=pl5321hdfd78af_4
+  - perl-inline=0.87=pl5321hdfd78af_0
+  - perl-inline-c=0.82=pl5321h7b50bb2_2
+  - perl-io-compress=2.216=pl5321h503566f_0
+  - perl-io-html=1.004=pl5321hdfd78af_0
+  - perl-io-socket-ssl=2.074=pl5321hdfd78af_0
+  - perl-io-zlib=1.15=pl5321hdfd78af_1
+  - perl-ipc-cmd=1.04=pl5321hdfd78af_1
+  - perl-json=4.11=pl5321hdfd78af_0
+  - perl-json-pp=4.11=pl5321hdfd78af_0
+  - perl-json-xs=4.04=pl5321h9948957_0
+  - perl-libwww-perl=6.67=pl5321hdfd78af_1
+  - perl-list-moreutils=0.430=pl5321hdfd78af_0
+  - perl-list-moreutils-xs=0.430=pl5321h7b50bb2_5
+  - perl-locale-maketext-simple=0.21=pl5321hdfd78af_3
+  - perl-lwp-mediatypes=6.04=pl5321hdfd78af_1
+  - perl-lwp-protocol-https=6.17=pl5321hdfd78af_0
+  - perl-lwp-simple=6.67=pl5321hdfd78af_0
+  - perl-mime-base64=3.16=pl5321hec16e2b_2
+  - perl-module-corelist=5.20261022=pl5321hcbfc158_0
+  - perl-module-load=0.34=pl5321hdfd78af_0
+  - perl-module-load-conditional=0.74=pl5321hdfd78af_0
+  - perl-module-metadata=1.000040=pl5321hdfd78af_0
+  - perl-mozilla-ca=20261105=pl5321hcbfc158_0
+  - perl-net-http=6.24=pl5321hdfd78af_0
+  - perl-net-ssleay=1.96=pl5321h34fdc24_0
+  - perl-ntlm=1.09=pl5321hdfd78af_5
+  - perl-params-check=0.38=pl5321hdfd78af_2
+  - perl-parent=0.236=pl5321hdfd78af_2
+  - perl-parse-recdescent=1.967015=pl5321hdfd78af_1
+  - perl-pathtools=3.75=pl5321hec16e2b_3
+  - perl-pegex=0.75=pl5321hdfd78af_0
+  - perl-perl-ostype=1.010=pl5321hdfd78af_2
+  - perl-scalar-list-utils=1.62=pl5321hec16e2b_1
+  - perl-socket=2.043=pl5321hddb4bb6_0
+  - perl-test-fatal=0.016=pl5321hdfd78af_0
+  - perl-test-needs=0.002009=pl5321hdfd78af_0
+  - perl-test-requiresinternet=0.05=pl5321hdfd78af_1
+  - perl-test-warnings=0.031=pl5321hdfd78af_0
+  - perl-text-parsewords=3.31=pl5321hdfd78af_0
+  - perl-tie-refhash=1.39=pl5321hdfd78af_3
+  - perl-time-hires=1.9764=pl5321h7b50bb2_6
+  - perl-time-local=1.35=pl5321hdfd78af_0
+  - perl-timedate=2.35=pl5321hdfd78af_0
+  - perl-try-tiny=0.31=pl5321hdfd78af_1
+  - perl-types-serialiser=1.01=pl5321hdfd78af_0
+  - perl-uri=5.35=pl5321ha770c72_0
+  - perl-url-encode=0.03=pl5321h9ee0642_1
+  - perl-version=0.9924=pl5321hec16e2b_2
+  - perl-www-robotrules=6.03=pl5321hdfd78af_0
+  - perl-xxx=0.38=pl5321hdfd78af_0
+  - perl-yaml-libyaml=0.904.0=pl5321hb03c661_3
+  - perl-yaml-pp=0.39.0=pl5321hdfd78af_0
+  - pip=26.2.2=pyh145f28c_2
+  - pixman=0.46.4=h54a6638_3
+  - pthread-stubs=0.4=h7cc23a3_1004
+  - python=3.15.2=h6e52b48_100_cp315
+  - python_abi=3.15=9_cp315
+  - sequip=0.11=hdfd78af_0
+  - sysroot_linux-64=2.28=h4ee821c_9
+  - tk=8.6.13=noxft_h1df4ec4_4
+  - tzdata=2026e=h5d301ff_0
+  - vadr=1.6.4=pl5321h87e0c26_1
+  - wget=1.21.4=hda4d442_0
+  - xorg-libice=1.1.2=h280c20c_0
+  - xorg-libsm=1.2.6=h0d788c3_1
+  - xorg-libx11=1.8.14=hb83e432_0
+  - xorg-libxau=1.0.12=h7cc23a3_2
+  - xorg-libxdmcp=1.1.5=h7cc23a3_2
+  - xorg-libxext=1.3.7=h7cc23a3_1
+  - xorg-libxfixes=6.0.2=h7cc23a3_1
+  - xorg-libxi=1.8.4=h7cc23a3_0
+  - xorg-libxrandr=1.5.5=h7cc23a3_1
+  - xorg-libxrender=0.9.13=h7cc23a3_0
+  - xorg-libxt=1.3.1=h7cc23a3_1
+  - xorg-libxtst=1.2.6=h7cc23a3_0
+  - zlib=1.3.2=h25fd6f3_3
+  - zstd=1.5.7=hb78ec9c_7

@@ -201,6 +201,54 @@ class TestCreateDatabaseForRun:
         assert config["taxonomy_source"] == "user_supplied"
         assert config["qc_applied"] is False
 
+    def test_annotator_defaults_to_prodigal(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        """Every existing caller omits annotator; the config must still
+        default to 'prodigal' so they stay byte-identical."""
+        run = orthophyl_run_skeleton()
+        out = tmp_path / "databases"
+        db_dir = db_creator_module.create_database_for_run(
+            run, ESCHERICHIA_TAX, "Escherichia", out
+        )
+        config = json.loads((db_dir / "database_config.json").read_text())
+        assert config["annotator"] == "prodigal"
+
+    def test_annotator_viral_recorded(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        run = orthophyl_run_skeleton()
+        out = tmp_path / "databases"
+        db_dir = db_creator_module.create_database_for_run(
+            run, ESCHERICHIA_TAX, "Escherichia", out, annotator="viral",
+        )
+        config = json.loads((db_dir / "database_config.json").read_text())
+        assert config["annotator"] == "viral"
+
+    def test_input_type_defaults_to_genomes(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        """Every existing caller omits input_type; the config must still
+        default to 'genomes' so they stay byte-identical."""
+        run = orthophyl_run_skeleton()
+        out = tmp_path / "databases"
+        db_dir = db_creator_module.create_database_for_run(
+            run, ESCHERICHIA_TAX, "Escherichia", out
+        )
+        config = json.loads((db_dir / "database_config.json").read_text())
+        assert config["input_type"] == "genomes"
+
+    def test_input_type_annotations_recorded(
+        self, db_creator_module, orthophyl_run_skeleton, tmp_path
+    ):
+        run = orthophyl_run_skeleton()
+        out = tmp_path / "databases"
+        db_dir = db_creator_module.create_database_for_run(
+            run, ESCHERICHIA_TAX, "Escherichia", out, input_type="annotations",
+        )
+        config = json.loads((db_dir / "database_config.json").read_text())
+        assert config["input_type"] == "annotations"
+
 
 class TestMetadataFile:
     """--metadata-file (plan section 4): copies an assembly metadata TSV

@@ -61,6 +61,12 @@ def fake_gatherer_class(monkeypatch):
     instances = []
     
     class FakeTaxonAssemblyGatherer:
+        # Class attribute (not set in __init__) so tests can
+        # monkeypatch.setattr(fake_cls, "is_viral", True) BEFORE calling
+        # w.run() -- the instance constructed during run() then picks it up
+        # via normal attribute lookup.
+        is_viral = False
+
         def __init__(self, taxon, output_dir, **kwargs):
             self.taxon = taxon
             self.output_dir = Path(output_dir)
@@ -377,6 +383,134 @@ class TestTaxonCreateMode:
         # Should NOT have called OrthoPhyl or database creator
         orthophyl_calls = [c for c in recording_run if "OrthoPhyl.sh" in str(c['cmd'])]
         assert len(orthophyl_calls) == 0, "OrthoPhyl.sh should not run in dry-run mode"
+
+
+class TestTaxonCreateModeViral:
+    """gatherer.is_viral=True reroutes create mode to the annotation-download path."""
+
+    def test_viral_taxon_downloads_annotations_not_raw_assemblies(
+        self, Wrapper, tmp_path, fake_gatherer_class, recording_run, monkeypatch
+    ):
+        """A viral taxon downloads NCBI CDS+protein annotations (-a), never
+        raw assemblies (-g), and the resulting DB is tagged annotator=viral."""
+        import sys as _sys
+        fake_cls = _sys.modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer
+        monkeypatch.setattr(fake_cls, "is_viral", True)
+
+        db_dir = tmp_path / "databases"
+        db_dir.mkdir()
+        w = _make_taxon_wrapper(Wrapper, tmp_path, db_dir, dry_run=False)
+
+        def fake_download_viral(taxon_name, output_dir):
+            nucl_dir = output_dir / "annots_nucls"
+            prot_dir = output_dir / "annots_prots"
+            nucl_dir.mkdir(parents=True, exist_ok=True)
+            prot_dir.mkdir(parents=True, exist_ok=True)
+            for i in range(4):
+                (nucl_dir / f"VIR_{i}.fna").write_text(">cds\nATCG\n")
+                (prot_dir / f"VIR_{i}.faa").write_text(">prot\nMM\n")
+            return nucl_dir, prot_dir
+        monkeypatch.setattr(w, "_download_viral_genomes", fake_download_viral)
+
+        run_op_calls = []
+        def patched_run_op(*args, **kwargs):
+            run_op_calls.append(kwargs)
+        monkeypatch.setattr(w, "_run_orthophyl", patched_run_op)
+
+        result = w.run()
+
+        assert result == 0
+        assert len(run_op_calls) == 1
+        assert run_op_calls[0]["input_dir"] is None
+        assert run_op_calls[0]["annotation_dirs"] is not None
+        nucl_dir, prot_dir = run_op_calls[0]["annotation_dirs"]
+        assert nucl_dir.name == "annots_nucls"
+        assert prot_dir.name == "annots_prots"
+
+        db_creator_calls = [c for c in recording_run if "OP_database_tool" in str(c['cmd'])]
+        assert len(db_creator_calls) > 0, "Database creator was not invoked"
+        assert any("viral" in c['cmd'] for c in db_creator_calls), \
+            "annotator=viral should be forwarded to OP_database_tool.py"
+        assert any("annotations" in c['cmd'] for c in db_creator_calls), \
+            "input_type=annotations should be forwarded to OP_database_tool.py"
+
+    def test_viral_taxon_rejects_megatree(
+        self, Wrapper, tmp_path, fake_gatherer_class, recording_run, monkeypatch
+    ):
+        """--megatree has no viral-taxon support yet; reject before any download."""
+        import sys as _sys
+        fake_cls = _sys.modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer
+        monkeypatch.setattr(fake_cls, "is_viral", True)
+
+        db_dir = tmp_path / "databases"
+        db_dir.mkdir()
+        w = _make_taxon_wrapper(Wrapper, tmp_path, db_dir, dry_run=False, megatree=True)
+
+        download_called = []
+        monkeypatch.setattr(
+            w, "_download_viral_genomes",
+            lambda *a, **k: download_called.append(1))
+
+        result = w.run()
+
+        assert result == 1
+        assert download_called == [], \
+            "viral+megatree should be rejected before any download"
+
+    def test_viral_taxon_over_ceiling_subsamples_fna_and_faa_together(
+        self, Wrapper, tmp_path, fake_gatherer_class, recording_run, monkeypatch
+    ):
+        """An oversized viral taxon (no megatree support) diverse-subsamples
+        the CDS set, then stages the SAME selection's matching .faa files --
+        guards against the nucl/prot pairing drifting apart under subsampling."""
+        import sys as _sys
+        fake_cls = _sys.modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer
+        monkeypatch.setattr(fake_cls, "is_viral", True)
+
+        db_dir = tmp_path / "databases"
+        db_dir.mkdir()
+        w = _make_taxon_wrapper(Wrapper, tmp_path, db_dir, dry_run=False,
+                                 max_tree_genomes=5, subsample_size=4)
+
+        def fake_download_viral(taxon_name, output_dir):
+            nucl_dir = output_dir / "annots_nucls"
+            prot_dir = output_dir / "annots_prots"
+            nucl_dir.mkdir(parents=True, exist_ok=True)
+            prot_dir.mkdir(parents=True, exist_ok=True)
+            for i in range(8):  # 8 > ceiling (5) -> subsample
+                (nucl_dir / f"VIR_{i}.fna").write_text(">cds\nATCG\n")
+                (prot_dir / f"VIR_{i}.faa").write_text(">prot\nMM\n")
+            return nucl_dir, prot_dir
+        monkeypatch.setattr(w, "_download_viral_genomes", fake_download_viral)
+
+        sub_calls = []
+        def fake_subsample(taxon, raw_dir, target, must_keep_stems=None):
+            sub_calls.append(target)
+            sel = w.orthophyl_dir / "subsample" / taxon / "selected"
+            sel.mkdir(parents=True, exist_ok=True)
+            for i in range(4):
+                (sel / f"VIR_{i}.fna").write_text(">cds\nATCG\n")
+            return sel
+        monkeypatch.setattr(w, "_subsample_genomes", fake_subsample)
+
+        run_op_calls = []
+        monkeypatch.setattr(
+            w, "_run_orthophyl",
+            lambda *a, **k: run_op_calls.append(k))
+        monkeypatch.setattr(w, "_create_taxon_database", lambda **k: None)
+
+        result = w.run()
+
+        assert result == 0
+        assert sub_calls == [4]  # subsampled to --subsample-size
+
+        assert len(run_op_calls) == 1
+        nucl_dir, prot_dir = run_op_calls[0]["annotation_dirs"]
+        assert nucl_dir == w.orthophyl_dir / "subsample" / "Methylorubrum" / "selected"
+
+        # Every selected .fna's matching .faa was staged alongside it.
+        selected_prots = list(prot_dir.glob("*.faa"))
+        assert {p.stem for p in selected_prots} == {f"VIR_{i}" for i in range(4)}
 
 
 class TestTaxonNameWithSpaces:
@@ -713,6 +847,110 @@ class TestTaxonUpdateMode:
         # Should NOT have called OrthoPhyl
         orthophyl_calls = [c for c in recording_run if "OrthoPhyl.sh" in str(c['cmd'])]
         assert len(orthophyl_calls) == 0
+
+
+class TestTaxonUpdateModeViral:
+    """A DB with annotator=='viral' updates via NCBI Virus re-download + -a,
+    not TaxonAssemblyGatherer.query_ncbi()'s bacteria assembly_summary.txt."""
+
+    def _existing_viral_db(self, database_dir, genome_ids):
+        clade = "Norovirus"
+        db = database_dir / f"{clade}_db"
+        db.mkdir(parents=True, exist_ok=True)
+        config = {
+            "clade_name": clade,
+            "annotator": "viral",
+            "assembly_accessions": list(genome_ids),
+            "available_tree_methods": ["iqtree"],
+            "available_data_types": ["CDS"],
+            "n_genomes": len(genome_ids),
+        }
+        (db / "database_config.json").write_text(json.dumps(config))
+        return {"db_dir": db, "clade_name": clade,
+                "n_assemblies": len(genome_ids), "config": config}
+
+    def _fake_download(self, w, monkeypatch, genome_ids):
+        def fake_download_viral(taxon_name, output_dir):
+            nucl_dir = output_dir / "annots_nucls"
+            prot_dir = output_dir / "annots_prots"
+            nucl_dir.mkdir(parents=True, exist_ok=True)
+            prot_dir.mkdir(parents=True, exist_ok=True)
+            for gid in genome_ids:
+                (nucl_dir / f"{gid}.fna").write_text(">cds\nATCG\n")
+                (prot_dir / f"{gid}.faa").write_text(">prot\nMM\n")
+            return nucl_dir, prot_dir
+        monkeypatch.setattr(w, "_download_viral_genomes", fake_download_viral)
+
+    def test_viral_db_dispatches_without_query_ncbi(
+        self, Wrapper, tmp_path, fake_database_dir, fake_gatherer_class, monkeypatch
+    ):
+        """Update mode on a viral DB never touches TaxonAssemblyGatherer at all."""
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, fake_database_dir,
+            taxon="Norovirus", update_existing=True, dry_run=False)
+        existing_db = self._existing_viral_db(w.database_dir, ["ISOLATE_A"])
+        self._fake_download(w, monkeypatch, ["ISOLATE_A", "ISOLATE_B"])
+
+        import sys as _sys
+        fake_cls = _sys.modules['taxon_assembly_gatherer'].TaxonAssemblyGatherer
+        monkeypatch.setattr(
+            fake_cls, "query_ncbi",
+            lambda self: pytest.fail("viral update must not call query_ncbi"))
+
+        releaf_calls = []
+        monkeypatch.setattr(w, "_run_releaf", lambda **k: releaf_calls.append(k))
+
+        rc = w._run_taxon_update_mode(existing_db)
+
+        assert rc == 0
+        assert len(releaf_calls) == 1
+        # Added via -a (annotation_dirs), never -g (input_genomes).
+        assert releaf_calls[0]["input_genomes"] is None
+        assert releaf_calls[0]["annotation_dirs"] is not None
+        new_nucl_dir, new_prot_dir = releaf_calls[0]["annotation_dirs"]
+        assert {p.stem for p in new_nucl_dir.glob("*.fna")} == {"ISOLATE_B"}
+        assert {p.stem for p in new_prot_dir.glob("*.faa")} == {"ISOLATE_B"}
+
+        config = json.loads(
+            (existing_db["db_dir"] / "database_config.json").read_text())
+        assert sorted(config["assembly_accessions"]) == ["ISOLATE_A", "ISOLATE_B"]
+
+    def test_viral_update_up_to_date_short_circuits(
+        self, Wrapper, tmp_path, fake_database_dir, fake_gatherer_class, monkeypatch
+    ):
+        """Every downloaded genome ID already matches the DB's recorded ones."""
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, fake_database_dir,
+            taxon="Norovirus", update_existing=True, dry_run=False)
+        existing_db = self._existing_viral_db(w.database_dir, ["ISOLATE_A", "ISOLATE_B"])
+        self._fake_download(w, monkeypatch, ["ISOLATE_A", "ISOLATE_B"])
+
+        monkeypatch.setattr(
+            w, "_run_releaf",
+            lambda **k: pytest.fail("ReLeaf must not run when nothing is new"))
+
+        rc = w._run_taxon_update_mode(existing_db)
+
+        assert rc == 0
+        config = json.loads(
+            (existing_db["db_dir"] / "database_config.json").read_text())
+        assert sorted(config["assembly_accessions"]) == ["ISOLATE_A", "ISOLATE_B"]
+
+    def test_viral_update_dry_run_skips_download(
+        self, Wrapper, tmp_path, fake_database_dir, fake_gatherer_class, monkeypatch
+    ):
+        w = _make_taxon_wrapper(
+            Wrapper, tmp_path, fake_database_dir,
+            taxon="Norovirus", update_existing=True, dry_run=True)
+        existing_db = self._existing_viral_db(w.database_dir, ["ISOLATE_A"])
+        w.output_dir.mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(
+            w, "_download_viral_genomes",
+            lambda *a, **k: pytest.fail("dry run must not download"))
+
+        rc = w._run_taxon_update_mode(existing_db)
+        assert rc == 0
 
 
 class TestGathererInterfaceContract:

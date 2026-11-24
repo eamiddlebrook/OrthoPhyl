@@ -187,9 +187,114 @@ PRODIGAL_PREDICT () {
 			 && touch $annots/${genome%.*}.complete
 			} &
 		fi
-	done 
+	done
 	wait
 }
+
+# dispatches to PRODIGAL_PREDICT (default) or VIRAL_PREDICT based on $annotator.
+# single call site replaces the old direct PRODIGAL_PREDICT call in
+# OrthoPhyl.sh's MAIN_PIPE and ReLeaf's functions_addem.sh ANNOTATIONS().
+ANNOTATE_GENOMES () {
+	local_genome_dir=$1
+	case "${annotator:-prodigal}" in
+		viral)
+			VIRAL_PREDICT $local_genome_dir
+			;;
+		*)
+			PRODIGAL_PREDICT $local_genome_dir
+			;;
+	esac
+}
+
+VIRAL_PREDICT () {
+	echo '
+	###################################################
+	######### Annotate Viral Genomes For ##############
+	######### Phylogenetics (VADR -> VIGOR4) ##########
+	###################################################
+	'
+	date
+	func_timing_start
+
+	if [[ -z "$vadr_model_libs" ]]; then
+		BAIL "--annotator viral requires --vadr-models (or vadr_model_libs set in a control file)"
+	fi
+	if [[ -z "$vigor_db_dir" ]]; then
+		BAIL "--annotator viral requires --vigor-db-dir (or vigor_db_dir set in a control file)"
+	fi
+
+	local_genome_dir=$1
+	cd $local_genome_dir || exit
+
+	viral_workdir=$annots/viral_work
+	mkdir -p $viral_workdir
+
+	# build the pooled VIGOR_DB diamond DB once (avoids a per-genome rebuild race
+	# across the $threads parallel jobs below); only needed for auto-detection.
+	vigor_refs_dmnd=""
+	if [[ "${vigor_db:-auto}" == "auto" ]]; then
+		vigor_refs_dmnd=$viral_workdir/vigor_refs
+		if [[ ! -f ${vigor_refs_dmnd}.dmnd ]]; then
+			python3 $script_home/python_scripts/viral_annotate.py \
+				--build-vigor-refs-db \
+				--vigor-db-dir $vigor_db_dir \
+				--out $vigor_refs_dmnd \
+				--env-run "$viral_env_run" \
+				|| BAIL "failed to build pooled VIGOR_DB diamond DB from $vigor_db_dir"
+		fi
+	fi
+
+	for genome in $(ls $local_genome_dir)
+	do
+		if test "$(jobs | wc -l)" -ge $threads
+		then
+			wait -n
+			trap control_c INT
+		fi
+		if [ -f $annots/"${genome%.*}".complete ]
+		then
+			echo "${genome%.*} already annotated"\
+			> $annots/notes
+		else
+			{
+			python3 $script_home/python_scripts/viral_annotate.py \
+				--genome $local_genome_dir/${genome} \
+				--genome-stem ${genome%.*} \
+				--out-trans $trans/${genome%.*}.fna \
+				--out-prots $prots/${genome%.*}.faa \
+				--annot-row $annots/${genome%.*}.annot_source.tsv \
+				--workdir $viral_workdir \
+				--vadr-models "$vadr_model_libs" \
+				--vadr-options "$vadr_options" \
+				--vigor-db "${vigor_db:-auto}" \
+				--vigor-db-dir "$vigor_db_dir" \
+				--vigor-config "$vigor_config" \
+				--vigor-refs-dmnd "${vigor_refs_dmnd:+${vigor_refs_dmnd}.dmnd}" \
+				--env-run "$viral_env_run" \
+				> $annots/${genome%.*}.viral_annotate.log 2>&1 \
+				&& touch $annots/${genome%.*}.complete
+			} &
+		fi
+	done
+	wait
+
+	# pool per-genome annotation source rows, report/abort on too many failures
+	cat $annots/*.annot_source.tsv > $annots/annotation_sources.tsv 2>/dev/null
+	awk -F'\t' '$2=="failed"{print $1}' $annots/annotation_sources.tsv > $annots/annotation_failed.txt
+	n_failed=$(wc -l < $annots/annotation_failed.txt)
+	n_annotated=$(( $(wc -l < $annots/annotation_sources.tsv) - n_failed ))
+	if [ "$n_failed" -gt 0 ]; then
+		echo "WARNING: $n_failed genome(s) could not be annotated (neither VADR nor VIGOR4 classified them)."
+		echo "         See $annots/annotation_failed.txt and each genome's *.viral_annotate.log"
+	fi
+	if [ "$n_annotated" -lt "${viral_min_genomes:-4}" ]; then
+		BAIL "Only $n_annotated genome(s) were successfully annotated (need >= ${viral_min_genomes:-4}). See $annots/annotation_sources.tsv"
+	fi
+	if [[ " ${tree_method[@]} " =~ " astral " ]]; then
+		echo "WARNING: tree_method includes astral, but viral genomes typically yield very few gene trees -- ASTRAL consensus may be unreliable here."
+	fi
+}
+
 : << 'COMMENT'
 CHECK_ANNOTS () {
 	echo "###################################"

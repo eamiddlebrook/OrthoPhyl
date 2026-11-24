@@ -41,3 +41,8 @@ nohup.out*
 TMP.*
 ncbi_dataset.zip
 *.esearch
+sing_build.sh
+sing_build.sh.save*
+singtest_TMP/
+test_cmds.txt
+*.tmp.tsv

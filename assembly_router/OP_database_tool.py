@@ -416,6 +416,8 @@ def create_database_for_run(
     qc_applied: bool = True,
     register_only: bool = False,
     metadata_file: Optional[str] = None,
+    annotator: str = "prodigal",
+    input_type: str = "genomes",
 ) -> Path:
     """
     Create a database directory for a single OrthoPhyl run.
@@ -436,6 +438,18 @@ def create_database_for_run(
 
     qc_applied: whether CheckM2 QC was run on the genomes before tree-building.
         Defaults to True; the local-genome-ingest mode's --skip-qc sets it False.
+
+    annotator: "prodigal" (default) or "viral" -- which annotator built this
+        DB's genomes. The router surfaces this so a query ReLeaf'd onto the
+        DB is always annotated the same way, regardless of the invoking
+        run's own --annotator default.
+
+    input_type: "genomes" (default) or "annotations" -- whether the OrthoPhyl
+        run behind this DB was built from raw assemblies (-g) or pre-annotated
+        CDS+protein directories (-a, e.g. the viral NCBI-annotation downloader).
+        Independent of annotator: a DB can be annotator=viral (queries placed
+        on it get VADR/VIGOR-annotated) while input_type=annotations (this
+        DB's own genomes were never run through an annotator at all).
 
     register_only (optional): register a subclade DB WITHOUT a built tree -- for
         lazy build-on-demand. Skips OrthoPhyl-run validation, sets built=false /
@@ -553,6 +567,12 @@ def create_database_for_run(
         #   ingest mode)? And was CheckM2 QC applied to the input genomes?
         "taxonomy_source": taxonomy_source,
         "qc_applied": qc_applied,
+        # Which annotator produced this DB's genomes (prodigal | viral) --
+        #   see create_database_for_run's docstring.
+        "annotator": annotator,
+        # Whether the OrthoPhyl run was built from raw assemblies or
+        #   pre-annotated CDS+protein directories -- see docstring.
+        "input_type": input_type,
         "assembly_accessions": [],
         "n_assemblies_at_creation": validation['n_genomes'],
         "quality_filters": {
@@ -1321,6 +1341,17 @@ Input Format (TSV):
     parser.add_argument('--qc-not-applied', action='store_true',
                         help='Record that CheckM2 QC was NOT run on the input '
                              'genomes (default: QC is assumed applied).')
+    parser.add_argument('--annotator', choices=['prodigal', 'viral'],
+                        default='prodigal',
+                        help='Which annotator built this DB\'s genomes '
+                             '(default: prodigal). Surfaced to the router so '
+                             'queries ReLeaf\'d onto this DB are annotated '
+                             'the same way.')
+    parser.add_argument('--input-type', choices=['genomes', 'annotations'],
+                        default='genomes',
+                        help='Whether the OrthoPhyl run was built from raw '
+                             'assemblies or pre-annotated CDS+protein '
+                             'directories (default: genomes).')
     parser.add_argument('--register-only', action='store_true',
                         help='Register a subclade DB with built=false (no tree yet) '
                              'for lazy build-on-demand. Requires --is-subclade.')
@@ -1430,6 +1461,8 @@ Input Format (TSV):
                 qc_applied=not args.qc_not_applied,
                 register_only=args.register_only,
                 metadata_file=args.metadata_file,
+                annotator=args.annotator,
+                input_type=args.input_type,
             )
         except FileExistsError:
             logger.info("Database already exists; nothing to do (use --force to rebuild)")
@@ -1518,6 +1551,8 @@ Input Format (TSV):
                 taxonomy_source=args.taxonomy_source,
                 qc_applied=not args.qc_not_applied,
                 metadata_file=args.metadata_file,
+                annotator=args.annotator,
+                input_type=args.input_type,
             )
             
             # Read back config

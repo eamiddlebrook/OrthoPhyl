@@ -35,9 +35,14 @@ class FakeTaxonomy:
             "phylum": "Pseudomonadota",
             "superkingdom": "Bacteria",
         }
+        # Non-viral by default: a bacterial chain that never includes 10239.
+        self._taxid_chain = ["561", "543", "91347", "1224", "3379134", "2"]
 
     def get_lineage(self, taxid):
         return dict(self._lineage)
+
+    def get_taxid_chain(self, taxid):
+        return list(self._taxid_chain)
 
 
 @pytest.fixture
@@ -61,6 +66,7 @@ def gatherer(taxon_gatherer_module, monkeypatch, tmp_path):
     g.taxid = "561"
     g.taxon_name = "Escherichia"
     g.taxon_rank = "genus"
+    g.is_viral = False
     g.since_date = None
     g.assemblies = []
     return g
@@ -109,6 +115,119 @@ class TestGetTaxonomyString:
         }
         s = gatherer.get_taxonomy_string()
         assert s == "d__Bacteria;p__Pseudomonadota"
+
+
+class TestGetTaxidChain:
+    """NCBITaxonomy.get_taxid_chain -- the TaxID-based path used for viral
+    detection, as opposed to get_lineage's rank-name keying."""
+
+    def _taxonomy(self, taxon_gatherer_module):
+        tax = taxon_gatherer_module.NCBITaxonomy.__new__(
+            taxon_gatherer_module.NCBITaxonomy
+        )
+        # norovirus (142786) -> Caliciviridae (11974) -> ... -> Viruses (10239) -> root (1)
+        tax.nodes = {
+            "142786": {"parent": "11974", "rank": "species"},
+            "11974": {"parent": "10239", "rank": "family"},
+            "10239": {"parent": "1", "rank": "superkingdom"},
+            "1": {"parent": "1", "rank": "no rank"},
+            "561": {"parent": "543", "rank": "genus"},
+            "543": {"parent": "2", "rank": "family"},
+            "2": {"parent": "2", "rank": "superkingdom"},
+        }
+        tax.names = {}
+        tax.name_to_taxid = {}
+        return tax
+
+    def test_walks_full_chain_to_root(self, taxon_gatherer_module):
+        tax = self._taxonomy(taxon_gatherer_module)
+        assert tax.get_taxid_chain("142786") == ["142786", "11974", "10239", "1"]
+
+    def test_bacterial_chain_excludes_virus_taxid(self, taxon_gatherer_module):
+        tax = self._taxonomy(taxon_gatherer_module)
+        chain = tax.get_taxid_chain("561")
+        assert "10239" not in chain
+
+    def test_unknown_taxid_returns_single_element_or_empty(self, taxon_gatherer_module):
+        tax = self._taxonomy(taxon_gatherer_module)
+        assert tax.get_taxid_chain("999999") == []
+
+
+class TestIsViralTaxid:
+    def test_true_when_virus_taxid_present(self, taxon_gatherer_module):
+        assert taxon_gatherer_module.is_viral_taxid(["142786", "11974", "10239", "1"])
+
+    def test_false_for_bacterial_chain(self, taxon_gatherer_module):
+        assert not taxon_gatherer_module.is_viral_taxid(["561", "543", "2"])
+
+    def test_false_for_empty_chain(self, taxon_gatherer_module):
+        assert not taxon_gatherer_module.is_viral_taxid([])
+
+
+class TestRenderGtdbLineageViral:
+    def test_is_viral_forces_domain_viruses(self, taxon_gatherer_module):
+        lineage = {
+            "family": "Caliciviridae",
+            "genus": "Norovirus",
+            "species": "Norwalk virus",
+        }
+        s = taxon_gatherer_module.render_gtdb_lineage(lineage, is_viral=True)
+        assert s.startswith("d__Viruses;")
+
+    def test_overrides_whatever_rank_mapping_produced(self, taxon_gatherer_module):
+        # Even if an NCBI rank happened to map to 'd' (e.g. a stray
+        # 'superkingdom'/'domain' entry under Viruses), is_viral wins.
+        lineage = {"superkingdom": "SomethingWeird", "genus": "Norovirus"}
+        s = taxon_gatherer_module.render_gtdb_lineage(lineage, is_viral=True)
+        assert s.startswith("d__Viruses;")
+        assert "SomethingWeird" not in s
+
+    def test_non_viral_unaffected(self, taxon_gatherer_module):
+        lineage = {"superkingdom": "Bacteria", "genus": "Escherichia"}
+        s = taxon_gatherer_module.render_gtdb_lineage(lineage, is_viral=False)
+        assert s.startswith("d__Bacteria;")
+
+
+class TestGetTaxonomyStringViral:
+    def test_viral_taxon_renders_d_viruses(self, gatherer):
+        gatherer.is_viral = True
+        gatherer.taxonomy._lineage = {
+            "family": "Caliciviridae",
+            "genus": "Norovirus",
+        }
+        s = gatherer.get_taxonomy_string()
+        assert s == "d__Viruses;p__;c__;o__;f__Caliciviridae;g__Norovirus"
+
+    def test_is_viral_set_from_taxid_chain_in_ctor(
+        self, taxon_gatherer_module, monkeypatch, tmp_path
+    ):
+        """End-to-end through __init__: a taxid chain containing 10239 must
+        set self.is_viral, driving get_taxonomy_string's d__Viruses override."""
+        Gatherer = taxon_gatherer_module.TaxonAssemblyGatherer
+
+        class ViralFakeTaxonomy(FakeTaxonomy):
+            def __init__(self):
+                super().__init__()
+                self._lineage = {"family": "Caliciviridae", "genus": "Norovirus"}
+                self._taxid_chain = ["142786", "11974", "10239", "1"]
+
+            def resolve_taxon(self, taxon):
+                return "142786"
+
+            def get_rank(self, taxid):
+                return "species"
+
+            def get_name(self, taxid):
+                return "Norovirus"
+
+        monkeypatch.setattr(Gatherer, "_ensure_taxonomy_database", lambda self: None)
+        monkeypatch.setattr(
+            taxon_gatherer_module, "NCBITaxonomy", lambda taxdump_dir: ViralFakeTaxonomy()
+        )
+
+        g = Gatherer(taxon="Norovirus", output_dir=tmp_path / "out")
+        assert g.is_viral is True
+        assert g.get_taxonomy_string().startswith("d__Viruses;")
 
 
 class TestDownloadAssemblies:
